@@ -1,0 +1,8 @@
+{
+  "appId": "app.ting.manager",
+  "appName": "Ting!",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  }
+}

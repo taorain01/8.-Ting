@@ -1,0 +1,84 @@
+{
+  "name": "ting",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ting! account manager desktop, web, and Android wrapper",
+  "author": "Ting!",
+  "main": "DongGoi/electron/main.cjs",
+  "scripts": {
+    "electron:dev": "electron .",
+    "dist:win": "electron-builder --win --x64",
+    "dist:unpacked": "electron-builder --win --x64 --dir",
+    "dist:portable": "electron-builder --win portable --x64",
+    "prepare:android-web": "node scripts/prepare-android-web.js",
+    "android:add": "npm run prepare:android-web && npx cap add android",
+    "android:sync": "npm run prepare:android-web && npx cap sync android",
+    "android:open": "npm run android:sync && npx cap open android",
+    "android:build:debug": "npm run android:sync && cd android && gradlew.bat assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "7.4.3",
+    "@capacitor/core": "7.4.3",
+    "electron-store": "^8.2.0",
+    "electron-updater": "^6.8.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "7.4.3",
+    "electron": "^41.3.0",
+    "electron-builder": "^26.8.1"
+  },
+  "overrides": {
+    "@capacitor/cli": {
+      "tar": "^7.5.13"
+    }
+  },
+  "build": {
+    "appId": "app.ting.accountmanager",
+    "productName": "Ting!",
+    "directories": {
+      "output": "DongGoi/dist-electron"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "YOUR_GITHUB_OWNER",
+        "repo": "ting"
+      }
+    ],
+    "files": [
+      "index.html",
+      "firebase-config.js",
+      "css/**/*",
+      "js/**/*",
+      "assets/**/*",
+      "DongGoi/build/**/*",
+      "DongGoi/electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "DongGoi/build/icon.ico",
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Ting!"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('electronAPI', {
+  isElectron: true,
+  updateTrayTooltip: text => ipcRenderer.invoke('tray:update-tooltip', text),
+  setAutoStart: enabled => ipcRenderer.invoke('settings:set-auto-start', enabled),
+  getAutoStart: () => ipcRenderer.invoke('settings:get-auto-start'),
+  setAutoLockMinutes: minutes => ipcRenderer.invoke('settings:set-auto-lock-minutes', minutes),
+  getAutoLockMinutes: () => ipcRenderer.invoke('settings:get-auto-lock-minutes'),
+  sendNativeNotification: (title, body) => ipcRenderer.invoke('notification:send', { title, body }),
+  getAppVersion: () => ipcRenderer.invoke('app:get-version'),
+  checkForUpdates: () => ipcRenderer.invoke('updates:check'),
+  getUpdateLog: () => ipcRenderer.invoke('updates:get-log'),
+  quitAndInstall: () => ipcRenderer.invoke('updates:quit-and-install'),
+  onAutoLock: callback => {
+    const handler = () => callback();
+    ipcRenderer.on('auto-lock', handler);
+    return () => ipcRenderer.removeListener('auto-lock', handler);
+  },
+  onShowNotifications: callback => {
+    const handler = () => callback();
+    ipcRenderer.on('show-notifications', handler);
+    return () => ipcRenderer.removeListener('show-notifications', handler);
+  },
+  onUpdateEvent: callback => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('update-event', handler);
+    return () => ipcRenderer.removeListener('update-event', handler);
+  },
+});
