@@ -96,6 +96,7 @@ function renderAccountList(type) {
     let filtered = accounts;
     if (filter !== 'all') filtered = filtered.filter(a => a.status === filter);
     if (search) filtered = filtered.filter(a => {
+        if (typeof accountMatchesSearch === 'function') return accountMatchesSearch(a, search);
         const q = search.toLowerCase();
         const platformLabel = getPlatformLabel(getResolvedPlatform(a), [a]).toLowerCase();
         return (a.name || '').toLowerCase().includes(q)
@@ -131,6 +132,8 @@ function renderAccountGroup(group, isPersonal = false) {
     const accounts = group.accounts;
     const label = getPlatformLabel(group.platform, accounts);
     const emoji = getPlatformEmoji(group.platform);
+    const logoStyle = typeof getPlatformLogoStyle === 'function' ? getPlatformLogoStyle(group.platform, label) : `background:${stringToColor(label)}20;color:${stringToColor(label)}`;
+    const logoMark = typeof renderPlatformLogoMark === 'function' ? renderPlatformLogoMark(group.platform, emoji) : emoji;
     const status = getWorstGroupStatus(accounts);
     const expanded = Boolean(window.appState.expandedGroups?.[group.key]);
     const activeCount = accounts.filter(a => a.status === 'active').length;
@@ -144,7 +147,7 @@ function renderAccountGroup(group, isPersonal = false) {
     return `
     <div class="account-group anim-fade-in-up">
         <button class="account-group-header" onclick="toggleAccountGroup('${escapeJsAttr(group.key)}')">
-            <div class="account-logo group-logo" style="background:${stringToColor(label)}20;color:${stringToColor(label)}">${emoji}</div>
+            <div class="account-logo group-logo" style="${logoStyle}">${logoMark}</div>
             <div class="account-group-info">
                 <div class="account-group-title">${escapeHtml(label)} <span class="account-group-count">${accounts.length} TK</span></div>
                 <div class="account-group-meta">${escapeHtml(summaryParts.join(' • ') || 'Không có trạng thái')}</div>
@@ -161,16 +164,19 @@ function renderAccountGroup(group, isPersonal = false) {
 function renderAccountCard(acc, isPersonal = false, isChild = false) {
     const days = daysUntil(acc.expiryDate);
     const daysText = acc.expiryType === 'lifetime' ? 'Vĩnh viễn' : days < 0 ? `Hết ${Math.abs(days)} ngày` : days === 0 ? 'Hết hạn hôm nay' : `Còn ${days} ngày`;
-    const emoji = getPlatformEmoji(getResolvedPlatform(acc) || acc.platform);
+    const platformRef = getResolvedPlatform(acc) || acc.platform || acc;
+    const emoji = getPlatformEmoji(platformRef);
+    const logoStyle = typeof getPlatformLogoStyle === 'function' ? getPlatformLogoStyle(platformRef, acc.name) : `background:${stringToColor(acc.name)}20;color:${stringToColor(acc.name)}`;
+    const logoMark = typeof renderPlatformLogoMark === 'function' ? renderPlatformLogoMark(platformRef, emoji) : emoji;
     const statusClass = getStatusBadgeClass(acc.status);
     const statusText = getStatusText(acc.status);
 
     return `
     <div class="account-card ${isChild ? 'account-child-card' : ''} anim-fade-in-up" onclick="showDetail('${acc.id}')">
         <div class="account-card-top">
-            <div class="account-logo" style="background:${stringToColor(acc.name)}20;color:${stringToColor(acc.name)}">${emoji}</div>
+            <div class="account-logo" style="${logoStyle}">${logoMark}</div>
             <div class="account-info">
-                <div class="account-name">${escapeHtml(acc.name)}</div>
+                <div class="account-name">${escapeHtml(typeof getAccountDisplayName === 'function' ? getAccountDisplayName(acc) : acc.name)}</div>
                 <div class="account-user">${isPersonal ? '••••••••' : escapeHtml(acc.displayUsername || '***')}</div>
             </div>
             <span class="account-badge ${statusClass}">${statusText}</span>
@@ -258,7 +264,10 @@ function renderDetail(accId) {
     if (!acc) return;
 
     const days = daysUntil(acc.expiryDate);
-    const emoji = getPlatformEmoji(getResolvedPlatform(acc) || acc.platform);
+    const platformRef = getResolvedPlatform(acc) || acc.platform || acc;
+    const emoji = getPlatformEmoji(platformRef);
+    const logoStyle = typeof getPlatformLogoStyle === 'function' ? getPlatformLogoStyle(platformRef, acc.name) : `background:${stringToColor(acc.name)}15;color:${stringToColor(acc.name)}`;
+    const logoMark = typeof renderPlatformLogoMark === 'function' ? renderPlatformLogoMark(platformRef, emoji) : emoji;
     const isPersonal = acc.type === 'personal';
     const decrypted = window.appState.activeDecryptedAccount?.id === accId
         ? window.appState.activeDecryptedAccount.data
@@ -273,7 +282,7 @@ function renderDetail(accId) {
         Quay lại
     </button>
     <div class="detail-header anim-fade-in-up">
-        <div class="detail-logo" style="background:${stringToColor(acc.name)}15;color:${stringToColor(acc.name)}">${emoji}</div>
+        <div class="detail-logo" style="${logoStyle}">${logoMark}</div>
         <div>
             <div class="detail-name">${escapeHtml(acc.name)}</div>
             <span class="account-badge ${getStatusBadgeClass(acc.status)}">${getStatusText(acc.status)}</span>
@@ -329,6 +338,36 @@ function renderDetail(accId) {
 
 // ===== RENDER: FORM THÊM TÀI KHOẢN =====
 function renderAddForm(type) {
+    const quickPlatforms = [
+        { name: 'Netflix', platform: 'netflix' },
+        { name: 'Spotify', platform: 'spotify' },
+        { name: 'Canva', platform: 'canva' },
+        { name: 'YouTube', platform: 'youtube' },
+        { name: 'ChatGPT', platform: 'openai' },
+        { name: 'Gemini Pro', platform: 'gemini-pro' },
+        { name: 'Veo 3', platform: 'google-veo' },
+        { name: 'Antigravity', platform: 'google-antigravity' },
+        { name: 'Claude', platform: 'claude' },
+        { name: 'Perplexity', platform: 'perplexity' },
+        { name: 'Google Account', platform: 'google-account' },
+        { name: 'Google Drive', platform: 'googledrive' },
+        { name: 'Microsoft 365', platform: 'office365' },
+        { name: 'Apple', platform: 'apple' },
+        { name: 'Suno', platform: 'suno' }
+    ];
+    const quickSelectHtml = `
+    <div class="quick-select-grid" style="margin-top:-4px">
+        ${quickPlatforms.map(p => `<div class="quick-select-item" onclick="selectQuickPlatform('${p.name}')">${typeof renderQuickPlatformChip === 'function' ? renderQuickPlatformChip(p.platform, p.name) : `<span>${getPlatformEmoji(p.platform)}</span><span>${p.name}</span>`}</div>`).join('')}
+    </div>`;
+
+    window.selectQuickPlatform = window.selectQuickPlatform || function(name) {
+        const input = document.getElementById('add-name');
+        if (input) {
+            input.value = name;
+            if (typeof autoDetectPlatform === 'function') autoDetectPlatform();
+        }
+    };
+
     return `
     <div class="form-section-title">Dán thông tin tài khoản</div>
     <textarea class="textarea-paste" id="paste-input" placeholder="Dán vào đây: user@email.com|password123|2FA_CODE" oninput="previewParse()"></textarea>
@@ -339,6 +378,7 @@ function renderAddForm(type) {
         <input type="text" id="add-name" class="input" placeholder=" " style="padding-left:16px" oninput="autoDetectPlatform()">
         <label for="add-name" class="input-label" style="left:16px">VD: Netflix, Canva...</label>
     </div>
+    ${quickSelectHtml}
     <div id="platform-detect" style="font-size:13px;color:var(--text-secondary);margin-bottom:16px"></div>
 
     <div class="form-section-title">Thời hạn</div>

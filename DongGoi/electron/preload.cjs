@@ -7,10 +7,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAutoStart: () => ipcRenderer.invoke('settings:get-auto-start'),
   setAutoLockMinutes: minutes => ipcRenderer.invoke('settings:set-auto-lock-minutes', minutes),
   getAutoLockMinutes: () => ipcRenderer.invoke('settings:get-auto-lock-minutes'),
-  sendNativeNotification: (title, body) => ipcRenderer.invoke('notification:send', { title, body }),
+  sendNativeNotification: (title, body, options) => ipcRenderer.invoke('notification:send', { title, body, ...options }),
+  openNotificationSettings: () => ipcRenderer.invoke('notification:open-settings'),
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
   getUpdateLog: () => ipcRenderer.invoke('updates:get-log'),
+  getShortcuts: () => ipcRenderer.invoke('settings:get-shortcuts'),
+  setShortcut: (action, accelerator) => ipcRenderer.invoke('settings:set-shortcut', action, accelerator),
+  resetShortcuts: () => ipcRenderer.invoke('settings:reset-shortcuts'),
   quitAndInstall: () => ipcRenderer.invoke('updates:quit-and-install'),
   onAutoLock: callback => {
     const handler = () => callback();
@@ -27,4 +31,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('update-event', handler);
     return () => ipcRenderer.removeListener('update-event', handler);
   },
+  onQuickAddRequest: callback => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('quick-add:save-request', handler);
+    return () => ipcRenderer.removeListener('quick-add:save-request', handler);
+  },
+  sendQuickAddResult: result => ipcRenderer.send('quick-add:save-result', result),
 });

@@ -1,5 +1,7 @@
 # Dependencies
 node_modules/
+.toolchains/
+.android-sdk/
 
 # Logs
 logs
@@ -12,6 +14,8 @@ pc-test-server.out.log
 
 # Build output
 DongGoi/dist-electron/
+.ting-test-user-data/
+tmp_icon_check/
 www/
 android/
 ios/
@@ -22,6 +26,14 @@ ios/
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Firebase app config files - keep local, do not commit
+google-services.json
+android/app/google-services.json
+android/app/src/google-services.json
+
+# Local workflow notes and private setup files
+workflow/
 
 # Editor directories and files
 .idea

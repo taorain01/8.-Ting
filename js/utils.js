@@ -209,18 +209,101 @@ function normalizeServiceName(name) {
         .trim() || 'unknown';
 }
 
+function normalizeSearchText(value) {
+    return String(value || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/[^a-z0-9@._+-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function accountMatchesSearch(acc, query) {
+    const q = normalizeSearchText(query);
+    if (!q) return true;
+
+    const platform = getResolvedPlatform(acc) || acc?.platform || '';
+    const categoryNames = Array.isArray(acc?.categoryIds) && window.appState?.customCategories
+        ? acc.categoryIds
+            .map(id => window.appState.customCategories.find(category => category.id === id)?.name)
+            .filter(Boolean)
+            .join(' ')
+        : '';
+    const fields = [
+        acc?.name,
+        acc?.username,
+        acc?.displayUsername,
+        acc?.note,
+        acc?.planTag,
+        Array.isArray(acc?.tags) ? acc.tags.join(' ') : '',
+        categoryNames,
+        acc?.type,
+        acc?.status,
+        platform,
+        getPlatformLabel(platform, [acc]),
+        getStatusText(acc?.status),
+    ];
+    const haystack = normalizeSearchText(fields.filter(Boolean).join(' '));
+    return q.split(' ').every(part => haystack.includes(part));
+}
+
 function getPlatformLabel(platform, accounts = []) {
+    if (platform && typeof getPlatformIconConfig === 'function') {
+        const icon = getPlatformIconConfig(platform);
+        if (icon?.label) return icon.label;
+    }
     const map = {
         youtube: 'YouTube',
         canva: 'Canva',
         capcut: 'CapCut',
         netflix: 'Netflix',
         spotify: 'Spotify',
+        disneyplus: 'Disney+',
+        primevideo: 'Prime Video',
+        hulu: 'Hulu',
+        appletv: 'Apple TV',
+        tiktok: 'TikTok',
+        instagram: 'Instagram',
+        facebook: 'Facebook',
+        x: 'X',
+        telegram: 'Telegram',
+        whatsapp: 'WhatsApp',
         adobe: 'Adobe',
+        gmail: 'Gmail',
+        googledrive: 'Google Drive',
         google: 'Google',
+        'google-account': 'Google Account',
+        'gemini-pro': 'Gemini Pro',
+        'google-veo': 'Veo 3',
+        'google-antigravity': 'Antigravity',
         microsoft: 'Microsoft 365',
+        office365: 'Microsoft 365',
         openai: 'ChatGPT / OpenAI',
         midjourney: 'Midjourney',
+        claude: 'Claude',
+        perplexity: 'Perplexity',
+        cursor: 'Cursor',
+        replit: 'Replit',
+        huggingface: 'Hugging Face',
+        deepseek: 'DeepSeek',
+        mistralai: 'Mistral AI',
+        elevenlabs: 'ElevenLabs',
+        replicate: 'Replicate',
+        poe: 'Poe',
+        deepl: 'DeepL',
+        grammarly: 'Grammarly',
+        zapier: 'Zapier',
+        make: 'Make',
+        n8n: 'n8n',
+        '1password': '1Password',
+        lastpass: 'LastPass',
+        proton: 'Proton',
+        protonmail: 'Proton Mail',
+        firebase: 'Firebase',
+        googlecloud: 'Google Cloud',
+        supabase: 'Supabase',
         github: 'GitHub',
         discord: 'Discord',
         notion: 'Notion',
@@ -241,6 +324,28 @@ function getAccountGroupKey(acc) {
     return `service-${slugifyGroup(normalizeServiceName(acc?.name))}`;
 }
 
+function getAccountDisplayName(acc) {
+    const rawName = String(acc?.name || '').trim();
+    const platform = getResolvedPlatform(acc) || acc?.platform;
+    const platformLabel = platform ? getPlatformLabel(platform, [acc]) : '';
+    if (!rawName) return platformLabel || '';
+    if (!platformLabel) return rawName;
+
+    const normalize = value => String(value || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '');
+    const rawKey = normalize(rawName);
+    const labelKey = normalize(platformLabel);
+    const platformKey = normalize(platform);
+
+    if (rawKey === labelKey || rawKey === platformKey || labelKey.includes(rawKey)) {
+        return platformLabel;
+    }
+    return rawName;
+}
+
 function getWorstGroupStatus(accounts) {
     if (accounts.some(a => a.status === 'expired')) return 'expired';
     if (accounts.some(a => a.status === 'expiring')) return 'expiring';
@@ -251,6 +356,50 @@ function getNearestFixedAccount(accounts) {
     return accounts
         .filter(a => a.expiryType !== 'lifetime' && a.expiryDate)
         .sort((a, b) => daysUntil(a.expiryDate) - daysUntil(b.expiryDate))[0] || null;
+}
+
+function getAccountTimeValue(value) {
+    if (!value) return 0;
+    if (typeof value.toMillis === 'function') return value.toMillis();
+    if (typeof value.toDate === 'function') return value.toDate().getTime();
+    if (value instanceof Date) return value.getTime();
+    if (typeof value === 'number') return value;
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function isAccountFavorite(acc) {
+    return acc?.isFavorite === true;
+}
+
+function isAccountPinned(acc) {
+    return acc?.isPinned === true || Boolean(acc?.pinnedAt && acc?.isPinned !== false);
+}
+
+function sortAccountsByPriority(accounts = []) {
+    return [...(accounts || [])]
+        .map((acc, index) => ({ acc, index }))
+        .sort((a, b) => {
+            const pinnedDiff = Number(isAccountPinned(b.acc)) - Number(isAccountPinned(a.acc));
+            if (pinnedDiff) return pinnedDiff;
+
+            if (isAccountPinned(a.acc) && isAccountPinned(b.acc)) {
+                const pinnedTimeDiff = getAccountTimeValue(b.acc.pinnedAt) - getAccountTimeValue(a.acc.pinnedAt);
+                if (pinnedTimeDiff) return pinnedTimeDiff;
+            }
+
+            const favoriteDiff = Number(isAccountFavorite(b.acc)) - Number(isAccountFavorite(a.acc));
+            if (favoriteDiff) return favoriteDiff;
+
+            if (isAccountFavorite(a.acc) && isAccountFavorite(b.acc)) {
+                const favoriteTimeDiff = getAccountTimeValue(b.acc.favoriteAt || b.acc.favoritedAt)
+                    - getAccountTimeValue(a.acc.favoriteAt || a.acc.favoritedAt);
+                if (favoriteTimeDiff) return favoriteTimeDiff;
+            }
+
+            return a.index - b.index;
+        })
+        .map(item => item.acc);
 }
 
 function formatDaysCompact(days) {
@@ -284,7 +433,7 @@ function getGroupExpirySummary(accounts) {
 
 function buildAccountDisplayItems(accounts) {
     const groupMap = new Map();
-    accounts.forEach((acc, index) => {
+    sortAccountsByPriority(accounts).forEach((acc, index) => {
         const key = getAccountGroupKey(acc);
         if (!groupMap.has(key)) {
             groupMap.set(key, {
@@ -329,14 +478,15 @@ function renderCombinedNoteToken(action) {
 }
 
 function renderInlineNoteSegments(line) {
-    const pattern = /\[copy\]([\s\S]*?)\[\/copy\]|https?:\/\/[^\s<>"')]+/gi;
+    const pattern = /\[(?:open|link)\]\s*(https?:\/\/[^\s<>"')]+)|\[copy\]([\s\S]*?)\[\/copy\]|https?:\/\/[^\s<>"')]+/gi;
     let html = '';
     let lastIndex = 0;
     let match;
 
     while ((match = pattern.exec(line)) !== null) {
         html += escapeHtml(line.slice(lastIndex, match.index));
-        if (match[1] !== undefined) html += renderCopyNoteToken(match[1].trim(), 'Copy');
+        if (match[1] !== undefined) html += renderLinkNoteToken(match[1]);
+        else if (match[2] !== undefined) html += renderCopyNoteToken(match[2].trim(), 'Copy');
         else html += renderLinkNoteToken(match[0]);
         lastIndex = pattern.lastIndex;
     }

@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ting! — Icon Preview & Picker</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0f0f13;color:#e0e0e8;padding:24px}
+h1{text-align:center;font-size:28px;margin-bottom:8px;background:linear-gradient(135deg,#6C5CE7,#A29BFE);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.subtitle{text-align:center;color:#888;margin-bottom:24px;font-size:14px}
+.controls{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:24px}
+.controls input{background:#1a1a24;border:1px solid #333;border-radius:8px;padding:10px 16px;color:#fff;font-size:14px;width:320px;outline:none}
+.controls input:focus{border-color:#6C5CE7}
+.controls button{background:#6C5CE7;color:#fff;border:none;border-radius:8px;padding:10px 20px;cursor:pointer;font-size:14px;font-weight:600}
+.controls button:hover{background:#5a4bd6}
+.stats{text-align:center;color:#666;font-size:13px;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+.card{background:#1a1a24;border:1px solid #2a2a3a;border-radius:12px;padding:16px;transition:all .2s}
+.card:hover{border-color:#6C5CE7;transform:translateY(-2px)}
+.card.fallback{border-color:#f5a62350}
+.card-header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.card-header .label{font-weight:700;font-size:15px}
+.card-header .key{color:#888;font-size:12px}
+.icon-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.icon-box{width:48px;height:48px;border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;border:2px solid transparent;position:relative;transition:all .15s}
+.icon-box:hover{border-color:#6C5CE7;transform:scale(1.1)}
+.icon-box.selected{border-color:#1DB954;box-shadow:0 0 12px #1DB95440}
+.icon-box img{width:28px;height:28px}
+.icon-box .src-tag{position:absolute;bottom:-4px;right:-4px;font-size:8px;background:#333;color:#aaa;padding:1px 4px;border-radius:4px;pointer-events:none}
+.icon-box.local{background:#1e1e2e}
+.icon-box.cdn{background:#0d1b2a}
+.icon-box.cdn-alt{background:#1a0d2e}
+.color-dot{width:14px;height:14px;border-radius:50%;border:1px solid #444;flex-shrink:0}
+.badge{font-size:10px;padding:2px 6px;border-radius:4px;font-weight:600}
+.badge.ok{background:#1DB95420;color:#1DB954}
+.badge.fb{background:#f5a62320;color:#f5a623}
+.badge.miss{background:#e5393520;color:#e53935}
+.badge.new{background:#6C5CE720;color:#A29BFE}
+.section-title{font-size:20px;font-weight:700;margin:32px 0 16px;padding-bottom:8px;border-bottom:1px solid #2a2a3a}
+#status{position:fixed;bottom:20px;right:20px;background:#1DB954;color:#fff;padding:10px 20px;border-radius:8px;font-weight:600;display:none;z-index:99}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<h1>🎨 Ting! Icon Preview</h1>
+<p class="subtitle">So sánh icon hiện tại với CDN. Click icon để chọn. Bấm "Tải icon đã chọn" để download.</p>
+<div class="controls">
+<input type="text" id="search" placeholder="🔍 Tìm nền tảng..." oninput="filterCards()">
+<button onclick="downloadSelected()">💾 Tải icon đã chọn</button>
+<button onclick="selectAllCDN()" style="background:#0d1b2a">🔄 Chọn tất cả CDN</button>
+</div>
+<div class="stats" id="stats"></div>
+<div id="content"></div>
+<div id="status"></div>
+
+<script>
+const SI_CDN = 'https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/';
+const LOCAL_BASE = 'assets/platform-icons/';
+
+// All platforms - current + new ones to add
+const PLATFORMS = {
+  // === Streaming ===
+  netflix: { label: 'Netflix', color: '#E50914', si: 'netflix' },
+  spotify: { label: 'Spotify', color: '#1DB954', si: 'spotify' },
+  youtube: { label: 'YouTube', color: '#FF0000', si: 'youtube' },
+  youtubemusic: { label: 'YouTube Music', color: '#FF0000', si: 'youtubemusic', isNew: true },
+  disneyplus: { label: 'Disney+', color: '#113CCF', si: 'disneyplus' },
+  primevideo: { label: 'Prime Video', color: '#00A8E1', si: 'primevideo' },
+  hulu: { label: 'Hulu', color: '#1CE783', si: 'hulu' },
+  appletv: { label: 'Apple TV', color: '#000000', si: 'appletv' },
+  twitch: { label: 'Twitch', color: '#9146FF', si: 'twitch' },
+  crunchyroll: { label: 'Crunchyroll', color: '#F47521', si: 'crunchyroll', isNew: true },
+  
+  // === Social ===
+  tiktok: { label: 'TikTok', color: '#000000', si: 'tiktok' },
+  instagram: { label: 'Instagram', color: '#E4405F', si: 'instagram' },
+  facebook: { label: 'Facebook', color: '#0866FF', si: 'facebook' },
+  x: { label: 'X (Twitter)', color: '#000000', si: 'x' },
+  telegram: { label: 'Telegram', color: '#26A5E4', si: 'telegram' },
+  whatsapp: { label: 'WhatsApp', color: '#25D366', si: 'whatsapp' },
+  discord: { label: 'Discord', color: '#5865F2', si: 'discord' },
+  reddit: { label: 'Reddit', color: '#FF4500', si: 'reddit' },
+  linkedin: { label: 'LinkedIn', color: '#0A66C2', si: 'linkedin' },
+  pinterest: { label: 'Pinterest', color: '#BD081C', si: 'pinterest' },
+  snapchat: { label: 'Snapchat', color: '#FFFC00', si: 'snapchat', isNew: true },
+  threads: { label: 'Threads', color: '#000000', si: 'threads', isNew: true },
+  mastodon: { label: 'Mastodon', color: '#6364FF', si: 'mastodon', isNew: true },
+  signal: { label: 'Signal', color: '#3A76F0', si: 'signal', isNew: true },
+  line: { label: 'LINE', color: '#00C300', si: 'line', isNew: true },
+  wechat: { label: 'WeChat', color: '#07C160', si: 'wechat', isNew: true },
+  viber: { label: 'Viber', color: '#7360F2', si: 'viber', isNew: true },
+  
+  // === Browsers ===
+  ucbrowser: { label: 'UC Browser', color: '#FF6D00', si: 'ucbrowser', isNew: true },
+  googlechrome: { label: 'Google Chrome', color: '#4285F4', si: 'googlechrome', isNew: true },
+  firefox: { label: 'Firefox', color: '#FF7139', si: 'firefoxbrowser', isNew: true },
+  brave: { label: 'Brave', color: '#FB542B', si: 'brave', isNew: true },
+  opera: { label: 'Opera', color: '#FF1B2D', si: 'opera', isNew: true },
+  microsoftedge: { label: 'Microsoft Edge', color: '#0078D7', si: 'microsoftedge', isNew: true },
+  safari: { label: 'Safari', color: '#006CFF', si: 'safari', isNew: true },
+  
+  // === Design ===
+  canva: { label: 'Canva', color: '#00C4CC', si: 'canva' },
+  capcut: { label: 'CapCut', color: '#000000', si: 'capcut' },
+  adobe: { label: 'Adobe', color: '#FF0000', si: 'adobe' },
+  figma: { label: 'Figma', color: '#F24E1E', si: 'figma' },
+  sketch: { label: 'Sketch', color: '#F7B500', si: 'sketch', isNew: true },
+  
+  // === Productivity ===
+  notion: { label: 'Notion', color: '#000000', si: 'notion' },
+  zoom: { label: 'Zoom', color: '#0B5CFF', si: 'zoom' },
+  slack: { label: 'Slack', color: '#4A154B', si: 'slack' },
+  trello: { label: 'Trello', color: '#0052CC', si: 'trello' },
+  
+  // === Cloud & Storage ===
+  dropbox: { label: 'Dropbox', color: '#0061FF', si: 'dropbox' },
+  googledrive: { label: 'Google Drive', color: '#1A73E8', si: 'googledrive' },
+  gmail: { label: 'Gmail', color: '#EA4335', si: 'gmail' },
+  google: { label: 'Google', color: '#4285F4', si: 'google' },
+  onedrive: { label: 'OneDrive', color: '#0078D4', si: 'microsoftonedrive', isNew: true },
+  
+  // === Microsoft & Apple ===
+  microsoft: { label: 'Microsoft', color: '#5E5E5E', si: 'microsoft' },
+  office365: { label: 'Microsoft 365', color: '#D83B01', si: 'microsoftoffice' },
+  apple: { label: 'Apple', color: '#000000', si: 'apple' },
+  icloud: { label: 'iCloud', color: '#3693F3', si: 'icloud', isNew: true },
+  
+  // === Dev ===
+  github: { label: 'GitHub', color: '#181717', si: 'github' },
+  gitlab: { label: 'GitLab', color: '#FC6D26', si: 'gitlab' },
+  bitbucket: { label: 'Bitbucket', color: '#0052CC', si: 'bitbucket' },
+  wordpress: { label: 'WordPress', color: '#21759B', si: 'wordpress' },
+  stackoverflow: { label: 'Stack Overflow', color: '#F58025', si: 'stackoverflow', isNew: true },
+  docker: { label: 'Docker', color: '#2496ED', si: 'docker', isNew: true },
+  npm: { label: 'npm', color: '#CB3837', si: 'npm', isNew: true },
+  
+  // === E-commerce & Finance ===
+  shopify: { label: 'Shopify', color: '#7AB55C', si: 'shopify' },
+  paypal: { label: 'PayPal', color: '#003087', si: 'paypal' },
+  stripe: { label: 'Stripe', color: '#635BFF', si: 'stripe' },
+  amazon: { label: 'Amazon', color: '#FF9900', si: 'amazon', isNew: true },
+  ebay: { label: 'eBay', color: '#E53238', si: 'ebay', isNew: true },
+  wise: { label: 'Wise', color: '#00B9FF', si: 'wise', isNew: true },
+  
+  // === Hosting ===
+  cloudflare: { label: 'Cloudflare', color: '#F38020', si: 'cloudflare' },
+  vercel: { label: 'Vercel', color: '#000000', si: 'vercel' },
+  netlify: { label: 'Netlify', color: '#00C7B7', si: 'netlify' },
+  digitalocean: { label: 'DigitalOcean', color: '#0080FF', si: 'digitalocean', isNew: true },
+  heroku: { label: 'Heroku', color: '#430098', si: 'heroku', isNew: true },
+  
+  // === AI ===
+  openai: { label: 'ChatGPT / OpenAI', color: '#10A37F', si: 'openai' },
+  anthropic: { label: 'Anthropic', color: '#191919', si: 'anthropic' },
+  claude: { label: 'Claude', color: '#D97757', si: 'claude' },
+  'google-ai': { label: 'Gemini', color: '#4285F4', si: 'googlegemini', file: 'google-ai.svg' },
+  perplexity: { label: 'Perplexity', color: '#1FB8CD', si: 'perplexity' },
+  cursor: { label: 'Cursor', color: '#000000', si: 'cursor' },
+  replit: { label: 'Replit', color: '#F26207', si: 'replit' },
+  huggingface: { label: 'Hugging Face', color: '#FFD21E', si: 'huggingface' },
+  midjourney: { label: 'Midjourney', color: '#000000', si: 'midjourney' },
+  suno: { label: 'Suno', color: '#6C5CE7', si: 'suno' },
+  stabilityai: { label: 'Stability AI', color: '#000000', si: 'stabilityai' },
+  ollama: { label: 'Ollama', color: '#000000', si: 'ollama' },
+  deepseek: { label: 'DeepSeek', color: '#4D6BFE', si: 'deepseek' },
+  mistralai: { label: 'Mistral AI', color: '#FA520F', si: 'mistral' },
+  elevenlabs: { label: 'ElevenLabs', color: '#000000', si: 'elevenlabs' },
+  replicate: { label: 'Replicate', color: '#000000', si: 'replicate' },
+  poe: { label: 'Poe', color: '#5D5CDE', si: 'poe' },
+  copilot: { label: 'Microsoft Copilot', color: '#6264A7', si: 'microsoftcopilot', isNew: true },
+  
+  // === Tools ===
+  deepl: { label: 'DeepL', color: '#0F2B46', si: 'deepl' },
+  grammarly: { label: 'Grammarly', color: '#15C39A', si: 'grammarly' },
+  zapier: { label: 'Zapier', color: '#FF4A00', si: 'zapier' },
+  make: { label: 'Make', color: '#6D00CC', si: 'make' },
+  n8n: { label: 'n8n', color: '#EA4B71', si: 'n8n' },
+  todoist: { label: 'Todoist', color: '#E44332', si: 'todoist' },
+  '1password': { label: '1Password', color: '#3B66BC', si: '1password' },
+  lastpass: { label: 'LastPass', color: '#D32D27', si: 'lastpass' },
+  bitwarden: { label: 'Bitwarden', color: '#175DDC', si: 'bitwarden', isNew: true },
+  
+  // === Email & Privacy ===
+  proton: { label: 'Proton', color: '#6D4AFF', si: 'proton' },
+  protonmail: { label: 'Proton Mail', color: '#6D4AFF', si: 'protonmail' },
+  
+  // === Education ===
+  coursera: { label: 'Coursera', color: '#0056D2', si: 'coursera' },
+  udemy: { label: 'Udemy', color: '#A435F0', si: 'udemy' },
+  duolingo: { label: 'Duolingo', color: '#58CC02', si: 'duolingo' },
+  
+  // === Project Management ===
+  linear: { label: 'Linear', color: '#5E6AD2', si: 'linear' },
+  asana: { label: 'Asana', color: '#F06A6A', si: 'asana' },
+  airtable: { label: 'Airtable', color: '#18BFFF', si: 'airtable' },
+  miro: { label: 'Miro', color: '#050038', si: 'miro' },
+  jira: { label: 'Jira', color: '#0052CC', si: 'jira', isNew: true },
+  
+  // === Database & Backend ===
+  firebase: { label: 'Firebase', color: '#DD2C00', si: 'firebase' },
+  googlecloud: { label: 'Google Cloud', color: '#4285F4', si: 'googlecloud' },
+  mongodb: { label: 'MongoDB', color: '#47A248', si: 'mongodb' },
+  supabase: { label: 'Supabase', color: '#3FCF8E', si: 'supabase' },
+  aws: { label: 'AWS', color: '#FF9900', si: 'amazonwebservices', isNew: true },
+  
+  // === Gaming ===
+  steam: { label: 'Steam', color: '#000000', si: 'steam', isNew: true },
+  epicgames: { label: 'Epic Games', color: '#313131', si: 'epicgames', isNew: true },
+  roblox: { label: 'Roblox', color: '#000000', si: 'roblox', isNew: true },
+  
+  // === Zalo (text mark, no SVG expected) ===
+  zalo: { label: 'Zalo', color: '#0068FF', si: 'zalo' },
+};
+
+// Additional Simple Icons slugs to try as alternatives
+const ALT_SLUGS = {
+  capcut: ['capcut'],
+  disneyplus: ['disneyplus','disney'],
+  midjourney: ['midjourney'],
+  stabilityai: ['stabilityai','stability'],
+  mistralai: ['mistral','mistralai'],
+  office365: ['microsoftoffice','microsoft365'],
+  zalo: ['zalo'],
+};
+
+const selected = {};
+let loadedCards = {};
+
+async function checkUrl(url) {
+  try {
+    const r = await fetch(url, { method: 'HEAD', mode: 'cors' });
+    return r.ok;
+  } catch { return false; }
+}
+
+async function loadSvgContent(url) {
+  try {
+    const r = await fetch(url, { mode: 'cors' });
+    if (!r.ok) return null;
+    return await r.text();
+  } catch { return null; }
+}
+
+function createIconBox(src, tag, type, key) {
+  const box = document.createElement('div');
+  box.className = `icon-box ${type}`;
+  box.title = `${tag} (${type})`;
+  box.dataset.key = key;
+  box.dataset.src = src;
+  box.dataset.tag = tag;
+  
+  const img = document.createElement('img');
+  img.src = src;
+  img.alt = tag;
+  img.onerror = () => { box.style.display = 'none'; };
+  box.appendChild(img);
+  
+  const srcTag = document.createElement('span');
+  srcTag.className = 'src-tag';
+  srcTag.textContent = tag;
+  box.appendChild(srcTag);
+  
+  box.onclick = () => {
+    // Deselect others for same platform
+    const card = box.closest('.card');
+    card.querySelectorAll('.icon-box').forEach(b => b.classList.remove('selected'));
+    box.classList.add('selected');
+    selected[key] = { src, tag, type };
+    updateStats();
+  };
+  
+  return box;
+}
+
+async function buildCard(key, config) {
+  const card = document.createElement('div');
+  card.className = `card ${config.isNew ? '' : ''}`;
+  card.dataset.key = key;
+  card.dataset.label = config.label.toLowerCase();
+  
+  const header = document.createElement('div');
+  header.className = 'card-header';
+  
+  const dot = document.createElement('span');
+  dot.className = 'color-dot';
+  dot.style.background = config.color;
+  header.appendChild(dot);
+  
+  const labelEl = document.createElement('span');
+  labelEl.className = 'label';
+  labelEl.textContent = config.label;
+  header.appendChild(labelEl);
+  
+  const keyEl = document.createElement('span');
+  keyEl.className = 'key';
+  keyEl.textContent = key;
+  header.appendChild(keyEl);
+  
+  // Badge
+  const badge = document.createElement('span');
+  if (config.isNew) {
+    badge.className = 'badge new';
+    badge.textContent = 'MỚI';
+  }
+  header.appendChild(badge);
+  
+  card.appendChild(header);
+  
+  const iconRow = document.createElement('div');
+  iconRow.className = 'icon-row';
+  
+  // 1. Local SVG
+  const localFile = config.file || `${key}.svg`;
+  const localUrl = LOCAL_BASE + localFile;
+  if (!config.isNew) {
+    iconRow.appendChild(createIconBox(localUrl, 'local', 'local', key));
+  }
+  
+  // 2. CDN current slug
+  const cdnUrl = SI_CDN + config.si + '.svg';
+  iconRow.appendChild(createIconBox(cdnUrl, config.si, 'cdn', key));
+  
+  // 3. Alternative CDN slugs
+  const alts = ALT_SLUGS[key] || [];
+  for (const alt of alts) {
+    if (alt !== config.si) {
+      iconRow.appendChild(createIconBox(SI_CDN + alt + '.svg', alt, 'cdn-alt', key));
+    }
+  }
+  
+  card.appendChild(iconRow);
+  return card;
+}
+
+function updateStats() {
+  const total = Object.keys(PLATFORMS).length;
+  const selectedCount = Object.keys(selected).length;
+  const newCount = Object.values(PLATFORMS).filter(p => p.isNew).length;
+  document.getElementById('stats').textContent = 
+    `${total} nền tảng (${total - newCount} hiện tại + ${newCount} mới) · ${selectedCount} đã chọn`;
+}
+
+function filterCards() {
+  const q = document.getElementById('search').value.toLowerCase();
+  document.querySelectorAll('.card').forEach(card => {
+    const match = card.dataset.key.includes(q) || card.dataset.label.includes(q);
+    card.classList.toggle('hidden', !match);
+  });
+}
+
+function selectAllCDN() {
+  document.querySelectorAll('.card').forEach(card => {
+    const cdnBox = card.querySelector('.icon-box.cdn');
+    if (cdnBox && cdnBox.style.display !== 'none') cdnBox.click();
+  });
+}
+
+async function downloadSelected() {
+  const entries = Object.entries(selected);
+  if (!entries.length) { alert('Chưa chọn icon nào!'); return; }
+  
+  const status = document.getElementById('status');
+  status.style.display = 'block';
+  
+  let done = 0;
+  for (const [key, info] of entries) {
+    status.textContent = `Đang tải ${done + 1}/${entries.length}: ${key}...`;
+    try {
+      const svg = await loadSvgContent(info.src);
+      if (svg) {
+        const blob = new Blob([svg], { type: 'image/svg+xml' });
+        const a = document.createElement('a');
+        const file = PLATFORMS[key]?.file || `${key}.svg`;
+        a.href = URL.createObjectURL(blob);
+        a.download = file;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        await new Promise(r => setTimeout(r, 300));
+      }
+    } catch (e) { console.warn(`Lỗi tải ${key}:`, e); }
+    done++;
+  }
+  
+  status.textContent = `✅ Đã tải ${done} icon!`;
+  setTimeout(() => { status.style.display = 'none'; }, 3000);
+}
+
+// === INIT ===
+async function init() {
+  const content = document.getElementById('content');
+  
+  // Group by category
+  const categories = {
+    '🎬 Streaming & Video': ['netflix','spotify','youtube','youtubemusic','disneyplus','primevideo','hulu','appletv','twitch','crunchyroll'],
+    '💬 Social & Messaging': ['tiktok','instagram','facebook','x','telegram','whatsapp','discord','reddit','linkedin','pinterest','snapchat','threads','mastodon','signal','line','wechat','viber'],
+    '🌐 Browsers': ['ucbrowser','googlechrome','firefox','brave','opera','microsoftedge','safari'],
+    '🎨 Design & Creative': ['canva','capcut','adobe','figma','sketch'],
+    '💼 Productivity': ['notion','zoom','slack','trello'],
+    '☁️ Cloud & Storage': ['dropbox','googledrive','gmail','google','onedrive'],
+    '🏢 Microsoft & Apple': ['microsoft','office365','apple','icloud'],
+    '💻 Development': ['github','gitlab','bitbucket','wordpress','stackoverflow','docker','npm'],
+    '🛒 E-commerce & Finance': ['shopify','paypal','stripe','amazon','ebay','wise'],
+    '🌍 Hosting & Infra': ['cloudflare','vercel','netlify','digitalocean','heroku'],
+    '🤖 AI & ML': ['openai','anthropic','claude','google-ai','perplexity','cursor','replit','huggingface','midjourney','suno','stabilityai','ollama','deepseek','mistralai','elevenlabs','replicate','poe','copilot'],
+    '🔧 Tools & Automation': ['deepl','grammarly','zapier','make','n8n','todoist','1password','lastpass','bitwarden'],
+    '📧 Email & Privacy': ['proton','protonmail'],
+    '📚 Education': ['coursera','udemy','duolingo'],
+    '📋 Project Management': ['linear','asana','airtable','miro','jira'],
+    '🗄️ Database & Backend': ['firebase','googlecloud','mongodb','supabase','aws'],
+    '🎮 Gaming': ['steam','epicgames','roblox'],
+    '💬 Vietnam': ['zalo'],
+  };
+  
+  for (const [catName, keys] of Object.entries(categories)) {
+    const title = document.createElement('div');
+    title.className = 'section-title';
+    title.textContent = catName;
+    content.appendChild(title);
+    
+    const grid = document.createElement('div');
+    grid.className = 'grid';
+    
+    for (const key of keys) {
+      const config = PLATFORMS[key];
+      if (!config) continue;
+      const card = await buildCard(key, config);
+      grid.appendChild(card);
+    }
+    
+    content.appendChild(grid);
+  }
+  
+  updateStats();
+}
+
+init();
+</script>
+</body>
+</html>

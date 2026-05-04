@@ -97,10 +97,12 @@ function toggleSearch() {
     }
 }
 function handleSearch(value) {
-    window.appState.searchQuery = value;
+    window.appState.searchQuery = String(value || '');
+    const hasSearch = window.appState.searchQuery.trim().length > 0;
     const page = window.appState.currentPage;
     if (page === 'bought') renderAccountList('bought');
     else if (page === 'personal') renderAccountList('personal');
+    else if (hasSearch && typeof renderSearchResults === 'function') renderSearchResults(window.appState.searchQuery);
     else if (page === 'dashboard') renderDashboard();
 }
 function clearSearch() {
@@ -198,6 +200,14 @@ function shakeMasterPasswordInput() {
     setTimeout(() => input.parentElement.classList.remove('anim-shake'), 400);
 }
 
+function clearMasterPasswordInput() {
+    const input = document.getElementById('master-pw-input');
+    if (input) {
+        input.value = '';
+        setTimeout(() => input.focus(), 30);
+    }
+}
+
 async function verifyMasterPassword() {
     const els = getMasterPasswordDialogEls();
     const masterPassword = els.input.value;
@@ -215,6 +225,7 @@ async function verifyMasterPassword() {
             if (masterPassword.length < 6) {
                 showToast('Master Password cần ít nhất 6 ký tự', 'error');
                 shakeMasterPasswordInput();
+                clearMasterPasswordInput();
                 return;
             }
 
@@ -245,6 +256,7 @@ async function verifyMasterPassword() {
         if (!ok) {
             showToast('Master Password không đúng', 'error');
             shakeMasterPasswordInput();
+            clearMasterPasswordInput();
             return;
         }
 
@@ -256,6 +268,7 @@ async function verifyMasterPassword() {
         console.error('❌ Lỗi Master Password:', error);
         showToast(error.message || 'Không thể mở khoá dữ liệu', 'error');
         shakeMasterPasswordInput();
+        clearMasterPasswordInput();
     } finally {
         els.button.disabled = false;
         els.button.textContent = originalText;
@@ -352,7 +365,9 @@ function autoDetectPlatform() {
     const platform = detectPlatform(name);
     const el = document.getElementById('platform-detect');
     if (platform) {
-        el.innerHTML = `${getPlatformEmoji(platform)} Nhận diện: <strong>${platform}</strong>`;
+        el.innerHTML = typeof renderPlatformDetect === 'function'
+            ? renderPlatformDetect(platform)
+            : `${getPlatformEmoji(platform)} Nhận diện: <strong>${platform}</strong>`;
     } else { el.innerHTML = ''; }
 }
 
@@ -459,6 +474,7 @@ async function handleEmailAuth(e) {
 
 function toggleAuthMode(e) {
     e.preventDefault();
+    clearAuthNotice?.();
     const btn = document.getElementById('btn-email-login');
     const text = document.getElementById('auth-toggle-text');
     const link = document.getElementById('auth-toggle-link');

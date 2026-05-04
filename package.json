@@ -6,19 +6,23 @@
   "author": "Ting!",
   "main": "DongGoi/electron/main.cjs",
   "scripts": {
+    "icons:sync": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-app-icons.ps1",
+    "web:test": "node scripts/serve-web-test.cjs",
     "electron:dev": "electron .",
-    "dist:win": "electron-builder --win --x64",
-    "dist:unpacked": "electron-builder --win --x64 --dir",
-    "dist:portable": "electron-builder --win portable --x64",
+    "electron:test": "node scripts/run-electron-test.cjs",
+    "dist:win": "npm run icons:sync && electron-builder --win --x64 && node scripts/keep-single-installer.js",
+    "dist:unpacked": "npm run icons:sync && electron-builder --win --x64 --dir",
     "prepare:android-web": "node scripts/prepare-android-web.js",
-    "android:add": "npm run prepare:android-web && npx cap add android",
-    "android:sync": "npm run prepare:android-web && npx cap sync android",
+    "android:add": "npm run prepare:android-web && npx cap add android && npm run icons:sync",
+    "android:sync": "npm run prepare:android-web && npx cap sync android && npm run icons:sync",
     "android:open": "npm run android:sync && npx cap open android",
-    "android:build:debug": "npm run android:sync && cd android && gradlew.bat assembleDebug"
+    "android:build:debug": "node scripts/build-android-debug.cjs"
   },
   "dependencies": {
+    "@capacitor-firebase/authentication": "^7.2.0",
     "@capacitor/android": "7.4.3",
     "@capacitor/core": "7.4.3",
+    "@capacitor/local-notifications": "^7.0.0",
     "electron-store": "^8.2.0",
     "electron-updater": "^6.8.3"
   },
@@ -29,24 +33,19 @@
   },
   "overrides": {
     "@capacitor/cli": {
-      "tar": "^7.5.13"
+      "tar": "^6.2.1"
     }
   },
   "build": {
     "appId": "app.ting.accountmanager",
     "productName": "Ting!",
+    "afterPack": "scripts/after-pack-win-icon.cjs",
     "directories": {
       "output": "DongGoi/dist-electron"
     },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "YOUR_GITHUB_OWNER",
-        "repo": "ting"
-      }
-    ],
     "files": [
       "index.html",
+      "quick-add.html",
       "firebase-config.js",
       "css/**/*",
       "js/**/*",
@@ -55,7 +54,21 @@
       "DongGoi/electron/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "DongGoi/build/icon.ico",
+        "to": "icon.ico"
+      }
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "taorain01",
+        "repo": "8.-Ting"
+      }
+    ],
     "win": {
+      "executableName": "Ting",
       "icon": "DongGoi/build/icon.ico",
       "signAndEditExecutable": false,
       "target": [
@@ -64,19 +77,19 @@
           "arch": [
             "x64"
           ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
         }
       ]
     },
     "nsis": {
+      "artifactName": "${name}-setup-${version}.${ext}",
+      "include": "DongGoi/build/installer.nsh",
+      "installerIcon": "DongGoi/build/icon.ico",
+      "uninstallerIcon": "DongGoi/build/icon.ico",
+      "installerHeaderIcon": "DongGoi/build/icon.ico",
+      "differentialPackage": false,
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
+      "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
       "shortcutName": "Ting!"
     }

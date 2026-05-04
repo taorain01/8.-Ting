@@ -4,5 +4,17 @@
   "webDir": "www",
   "server": {
     "androidScheme": "https"
+  },
+  "plugins": {
+    "FirebaseAuthentication": {
+      "skipNativeAuth": true,
+      "providers": [
+        "google.com"
+      ]
+    },
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_ting",
+      "iconColor": "#6C5CE7"
+    }
   }
 }

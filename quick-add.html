@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ting! Thêm nhanh</title>
+  <link rel="stylesheet" href="css/quick-add.css">
+  <script defer src="js/parser.js"></script>
+  <script defer src="js/platform-icons.js"></script>
+  <script defer src="js/platform-tags.js"></script>
+</head>
+<body>
+  <main class="quick-shell">
+    <header class="quick-head">
+      <div class="quick-title">
+        <span class="quick-mark">T!</span>
+        <div>
+          <span class="quick-kicker">Ting!</span>
+          <h1>Thêm nhanh</h1>
+        </div>
+      </div>
+      <button class="quick-close" type="button" onclick="closeQuickAdd()" aria-label="Đóng">&times;</button>
+    </header>
+
+    <form id="quick-form" class="quick-form">
+      <label class="quick-field quick-paste-field">
+        <span class="quick-label">Dán thông tin tài khoản</span>
+        <textarea id="quick-raw" rows="3" placeholder="Netflix|user@email.com|password|2FA" spellcheck="false"></textarea>
+      </label>
+
+      <div id="quick-parse-preview" class="quick-parse-preview" hidden></div>
+
+      <div class="quick-service-line">
+        <label class="quick-field quick-name-field">
+          <span class="quick-label">Tên dịch vụ</span>
+          <input id="quick-name" type="text" placeholder="Netflix, Gemini Pro, Suno..." autocomplete="off" required>
+        </label>
+        <div id="quick-platform-chip" class="quick-platform-chip" hidden></div>
+      </div>
+
+      <div id="quick-tag-suggestions" class="quick-tag-suggestions" hidden></div>
+
+      <div class="quick-grid">
+        <label class="quick-field">
+          <span class="quick-label">Loại</span>
+          <select id="quick-type">
+            <option value="bought">TK mua</option>
+            <option value="personal">Cá nhân</option>
+          </select>
+        </label>
+        <label class="quick-field">
+          <span class="quick-label">Thời hạn</span>
+          <input id="quick-smart-date" type="text" value="30 ngày" placeholder="30 ngày, 28/04 > 28/05">
+        </label>
+      </div>
+
+      <div class="quick-date-line">
+        <label class="quick-check">
+          <input id="quick-lifetime" type="checkbox">
+          <span>Vĩnh viễn</span>
+        </label>
+        <p id="quick-date-preview" class="quick-date-preview"></p>
+      </div>
+
+      <details class="quick-details">
+        <summary>Tùy chỉnh ngày</summary>
+        <div class="quick-date-grid">
+          <label class="quick-field">
+            <span class="quick-label">Ngày mua</span>
+            <input id="quick-purchase" type="date">
+          </label>
+          <label class="quick-field">
+            <span class="quick-label">Ngày hết hạn</span>
+            <input id="quick-expiry" type="date">
+          </label>
+        </div>
+      </details>
+
+      <div class="quick-secondary-grid">
+        <label class="quick-field">
+          <span class="quick-label">Tags / gói cước</span>
+          <input id="quick-tags" type="text" placeholder="Premium, Family, Gemini Pro">
+        </label>
+        <label class="quick-field">
+          <span class="quick-label">Ghi chú</span>
+          <input id="quick-note" type="text" placeholder="Tùy chọn">
+        </label>
+      </div>
+
+      <p id="quick-status" class="quick-status"></p>
+
+      <div class="quick-actions">
+        <button class="quick-btn ghost" type="button" onclick="closeQuickAdd()">Hủy</button>
+        <button id="quick-save" class="quick-btn primary" type="submit">Lưu nhanh</button>
+      </div>
+    </form>
+  </main>
+
+  <script>
+    function closeQuickAdd() {
+      window.quickAddAPI?.closePopup?.();
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const form = document.getElementById('quick-form');
+      const els = {
+        raw: document.getElementById('quick-raw'),
+        name: document.getElementById('quick-name'),
+        type: document.getElementById('quick-type'),
+        smartDate: document.getElementById('quick-smart-date'),
+        lifetime: document.getElementById('quick-lifetime'),
+        purchase: document.getElementById('quick-purchase'),
+        expiry: document.getElementById('quick-expiry'),
+        preview: document.getElementById('quick-parse-preview'),
+        platform: document.getElementById('quick-platform-chip'),
+        tags: document.getElementById('quick-tags'),
+        tagSuggestions: document.getElementById('quick-tag-suggestions'),
+        note: document.getElementById('quick-note'),
+        datePreview: document.getElementById('quick-date-preview'),
+        status: document.getElementById('quick-status'),
+        save: document.getElementById('quick-save'),
+      };
+
+      const state = {
+        autoName: '',
+        autoTags: [],
+        latestParsed: null,
+        latestDetection: { platforms: [], tags: [] },
+      };
+
+      function escapeHtml(value) {
+        return String(value ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
+      function todayIso() {
+        const now = new Date();
+        return dateToInputValue(now);
+      }
+
+      function dateToInputValue(date) {
+        if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+        return [
+          date.getFullYear(),
+          String(date.getMonth() + 1).padStart(2, '0'),
+          String(date.getDate()).padStart(2, '0'),
+        ].join('-');
+      }
+
+      function inputValueToDate(value) {
+        const match = String(value || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+        return match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : null;
+      }
+
+      function addDateSmart(baseDate, { days = 0, months = 0, years = 0 } = {}) {
+        const date = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+        if (years) date.setFullYear(date.getFullYear() + years);
+        if (months) date.setMonth(date.getMonth() + months);
+        if (days) date.setDate(date.getDate() + days);
+        return date;
+      }
+
+      function normalizeText(value) {
+        return String(value || '')
+          .trim()
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '');
+      }
+
+      function normalizeCompact(value) {
+        return normalizeText(value)
+          .replace(/&/g, 'and')
+          .replace(/\+/g, 'plus')
+          .replace(/[^a-z0-9]+/g, '');
+      }
+
+      function parseQuickDate(value, baseDate = new Date()) {
+        const raw = String(value || '').trim();
+        const text = normalizeText(raw);
+        if (!text) return null;
+        if (['hom nay', 'today', 'now'].includes(text)) return addDateSmart(baseDate);
+        if (['hom qua', 'yesterday'].includes(text)) return addDateSmart(baseDate, { days: -1 });
+        if (['mai', 'ngay mai', 'tomorrow'].includes(text)) return addDateSmart(baseDate, { days: 1 });
+        if (/^[+-]\d+$/.test(text)) return addDateSmart(baseDate, { days: Number(text) });
+
+        const iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+        if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+
+        const slash = raw.match(/^(\d{1,2})[\/.-](\d{1,2})(?:[\/.-](\d{2,4}))?$/);
+        if (slash) {
+          const year = slash[3] ? (Number(slash[3]) < 100 ? 2000 + Number(slash[3]) : Number(slash[3])) : baseDate.getFullYear();
+          return new Date(year, Number(slash[2]) - 1, Number(slash[1]));
+        }
+
+        const compact = raw.match(/^(\d{2})(\d{2})(\d{2}|\d{4})?$/);
+        if (compact) {
+          const year = compact[3] ? (Number(compact[3]) < 100 ? 2000 + Number(compact[3]) : Number(compact[3])) : baseDate.getFullYear();
+          return new Date(year, Number(compact[2]) - 1, Number(compact[1]));
+        }
+        return null;
+      }
+
+      function parseQuickDuration(value, purchaseDate) {
+        const raw = String(value || '').trim();
+        const text = normalizeText(raw);
+        if (!text || !purchaseDate) return null;
+
+        const directDate = parseQuickDate(raw, purchaseDate);
+        if (directDate && /[\/.-]/.test(raw)) return { date: directDate, label: 'ngày tự chọn' };
+
+        const numberOnly = text.match(/^(\d+)$/);
+        if (numberOnly) {
+          const days = Number(numberOnly[1]);
+          return { date: addDateSmart(purchaseDate, { days }), label: `${days} ngày` };
+        }
+
+        const match = text.match(/^(\d+)\s*(d|day|days|ngay|w|week|weeks|tuan|m|month|months|thang|y|year|years|nam)$/);
+        if (match) {
+          const amount = Number(match[1]);
+          const unit = match[2];
+          if (['d', 'day', 'days', 'ngay'].includes(unit)) return { date: addDateSmart(purchaseDate, { days: amount }), label: `${amount} ngày` };
+          if (['w', 'week', 'weeks', 'tuan'].includes(unit)) return { date: addDateSmart(purchaseDate, { days: amount * 7 }), label: `${amount} tuần` };
+          if (['m', 'month', 'months', 'thang'].includes(unit)) return { date: addDateSmart(purchaseDate, { months: amount }), label: `${amount} tháng` };
+          if (['y', 'year', 'years', 'nam'].includes(unit)) return { date: addDateSmart(purchaseDate, { years: amount }), label: `${amount} năm` };
+        }
+
+        if (['thang sau', '1 thang'].includes(text)) return { date: addDateSmart(purchaseDate, { months: 1 }), label: '1 tháng' };
+        if (['nam sau', '1 nam'].includes(text)) return { date: addDateSmart(purchaseDate, { years: 1 }), label: '1 năm' };
+        return null;
+      }
+
+      function parseSmartDateRange(input) {
+        const raw = String(input || '').trim();
+        const today = inputValueToDate(todayIso()) || new Date();
+        if (!raw) return { purchaseDate: today, expiryDate: null, label: '' };
+
+        const normalized = normalizeText(raw).replace(/[,]+/g, ' ').replace(/\s+/g, ' ').trim();
+        const monthText = normalized.match(/^(\d{1,2})\s*thang\s*(\d{1,2})(?:\s+(\d+)\s*(ngay|thang|nam|day|days|month|months|year|years))?$/);
+        if (monthText) {
+          const purchaseDate = new Date(today.getFullYear(), Number(monthText[2]) - 1, Number(monthText[1]));
+          const durationText = monthText[3] ? `${monthText[3]} ${monthText[4]}` : '30';
+          const duration = parseQuickDuration(durationText, purchaseDate);
+          return { purchaseDate, expiryDate: duration?.date || null, label: duration?.label || '30 ngày' };
+        }
+
+        if (raw.includes('>')) {
+          const [left, right] = raw.split('>').map(part => part.trim());
+          const rightDate = parseQuickDate(right, today);
+          const leftDate = /^\d+$/.test(left) ? today : (parseQuickDate(left, today) || today);
+          if (rightDate) {
+            const days = Math.round((rightDate - leftDate) / 86400000);
+            return { purchaseDate: leftDate, expiryDate: rightDate, label: `${days} ngày` };
+          }
+        }
+
+        const dateAtStart = raw.match(/^(\d{1,2}[\/.-]\d{1,2}(?:[\/.-]\d{2,4})?|\d{2}\d{2}(?:\d{2,4})?)\s+(.+)$/);
+        if (dateAtStart) {
+          const purchaseDate = parseQuickDate(dateAtStart[1], today);
+          if (purchaseDate) {
+            const rest = dateAtStart[2].trim();
+            const explicitExpiry = parseQuickDate(rest, purchaseDate);
+            if (explicitExpiry && /[\/.-]/.test(rest)) {
+              const days = Math.round((explicitExpiry - purchaseDate) / 86400000);
+              return { purchaseDate, expiryDate: explicitExpiry, label: `${days} ngày` };
+            }
+            const duration = parseQuickDuration(rest, purchaseDate);
+            if (duration?.date) return { purchaseDate, expiryDate: duration.date, label: duration.label };
+          }
+        }
+
+        const onlyDate = parseQuickDate(raw, today);
+        if (onlyDate && /[\/.-]/.test(raw)) {
+          const duration = parseQuickDuration('30', onlyDate);
+          return { purchaseDate: onlyDate, expiryDate: duration?.date || null, label: '30 ngày' };
+        }
+
+        const duration = parseQuickDuration(raw, today);
+        if (duration?.date) return { purchaseDate: today, expiryDate: duration.date, label: duration.label };
+        return { purchaseDate: today, expiryDate: null, label: '' };
+      }
+
+      function formatDateVN(value) {
+        const date = value instanceof Date ? value : inputValueToDate(value);
+        if (!date || Number.isNaN(date.getTime())) return '';
+        return `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${date.getFullYear()}`;
+      }
+
+      function splitTags(value) {
+        return String(value || '')
+          .split(/[,\n;]/)
+          .map(tag => tag.trim())
+          .filter(Boolean);
+      }
+
+      function uniqueTags(tags = []) {
+        const seen = new Set();
+        const result = [];
+        tags.forEach(tag => {
+          const label = String(tag || '').trim().replace(/\s+/g, ' ');
+          const key = normalizeText(label);
+          if (!label || seen.has(key)) return;
+          seen.add(key);
+          result.push(label);
+        });
+        return result;
+      }
+
+      function getPlatformLabel(platform) {
+        const icon = typeof getPlatformIconConfig === 'function' ? getPlatformIconConfig(platform) : null;
+        return icon?.label || platform || '';
+      }
+
+      function renderPlatformChip(match) {
+        if (!match?.id) {
+          els.platform.hidden = true;
+          els.platform.innerHTML = '';
+          return;
+        }
+        const label = match.label || getPlatformLabel(match.id);
+        const mark = typeof renderPlatformLogoMark === 'function'
+          ? renderPlatformLogoMark(match.id)
+          : `<span class="platform-logo-fallback">${escapeHtml(typeof getPlatformEmoji === 'function' ? getPlatformEmoji(match.id) : 'T')}</span>`;
+        const style = typeof getPlatformLogoStyle === 'function' ? getPlatformLogoStyle(match.id, label) : '';
+        els.platform.innerHTML = `<span class="quick-platform-icon" style="${style}">${mark}</span><span>${escapeHtml(label)}</span>`;
+        els.platform.hidden = false;
+      }
+
+      function getPlatformCatalog() {
+        const catalog = new Map();
+        const add = (key, platform) => {
+          const clean = normalizeCompact(key);
+          if (clean && platform && platform !== 'other') catalog.set(clean, platform);
+        };
+
+        Object.keys(window.TING_PLATFORM_ICONS || {}).forEach(platform => {
+          add(platform, platform);
+          add(platform.replace(/-/g, ''), platform);
+          const label = getPlatformLabel(platform);
+          if (label) add(label, platform);
+        });
+        Object.keys(window.PLATFORM_PLAN_TAGS || {}).forEach(platform => {
+          add(platform, platform);
+          add(platform.replace(/-/g, ''), platform);
+        });
+        Object.entries({
+          chatgpt: 'openai',
+          gpt: 'openai',
+          googlemail: 'gmail',
+          accgoogle: 'google-account',
+          taikhoangoogle: 'google-account',
+          geminipro: 'gemini-pro',
+          geminiadvanced: 'gemini-pro',
+          veo3: 'google-veo',
+          antigravity: 'google-antigravity',
+          gdrive: 'googledrive',
+          office: 'office365',
+          microsoft365: 'office365',
+          ms365: 'office365',
+          protonmail: 'protonmail',
+          discordnitro: 'discord',
+        }).forEach(([alias, platform]) => add(alias, platform));
+        return catalog;
+      }
+
+      function findPlatformMatch(value, source = 'text') {
+        const token = normalizeCompact(value);
+        if (!token || token.length < 2) return null;
+
+        const catalog = getPlatformCatalog();
+        const direct = catalog.get(token);
+        if (direct) return { id: direct, source, confidence: source === 'service' ? 96 : 86 };
+
+        const detected = typeof detectPlatform === 'function' ? detectPlatform(value) : null;
+        if (detected && detected !== 'other') return { id: detected, source, confidence: source === 'name' ? 92 : 82 };
+
+        let best = null;
+        catalog.forEach((platform, key) => {
+          if ((key.length < 3 && key !== 'x') || !token.includes(key)) return;
+          const confidence = (source === 'domain' ? 50 : 72) + Math.min(key.length, 18);
+          if (!best || confidence > best.confidence) best = { id: platform, source, confidence };
+        });
+        return best;
+      }
+
+      function extractTokens(rawText) {
+        const raw = String(rawText || '');
+        const tokens = [];
+        const push = (value, source = 'text') => {
+          const clean = String(value || '').trim();
+          if (normalizeCompact(clean).length >= 2) tokens.push({ value: clean, source });
+        };
+
+        raw.replace(/([a-z0-9._%+-]+)@([a-z0-9.-]+\.[a-z]{2,})/gi, (_, user, domain) => {
+          push(user, 'account');
+          push(domain.split('.')[0], 'domain');
+          return '';
+        });
+        raw.split(/[\r\n\t|;,<>()[\]{}"']+/).forEach(part => push(part, 'text'));
+        raw.split(/[|@_\-.\s:;,<>()[\]{}"']+/).forEach(part => push(part, 'text'));
+        return tokens;
+      }
+
+      function detectQuickServices(rawText, nameText, parsed) {
+        const platformMap = new Map();
+        const add = match => {
+          if (!match?.id) return;
+          const label = getPlatformLabel(match.id);
+          const current = platformMap.get(match.id);
+          const next = { ...match, label };
+          if (!current || next.confidence > current.confidence) platformMap.set(match.id, next);
+        };
+
+        if (parsed?.platform) add({ id: parsed.platform, source: 'service', confidence: 98 });
+        if (parsed?.serviceName) add(findPlatformMatch(parsed.serviceName, 'service'));
+        if (nameText) add(findPlatformMatch(nameText, 'name'));
+        extractTokens(rawText).forEach(token => add(findPlatformMatch(token.value, token.source)));
+
+        const platforms = [...platformMap.values()].sort((a, b) => b.confidence - a.confidence).slice(0, 3);
+        const bestPlatform = platforms[0]?.id || null;
+        const tagPool = bestPlatform && typeof getSuggestedTagsForPlatform === 'function'
+          ? getSuggestedTagsForPlatform(bestPlatform, nameText || parsed?.serviceName || '').slice(0, 24)
+          : [...(window.COMMON_PLAN_TAGS || [])];
+        const haystack = normalizeCompact(`${rawText} ${nameText}`);
+        const tags = uniqueTags(tagPool.filter(tag => {
+          const key = normalizeCompact(tag);
+          return key.length >= 3 && haystack.includes(key);
+        })).slice(0, 5);
+
+        return { platforms, tags };
+      }
+
+      function renderParsePreview(parsed) {
+        if (!parsed || (!parsed.username && !parsed.password && !parsed.twoFaCode)) {
+          els.preview.hidden = true;
+          els.preview.innerHTML = '';
+          return;
+        }
+
+        const items = [
+          ['Tài khoản', parsed.username || '—'],
+          ['Mật khẩu', parsed.password || '—'],
+          ['2FA', parsed.twoFaCode || '—'],
+        ];
+        els.preview.innerHTML = items.map(([label, value]) => `
+          <div class="quick-preview-item">
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(value)}</strong>
+          </div>
+        `).join('');
+        els.preview.hidden = false;
+      }
+
+      function syncAutoTags(nextAutoTags) {
+        const previousKeys = new Set(state.autoTags.map(normalizeText));
+        const manualTags = splitTags(els.tags.value).filter(tag => !previousKeys.has(normalizeText(tag)));
+        const tags = uniqueTags([...manualTags, ...nextAutoTags]);
+        state.autoTags = uniqueTags(nextAutoTags);
+        els.tags.value = tags.join(', ');
+      }
+
+      function renderTagSuggestions(tags) {
+        if (!tags.length) {
+          els.tagSuggestions.hidden = true;
+          els.tagSuggestions.innerHTML = '';
+          return;
+        }
+        els.tagSuggestions.innerHTML = tags.map(tag => `<span>${escapeHtml(tag)}</span>`).join('');
+        els.tagSuggestions.hidden = false;
+      }
+
+      function updateSmartState() {
+        const raw = els.raw.value;
+        const parsed = (typeof parseAccountInput === 'function' ? parseAccountInput(raw) : null) || {};
+        const nameText = els.name.value.trim();
+        const detection = detectQuickServices(raw, nameText, parsed);
+        const bestPlatform = detection.platforms[0] || null;
+        const serviceName = parsed.serviceName || '';
+        const canAutoName = !nameText || els.name.dataset.autoFilled === 'true';
+
+        state.latestParsed = parsed;
+        state.latestDetection = detection;
+        renderParsePreview(parsed);
+        renderPlatformChip(bestPlatform);
+
+        if (canAutoName) {
+          const nextName = serviceName || (bestPlatform && bestPlatform.source !== 'domain' ? bestPlatform.label : '');
+          if (nextName) {
+            els.name.value = nextName;
+            els.name.dataset.autoFilled = 'true';
+            state.autoName = nextName;
+          }
+        }
+
+        const namePlatform = typeof detectPlatform === 'function' ? detectPlatform(els.name.value) : null;
+        const smartTags = bestPlatform?.source === 'domain' && !namePlatform ? [] : detection.tags;
+        syncAutoTags(smartTags);
+        renderTagSuggestions(smartTags);
+      }
+
+      function applySmartDateInput() {
+        const result = parseSmartDateRange(els.smartDate.value);
+        if (result.purchaseDate) els.purchase.value = dateToInputValue(result.purchaseDate);
+        if (!els.lifetime.checked) els.expiry.value = result.expiryDate ? dateToInputValue(result.expiryDate) : '';
+        updateLifetimeState(false, result.label);
+      }
+
+      function updateLifetimeState(markTouched = false, label = '') {
+        if (markTouched) els.lifetime.dataset.userTouched = '1';
+        const isPersonal = els.type.value === 'personal';
+        if (!els.lifetime.dataset.userTouched) els.lifetime.checked = isPersonal;
+
+        const isLifetime = els.lifetime.checked;
+        els.smartDate.disabled = isLifetime;
+        els.expiry.disabled = isLifetime;
+        if (isLifetime) {
+          els.expiry.value = '';
+          els.datePreview.textContent = 'Không hết hạn';
+          return;
+        }
+
+        const purchaseDate = inputValueToDate(els.purchase.value);
+        const expiryDate = inputValueToDate(els.expiry.value);
+        if (!expiryDate) {
+          els.datePreview.textContent = 'Chưa có ngày hết hạn';
+          return;
+        }
+        const days = purchaseDate ? Math.round((expiryDate - purchaseDate) / 86400000) : null;
+        els.datePreview.textContent = `${formatDateVN(purchaseDate)} → ${formatDateVN(expiryDate)}${days !== null ? ` (${label || `${days} ngày`})` : ''}`;
+      }
+
+      function resetQuickForm() {
+        form.reset();
+        state.autoName = '';
+        state.autoTags = [];
+        state.latestParsed = null;
+        state.latestDetection = { platforms: [], tags: [] };
+        els.name.dataset.autoFilled = '';
+        els.lifetime.dataset.userTouched = '';
+        els.purchase.value = todayIso();
+        els.smartDate.value = '30 ngày';
+        applySmartDateInput();
+        renderParsePreview(null);
+        renderPlatformChip(null);
+        renderTagSuggestions([]);
+        setStatus('');
+        setTimeout(() => els.raw.focus(), 30);
+      }
+
+      function setStatus(message, type = '') {
+        els.status.textContent = message || '';
+        els.status.dataset.type = type;
+      }
+
+      els.raw.addEventListener('input', updateSmartState);
+      els.name.addEventListener('input', () => {
+        els.name.dataset.autoFilled = 'false';
+        updateSmartState();
+      });
+      els.tags.addEventListener('input', () => {
+        state.autoTags = state.autoTags.filter(tag => splitTags(els.tags.value).some(value => normalizeText(value) === normalizeText(tag)));
+      });
+      els.smartDate.addEventListener('input', applySmartDateInput);
+      els.type.addEventListener('change', () => updateLifetimeState(false));
+      els.lifetime.addEventListener('change', () => updateLifetimeState(true));
+      els.purchase.addEventListener('change', () => {
+        if (els.smartDate.value.trim()) applySmartDateInput();
+        else updateLifetimeState(false);
+      });
+      els.expiry.addEventListener('change', () => updateLifetimeState(false));
+
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') closeQuickAdd();
+        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') form.requestSubmit();
+      });
+
+      window.quickAddAPI?.onShown?.(() => resetQuickForm());
+      resetQuickForm();
+
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        if (!window.quickAddAPI?.saveQuickAccount) {
+          setStatus('Chỉ hoạt động trong Ting! Electron.', 'error');
+          return;
+        }
+
+        updateSmartState();
+        applySmartDateInput();
+
+        const payload = {
+          name: els.name.value.trim(),
+          rawInput: els.raw.value,
+          type: els.type.value,
+          purchaseDate: els.purchase.value,
+          expiryDate: els.expiry.value,
+          expiryQuick: els.smartDate.value,
+          isLifetime: els.lifetime.checked,
+          tagsText: els.tags.value,
+          note: els.note.value.trim(),
+        };
+        if (!payload.name) {
+          setStatus('Nhập tên dịch vụ trước.', 'error');
+          els.name.focus();
+          return;
+        }
+        if (!payload.isLifetime && !payload.expiryDate) {
+          setStatus('Chưa đọc được thời hạn.', 'error');
+          els.smartDate.focus();
+          return;
+        }
+
+        els.save.disabled = true;
+        setStatus('Đang gửi về Ting!...', 'loading');
+        try {
+          const result = await window.quickAddAPI.saveQuickAccount(payload);
+          if (result?.ok) {
+            setStatus(result.message || 'Đã lưu.', 'success');
+            setTimeout(() => {
+              resetQuickForm();
+              closeQuickAdd();
+            }, 650);
+          } else {
+            setStatus(result?.message || 'Không lưu được.', 'error');
+          }
+        } catch (error) {
+          setStatus(error?.message || 'Không lưu được.', 'error');
+        } finally {
+          els.save.disabled = false;
+        }
+      });
+    });
+  </script>
+</body>
+</html>

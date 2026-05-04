@@ -36,6 +36,9 @@ copyDir(path.join(root, 'assets'), path.join(www, 'assets'));
 const sharedScripts = [
   'utils.js',
   'parser.js',
+  'notification.js',
+  'platform-icons.js',
+  'platform-tags.js',
   'crypto.js',
   'db.js',
   'auth.js',

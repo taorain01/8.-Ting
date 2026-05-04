@@ -1,5 +1,5 @@
 /* Ting! — Firebase Configuration
-   Dùng Firebase CDN (compat) cho vanilla JS, không cần bundler */
+   Load Firebase CDN after the static UI can paint. */
 
 // Firebase config từ console
 const firebaseConfig = {
@@ -12,19 +12,77 @@ const firebaseConfig = {
     measurementId: "G-XSR0BP3M40"
 };
 
-// Khởi tạo Firebase
-firebase.initializeApp(firebaseConfig);
+let auth = null;
+let db = null;
 
-// Khởi tạo các service
-const auth = firebase.auth();
-const db = firebase.firestore();
+function loadFirebaseScript(src) {
+    return new Promise((resolve, reject) => {
+        if (src.includes('firebase-app-compat') && window.firebase?.initializeApp) {
+            resolve();
+            return;
+        }
+        if (src.includes('firebase-auth-compat') && window.firebase?.auth) {
+            resolve();
+            return;
+        }
+        if (src.includes('firebase-firestore-compat') && window.firebase?.firestore) {
+            resolve();
+            return;
+        }
 
-// Bật offline persistence cho Firestore
-db.enablePersistence({ synchronizeTabs: true }).catch(err => {
-    console.warn('Firestore offline persistence không khả dụng:', err.code);
+        const existing = document.querySelector(`script[src="${src}"]`);
+        if (existing?.dataset.loaded === 'true') {
+            resolve();
+            return;
+        }
+        const script = existing || document.createElement('script');
+        script.src = src;
+        script.async = true;
+        script.onload = () => {
+            script.dataset.loaded = 'true';
+            resolve();
+        };
+        script.onerror = () => reject(new Error(`Không tải được ${src}`));
+        if (!existing) document.head.appendChild(script);
+    });
+}
+
+async function initFirebase() {
+    if (typeof updateSplashStatus === 'function') updateSplashStatus('Đang tải Firebase...');
+    await loadFirebaseScript('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js');
+    if (typeof updateSplashStatus === 'function') updateSplashStatus('Đang tải Auth...');
+    await loadFirebaseScript('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js');
+    if (typeof updateSplashStatus === 'function') updateSplashStatus('Đang tải Firestore...');
+    await loadFirebaseScript('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js');
+
+    if (!firebase.apps?.length) {
+        firebase.initializeApp(firebaseConfig);
+    }
+
+    auth = firebase.auth();
+    db = firebase.firestore();
+
+    // Bật offline persistence cho Firestore
+    db.enablePersistence({ synchronizeTabs: true }).catch(err => {
+        console.warn('Firestore offline persistence không khả dụng:', err.code);
+    });
+
+    // Persistent login — giữ đăng nhập khi đóng tab
+    try {
+        await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+    } catch (error) {
+        console.warn('Không thiết lập được persistent login:', error);
+    }
+
+    console.log('✅ Firebase đã khởi tạo — project: ting-d2c78');
+    return { auth, db, firebase };
+}
+
+window.firebaseReady = initFirebase().catch(error => {
+    console.error('❌ Lỗi khởi tạo Firebase:', error);
+    throw error;
 });
 
-// Persistent login — giữ đăng nhập khi đóng tab
-auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-
-console.log('✅ Firebase đã khởi tạo — project: ting-d2c78');
+function waitForFirebase() {
+    return window.firebaseReady;
+}

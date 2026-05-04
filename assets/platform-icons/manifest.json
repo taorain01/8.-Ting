@@ -1,0 +1,574 @@
+{
+  "source": "Simple Icons via jsDelivr",
+  "sourceUrl": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/",
+  "generatedAt": "2026-04-27T17:53:57.173Z",
+  "icons": {
+    "netflix": {
+      "label": "Netflix",
+      "color": "#E50914",
+      "file": "netflix.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/netflix.svg",
+      "fallback": false
+    },
+    "spotify": {
+      "label": "Spotify",
+      "color": "#1DB954",
+      "file": "spotify.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/spotify.svg",
+      "fallback": false
+    },
+    "youtube": {
+      "label": "YouTube",
+      "color": "#FF0000",
+      "file": "youtube.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/youtube.svg",
+      "fallback": false
+    },
+    "disneyplus": {
+      "label": "Disney+",
+      "color": "#113CCF",
+      "file": "disneyplus.svg",
+      "source": "generated fallback",
+      "fallback": true
+    },
+    "primevideo": {
+      "label": "Prime Video",
+      "color": "#00A8E1",
+      "file": "primevideo.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/primevideo.svg",
+      "fallback": false
+    },
+    "hulu": {
+      "label": "Hulu",
+      "color": "#1CE783",
+      "file": "hulu.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/hulu.svg",
+      "fallback": false
+    },
+    "appletv": {
+      "label": "Apple TV",
+      "color": "#000000",
+      "file": "appletv.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/appletv.svg",
+      "fallback": false
+    },
+    "twitch": {
+      "label": "Twitch",
+      "color": "#9146FF",
+      "file": "twitch.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/twitch.svg",
+      "fallback": false
+    },
+    "tiktok": {
+      "label": "TikTok",
+      "color": "#000000",
+      "file": "tiktok.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/tiktok.svg",
+      "fallback": false
+    },
+    "instagram": {
+      "label": "Instagram",
+      "color": "#E4405F",
+      "file": "instagram.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/instagram.svg",
+      "fallback": false
+    },
+    "facebook": {
+      "label": "Facebook",
+      "color": "#0866FF",
+      "file": "facebook.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/facebook.svg",
+      "fallback": false
+    },
+    "x": {
+      "label": "X",
+      "color": "#000000",
+      "file": "x.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/x.svg",
+      "fallback": false
+    },
+    "telegram": {
+      "label": "Telegram",
+      "color": "#26A5E4",
+      "file": "telegram.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/telegram.svg",
+      "fallback": false
+    },
+    "whatsapp": {
+      "label": "WhatsApp",
+      "color": "#25D366",
+      "file": "whatsapp.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/whatsapp.svg",
+      "fallback": false
+    },
+    "discord": {
+      "label": "Discord",
+      "color": "#5865F2",
+      "file": "discord.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/discord.svg",
+      "fallback": false
+    },
+    "reddit": {
+      "label": "Reddit",
+      "color": "#FF4500",
+      "file": "reddit.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/reddit.svg",
+      "fallback": false
+    },
+    "linkedin": {
+      "label": "LinkedIn",
+      "color": "#0A66C2",
+      "file": "linkedin.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/linkedin.svg",
+      "fallback": false
+    },
+    "pinterest": {
+      "label": "Pinterest",
+      "color": "#BD081C",
+      "file": "pinterest.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/pinterest.svg",
+      "fallback": false
+    },
+    "canva": {
+      "label": "Canva",
+      "color": "#00C4CC",
+      "file": "canva.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/canva.svg",
+      "fallback": false
+    },
+    "capcut": {
+      "label": "CapCut",
+      "color": "#000000",
+      "file": "capcut.svg",
+      "source": "generated fallback",
+      "fallback": true
+    },
+    "adobe": {
+      "label": "Adobe",
+      "color": "#FF0000",
+      "file": "adobe.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/adobe.svg",
+      "fallback": false
+    },
+    "figma": {
+      "label": "Figma",
+      "color": "#F24E1E",
+      "file": "figma.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/figma.svg",
+      "fallback": false
+    },
+    "notion": {
+      "label": "Notion",
+      "color": "#000000",
+      "file": "notion.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/notion.svg",
+      "fallback": false
+    },
+    "zoom": {
+      "label": "Zoom",
+      "color": "#0B5CFF",
+      "file": "zoom.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/zoom.svg",
+      "fallback": false
+    },
+    "slack": {
+      "label": "Slack",
+      "color": "#4A154B",
+      "file": "slack.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/slack.svg",
+      "fallback": false
+    },
+    "trello": {
+      "label": "Trello",
+      "color": "#0052CC",
+      "file": "trello.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/trello.svg",
+      "fallback": false
+    },
+    "dropbox": {
+      "label": "Dropbox",
+      "color": "#0061FF",
+      "file": "dropbox.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/dropbox.svg",
+      "fallback": false
+    },
+    "googledrive": {
+      "label": "Google Drive",
+      "color": "#1A73E8",
+      "file": "googledrive.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/googledrive.svg",
+      "fallback": false
+    },
+    "gmail": {
+      "label": "Gmail",
+      "color": "#EA4335",
+      "file": "gmail.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/gmail.svg",
+      "fallback": false
+    },
+    "google": {
+      "label": "Google",
+      "color": "#4285F4",
+      "file": "google.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/google.svg",
+      "fallback": false
+    },
+    "microsoft": {
+      "label": "Microsoft",
+      "color": "#5E5E5E",
+      "file": "microsoft.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/microsoft.svg",
+      "fallback": false
+    },
+    "office365": {
+      "label": "Microsoft 365",
+      "color": "#D83B01",
+      "file": "office365.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/microsoftoffice.svg",
+      "fallback": false
+    },
+    "apple": {
+      "label": "Apple",
+      "color": "#000000",
+      "file": "apple.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/apple.svg",
+      "fallback": false
+    },
+    "github": {
+      "label": "GitHub",
+      "color": "#181717",
+      "file": "github.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/github.svg",
+      "fallback": false
+    },
+    "gitlab": {
+      "label": "GitLab",
+      "color": "#FC6D26",
+      "file": "gitlab.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/gitlab.svg",
+      "fallback": false
+    },
+    "bitbucket": {
+      "label": "Bitbucket",
+      "color": "#0052CC",
+      "file": "bitbucket.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/bitbucket.svg",
+      "fallback": false
+    },
+    "wordpress": {
+      "label": "WordPress",
+      "color": "#21759B",
+      "file": "wordpress.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/wordpress.svg",
+      "fallback": false
+    },
+    "shopify": {
+      "label": "Shopify",
+      "color": "#7AB55C",
+      "file": "shopify.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/shopify.svg",
+      "fallback": false
+    },
+    "paypal": {
+      "label": "PayPal",
+      "color": "#003087",
+      "file": "paypal.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/paypal.svg",
+      "fallback": false
+    },
+    "stripe": {
+      "label": "Stripe",
+      "color": "#635BFF",
+      "file": "stripe.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/stripe.svg",
+      "fallback": false
+    },
+    "cloudflare": {
+      "label": "Cloudflare",
+      "color": "#F38020",
+      "file": "cloudflare.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/cloudflare.svg",
+      "fallback": false
+    },
+    "vercel": {
+      "label": "Vercel",
+      "color": "#000000",
+      "file": "vercel.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/vercel.svg",
+      "fallback": false
+    },
+    "netlify": {
+      "label": "Netlify",
+      "color": "#00C7B7",
+      "file": "netlify.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/netlify.svg",
+      "fallback": false
+    },
+    "openai": {
+      "label": "ChatGPT / OpenAI",
+      "color": "#10A37F",
+      "file": "openai.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/openai.svg",
+      "fallback": false
+    },
+    "anthropic": {
+      "label": "Anthropic",
+      "color": "#191919",
+      "file": "anthropic.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/anthropic.svg",
+      "fallback": false
+    },
+    "claude": {
+      "label": "Claude",
+      "color": "#D97757",
+      "file": "claude.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/claude.svg",
+      "fallback": false
+    },
+    "google-ai": {
+      "label": "Gemini",
+      "color": "#4285F4",
+      "file": "google-ai.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/googlegemini.svg",
+      "fallback": false
+    },
+    "perplexity": {
+      "label": "Perplexity",
+      "color": "#1FB8CD",
+      "file": "perplexity.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/perplexity.svg",
+      "fallback": false
+    },
+    "cursor": {
+      "label": "Cursor",
+      "color": "#000000",
+      "file": "cursor.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/cursor.svg",
+      "fallback": false
+    },
+    "replit": {
+      "label": "Replit",
+      "color": "#F26207",
+      "file": "replit.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/replit.svg",
+      "fallback": false
+    },
+    "huggingface": {
+      "label": "Hugging Face",
+      "color": "#FFD21E",
+      "file": "huggingface.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/huggingface.svg",
+      "fallback": false
+    },
+    "midjourney": {
+      "label": "Midjourney",
+      "color": "#000000",
+      "file": "midjourney.svg",
+      "source": "generated fallback",
+      "fallback": true
+    },
+    "suno": {
+      "label": "Suno",
+      "color": "#6C5CE7",
+      "file": "suno.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/suno.svg",
+      "fallback": false
+    },
+    "stabilityai": {
+      "label": "Stability AI",
+      "color": "#000000",
+      "file": "stabilityai.svg",
+      "source": "generated fallback",
+      "fallback": true
+    },
+    "ollama": {
+      "label": "Ollama",
+      "color": "#000000",
+      "file": "ollama.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/ollama.svg",
+      "fallback": false
+    },
+    "deepseek": {
+      "label": "DeepSeek",
+      "color": "#4D6BFE",
+      "file": "deepseek.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/deepseek.svg",
+      "fallback": false
+    },
+    "mistralai": {
+      "label": "Mistral AI",
+      "color": "#FA520F",
+      "file": "mistralai.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/mistralai.svg",
+      "fallback": false
+    },
+    "elevenlabs": {
+      "label": "ElevenLabs",
+      "color": "#000000",
+      "file": "elevenlabs.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/elevenlabs.svg",
+      "fallback": false
+    },
+    "replicate": {
+      "label": "Replicate",
+      "color": "#000000",
+      "file": "replicate.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/replicate.svg",
+      "fallback": false
+    },
+    "poe": {
+      "label": "Poe",
+      "color": "#5D5CDE",
+      "file": "poe.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/poe.svg",
+      "fallback": false
+    },
+    "deepl": {
+      "label": "DeepL",
+      "color": "#0F2B46",
+      "file": "deepl.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/deepl.svg",
+      "fallback": false
+    },
+    "grammarly": {
+      "label": "Grammarly",
+      "color": "#15C39A",
+      "file": "grammarly.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/grammarly.svg",
+      "fallback": false
+    },
+    "zapier": {
+      "label": "Zapier",
+      "color": "#FF4A00",
+      "file": "zapier.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/zapier.svg",
+      "fallback": false
+    },
+    "make": {
+      "label": "Make",
+      "color": "#6D00CC",
+      "file": "make.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/make.svg",
+      "fallback": false
+    },
+    "n8n": {
+      "label": "n8n",
+      "color": "#EA4B71",
+      "file": "n8n.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/n8n.svg",
+      "fallback": false
+    },
+    "todoist": {
+      "label": "Todoist",
+      "color": "#E44332",
+      "file": "todoist.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/todoist.svg",
+      "fallback": false
+    },
+    "1password": {
+      "label": "1Password",
+      "color": "#3B66BC",
+      "file": "1password.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/1password.svg",
+      "fallback": false
+    },
+    "lastpass": {
+      "label": "LastPass",
+      "color": "#D32D27",
+      "file": "lastpass.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/lastpass.svg",
+      "fallback": false
+    },
+    "proton": {
+      "label": "Proton",
+      "color": "#6D4AFF",
+      "file": "proton.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/proton.svg",
+      "fallback": false
+    },
+    "protonmail": {
+      "label": "Proton Mail",
+      "color": "#6D4AFF",
+      "file": "protonmail.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/protonmail.svg",
+      "fallback": false
+    },
+    "coursera": {
+      "label": "Coursera",
+      "color": "#0056D2",
+      "file": "coursera.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/coursera.svg",
+      "fallback": false
+    },
+    "udemy": {
+      "label": "Udemy",
+      "color": "#A435F0",
+      "file": "udemy.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/udemy.svg",
+      "fallback": false
+    },
+    "duolingo": {
+      "label": "Duolingo",
+      "color": "#58CC02",
+      "file": "duolingo.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/duolingo.svg",
+      "fallback": false
+    },
+    "linear": {
+      "label": "Linear",
+      "color": "#5E6AD2",
+      "file": "linear.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/linear.svg",
+      "fallback": false
+    },
+    "asana": {
+      "label": "Asana",
+      "color": "#F06A6A",
+      "file": "asana.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/asana.svg",
+      "fallback": false
+    },
+    "airtable": {
+      "label": "Airtable",
+      "color": "#18BFFF",
+      "file": "airtable.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/airtable.svg",
+      "fallback": false
+    },
+    "miro": {
+      "label": "Miro",
+      "color": "#050038",
+      "file": "miro.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/miro.svg",
+      "fallback": false
+    },
+    "firebase": {
+      "label": "Firebase",
+      "color": "#DD2C00",
+      "file": "firebase.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/firebase.svg",
+      "fallback": false
+    },
+    "googlecloud": {
+      "label": "Google Cloud",
+      "color": "#4285F4",
+      "file": "googlecloud.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/googlecloud.svg",
+      "fallback": false
+    },
+    "mongodb": {
+      "label": "MongoDB",
+      "color": "#47A248",
+      "file": "mongodb.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/mongodb.svg",
+      "fallback": false
+    },
+    "supabase": {
+      "label": "Supabase",
+      "color": "#3FCF8E",
+      "file": "supabase.svg",
+      "source": "https://cdn.jsdelivr.net/npm/simple-icons@16.16.0/icons/supabase.svg",
+      "fallback": false
+    }
+  }
+}
