@@ -44,6 +44,30 @@ function Save-ResizedPng([System.Drawing.Image]$Source, [string]$Target, [int]$S
     }
 }
 
+# Draws the source centered at $Scale of the canvas on a transparent background.
+# Used for adaptive icon foreground so the logo stays inside Android's safe zone
+# (the outer ~25% of an adaptive icon can be clipped by the launcher mask).
+function Save-InsetPng([System.Drawing.Image]$Source, [string]$Target, [int]$Size, [double]$Scale) {
+    Ensure-Dir (Split-Path -Parent $Target)
+    $bitmap = New-TransparentBitmap $Size $Size
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.Clear([System.Drawing.Color]::Transparent)
+        $graphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceOver
+        $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+        $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+        $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        $inner = [int][math]::Round($Size * $Scale)
+        $offset = [int][math]::Round(($Size - $inner) / 2)
+        $graphics.DrawImage($Source, $offset, $offset, $inner, $inner)
+        $bitmap.Save($Target, [System.Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+        $graphics.Dispose()
+        $bitmap.Dispose()
+    }
+}
+
 function Write-TextFile([string]$Target, [string]$Content) {
     Ensure-Dir (Split-Path -Parent $Target)
     [System.IO.File]::WriteAllText($Target, $Content, [System.Text.UTF8Encoding]::new($false))
@@ -130,13 +154,13 @@ try {
         'mipmap-xxxhdpi' = 432
     }
     foreach ($bucket in $foreground.Keys) {
-        Save-ResizedPng $source (Join-Path (Join-Path $androidRes $bucket) 'ic_launcher_foreground.png') $foreground[$bucket]
+        Save-InsetPng $source (Join-Path (Join-Path $androidRes $bucket) 'ic_launcher_foreground.png') $foreground[$bucket] 0.76
     }
 
     Write-TextFile (Join-Path $androidRes 'values/ic_launcher_background.xml') @'
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#00000000</color>
+    <color name="ic_launcher_background">#FFFFFFFF</color>
 </resources>
 '@
 

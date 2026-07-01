@@ -13,8 +13,8 @@
     "dist:win": "npm run icons:sync && electron-builder --win --x64 && node scripts/keep-single-installer.js",
     "dist:unpacked": "npm run icons:sync && electron-builder --win --x64 --dir",
     "prepare:android-web": "node scripts/prepare-android-web.js",
-    "android:add": "npm run prepare:android-web && npx cap add android && npm run icons:sync",
-    "android:sync": "npm run prepare:android-web && npx cap sync android && npm run icons:sync",
+    "android:add": "npm run prepare:android-web && npx cap add android && node scripts/patch-android-back-button.cjs && npm run icons:sync",
+    "android:sync": "npm run prepare:android-web && npx cap sync android && node scripts/patch-android-back-button.cjs && npm run icons:sync",
     "android:open": "npm run android:sync && npx cap open android",
     "android:build:debug": "node scripts/build-android-debug.cjs"
   },

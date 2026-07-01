@@ -41,7 +41,15 @@ window.appState = {
 };
 
 // ===== INIT =====
+function bootstrapInitialAppShell() {
+    window.appState.authChecking = true;
+    if (typeof showAppShell === 'function') showAppShell();
+    updateHeader?.();
+    navigateTo('dashboard');
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+    bootstrapInitialAppShell();
     // Lắng nghe trạng thái đăng nhập Firebase
     setupAuthListener();
     document.getElementById('auth-password')?.addEventListener('input', e => updatePasswordStrength(e.target.value));
@@ -405,6 +413,92 @@ function openExternalLink(url) {
     window.open(url, '_blank', 'noopener,noreferrer');
 }
 
+// ===== TOTP LIVE WIDGET (2FA) =====
+function stopTotpTicker() {
+    if (window.tingTotpInterval) {
+        clearInterval(window.tingTotpInterval);
+        window.tingTotpInterval = null;
+    }
+    window.tingTotpSecret = null;
+}
+
+async function refreshTotpWidget() {
+    const codeEl = document.getElementById('totp-code');
+    const secret = window.tingTotpSecret;
+    if (!codeEl || !secret) { stopTotpTicker(); return; }
+    if (typeof generateTOTP !== 'function') return;
+    const code = await generateTOTP(secret);
+    if (!code) { codeEl.textContent = '------'; return; }
+    codeEl.textContent = code.replace(/(\d{3})(\d{3})/, '$1 $2');
+    const remain = typeof totpTimeRemaining === 'function' ? totpTimeRemaining(30) : 30;
+    const countEl = document.getElementById('totp-count');
+    const barEl = document.getElementById('totp-bar');
+    if (countEl) countEl.textContent = `${remain}s`;
+    if (barEl) barEl.style.width = `${Math.round((remain / 30) * 100)}%`;
+}
+
+function startTotpTicker(secret) {
+    stopTotpTicker();
+    if (!secret) return;
+    window.tingTotpSecret = secret;
+    refreshTotpWidget();
+    window.tingTotpInterval = setInterval(refreshTotpWidget, 1000);
+}
+
+async function copyTotpCode() {
+    const secret = window.tingTotpSecret;
+    if (!secret || typeof generateTOTP !== 'function') return;
+    const code = await generateTOTP(secret);
+    if (code) await copyToClipboard(code, 'mã 2FA');
+}
+
+async function openWeb2FA(secret) {
+    if (secret) {
+        try { await copyToClipboard(secret, 'key 2FA'); } catch (_) {}
+        showToast('Đã copy key 2FA, dán vào trang web để lấy mã', 'success');
+    }
+    openExternalLink('https://2fa.live/');
+}
+
+// Ghi nhớ tài khoản vừa thêm để hiện nổi bật ở đầu Tổng quan
+function markAccountAsJustAdded(id) {
+    if (!id) return;
+    window.appState.justAddedAccountId = id;
+    window.appState.justAddedAt = Date.now();
+}
+
+function dismissJustAddedAccount() {
+    window.appState.justAddedAccountId = null;
+    window.appState.justAddedAt = null;
+    if (window.appState.currentPage === 'dashboard' && typeof renderDashboard === 'function') renderDashboard();
+}
+
+// Đánh dấu tài khoản hết hạn ngay lập tức
+async function markAccountExpired(id) {
+    const acc = (window.appState.accounts || []).find(a => a.id === id);
+    if (!acc) return;
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const expiryDate = typeof dateToInputValue === 'function'
+        ? dateToInputValue(yesterday)
+        : yesterday.toISOString().split('T')[0];
+    const update = { expiryDate, expiryType: 'fixed', status: 'expired' };
+    if (window.appState.isDemo) {
+        Object.assign(acc, update);
+        updateHeader();
+        showToast('Đã đánh dấu hết hạn', 'success');
+        if (window.appState.currentPage === 'detail') renderDetail(id);
+        else rerenderCurrentView?.(id);
+        return;
+    }
+    if (await updateAccountInDB(id, update)) {
+        Object.assign(acc, update);
+        showToast('Đã đánh dấu hết hạn', 'success');
+        if (window.appState.currentPage === 'detail') renderDetail(id);
+        else rerenderCurrentView?.(id);
+    }
+}
+
 async function copyNoteSegment(text) {
     if (!text) return;
     await copyToClipboard(text, 'mã');
@@ -498,6 +592,8 @@ function collectEditedAccountInput(acc) {
         note: document.getElementById('add-note')?.value || '',
         sellerName: document.getElementById('add-seller-name')?.value || '',
         sellerPlatform: document.getElementById('add-seller-platform')?.value || 'other',
+        sellerLink: document.getElementById('add-seller-link')?.value || '',
+        purchasePrice: document.getElementById('add-price')?.value || '',
         tags: getAddTags(),
         categoryIds: getSelectedCategoryIdsFromForm(),
         protectedByMasterPassword: acc.protectedByMasterPassword === true || acc.type === 'personal',
@@ -701,6 +797,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initConnectivityStatus();
     renderOfflineBanner();
     schedulePeriodicCheck();
+    initHardwareBackButton();
     setTimeout(async () => {
         await ensureNotificationPermissionOnStartup?.();
         await startBackgroundNotificationCheck?.();
@@ -716,6 +813,7 @@ function navigateTo(page) {
     window.appState.currentTagFilter = '';
     window.appState.currentPlatformFilter = '';
     window.appState.searchQuery = '';
+    resetBackExitPrompt();
 
     const navPage = (page === 'categories' || page === 'trash' || page.startsWith('category:')) ? 'settings' : page;
     document.querySelectorAll('.nav-item').forEach(item => {
@@ -849,6 +947,119 @@ function rerenderCurrentView(accountId) {
     else if (page === 'categories') renderCategoriesPage();
     else if (page.startsWith('category:')) renderCategoryDetail(page.slice('category:'.length));
 }
+
+function resetBackExitPrompt() {
+    window.appState.lastBackExitPromptAt = 0;
+}
+
+function initHardwareBackButton() {
+    window.handleTingAndroidBackButton = handleTingAndroidBackButton;
+    if (window.appState.hardwareBackButtonReady) return;
+    window.appState.hardwareBackButtonReady = true;
+
+    document.addEventListener('backbutton', event => {
+        event.preventDefault();
+        if (handleTingAndroidBackButton() === 'exit') exitAppFromWebBackButton();
+    }, false);
+}
+
+function handleTingAndroidBackButton() {
+    if (closeTransientUiFromBackButton()) {
+        resetBackExitPrompt();
+        return 'handled';
+    }
+    if (navigateBackFromHardwareButton()) {
+        resetBackExitPrompt();
+        return 'handled';
+    }
+    return promptBackButtonExit();
+}
+
+function closeTransientUiFromBackButton() {
+    const platformPicker = document.getElementById('platform-picker-popover');
+    if (platformPicker && !platformPicker.hidden) {
+        closePlatformPicker?.();
+        return true;
+    }
+
+    const notificationPanel = document.getElementById('notification-dropdown');
+    if (notificationPanel && !notificationPanel.hidden) {
+        notificationPanel.hidden = true;
+        notificationPanel.classList.remove('open');
+        return true;
+    }
+
+    if (document.querySelector('.quick-platform-filter.open')) {
+        closeQuickPlatformFilter?.();
+        return true;
+    }
+
+    const masterOverlay = document.getElementById('master-pw-overlay');
+    if (masterOverlay?.classList.contains('open') && masterOverlay.style.display !== 'none') {
+        cancelMasterPasswordDialog?.();
+        return true;
+    }
+
+    const modalOverlay = document.getElementById('modal-overlay');
+    if (modalOverlay?.classList.contains('open')) {
+        closeModal?.();
+        return true;
+    }
+
+    return closeSearchBarFromBackButton();
+}
+
+function closeSearchBarFromBackButton() {
+    const bar = document.getElementById('search-bar');
+    if (!bar || bar.classList.contains('hidden')) return false;
+
+    const input = document.getElementById('search-input');
+    const hadQuery = Boolean((input?.value || '').trim() || window.appState.searchQuery);
+    bar.classList.add('hidden');
+    if (input) input.value = '';
+    window.appState.searchQuery = '';
+    closeQuickPlatformFilter?.();
+    if (hadQuery) rerenderCurrentView();
+    return true;
+}
+
+function navigateBackFromHardwareButton() {
+    const page = window.appState.currentPage || 'dashboard';
+    if (page === 'dashboard') return false;
+
+    const previousPage = window.appState.previousPage;
+    let targetPage = 'dashboard';
+    if (page === 'detail') targetPage = previousPage && previousPage !== 'detail' ? previousPage : 'dashboard';
+    else if (page === 'categories' || page === 'trash') targetPage = 'settings';
+    else if (page.startsWith('category:')) targetPage = 'categories';
+
+    navigateTo(targetPage);
+    return true;
+}
+
+function promptBackButtonExit() {
+    const now = Date.now();
+    const lastPromptAt = Number(window.appState.lastBackExitPromptAt || 0);
+    if (now - lastPromptAt <= 2000) {
+        resetBackExitPrompt();
+        return 'exit';
+    }
+
+    window.appState.lastBackExitPromptAt = now;
+    if (typeof showToast === 'function') showToast('Bấm trở về lần nữa để thoát app', 'error');
+    return 'handled';
+}
+
+function exitAppFromWebBackButton() {
+    const appPlugin = window.Capacitor?.Plugins?.App;
+    if (appPlugin?.exitApp) {
+        appPlugin.exitApp();
+        return;
+    }
+    navigator.app?.exitApp?.();
+}
+
+window.handleTingAndroidBackButton = handleTingAndroidBackButton;
 
 function initConnectivityStatus() {
     window.appState.isOnline = typeof navigator === 'undefined' ? true : navigator.onLine !== false;
@@ -1874,9 +2085,45 @@ function previewParse() {
     const r = parseAccountInput(raw);
     const el = document.getElementById('parse-preview');
     syncDetectedServicesFromPaste(raw);
+    syncSellerFromPaste(raw);
     if (!el) return;
     if (!r || (!r.username && !r.password)) { el.innerHTML = ''; return; }
     el.innerHTML = `<div class="parse-preview"><div class="parse-preview-item"><span class="parse-preview-label">Tài khoản</span><span class="parse-preview-value">${r.username || '—'}</span></div><div class="parse-preview-item"><span class="parse-preview-label">Mật khẩu</span><span class="parse-preview-value">${r.password || '—'}</span></div>${r.twoFaCode ? `<div class="parse-preview-item"><span class="parse-preview-label">2FA</span><span class="parse-preview-value">${r.twoFaCode}</span></div>` : ''}</div>`;
+}
+
+// Tự nhận diện người bán / nguồn từ link dán vào ô "Dán thông tin tài khoản"
+function syncSellerFromPaste(rawText) {
+    if (typeof detectSellerFromText !== 'function') return;
+    const seller = detectSellerFromText(rawText);
+    const nameInput = document.getElementById('add-seller-name');
+    const linkInput = document.getElementById('add-seller-link');
+    const hint = document.getElementById('seller-link-hint');
+    if (!nameInput) return;
+
+    if (!seller) {
+        if (window.appState.addFormSellerAutoFilled && nameInput.dataset.sellerAuto === 'true') {
+            nameInput.value = '';
+            nameInput.dataset.sellerAuto = 'false';
+            if (linkInput) linkInput.value = '';
+            if (hint) { hint.hidden = true; hint.innerHTML = ''; }
+            window.appState.addFormSellerAutoFilled = false;
+            if (typeof selectSellerPlatform === 'function') selectSellerPlatform('other');
+        }
+        return;
+    }
+
+    const canFillName = !nameInput.value.trim() || nameInput.dataset.sellerAuto === 'true';
+    if (canFillName) {
+        nameInput.value = seller.name;
+        nameInput.dataset.sellerAuto = 'true';
+    }
+    if (linkInput) linkInput.value = seller.url;
+    if (typeof selectSellerPlatform === 'function') selectSellerPlatform(seller.platform);
+    if (hint && typeof renderSellerLinkHint === 'function') {
+        hint.innerHTML = renderSellerLinkHint(seller.url);
+        hint.hidden = false;
+    }
+    window.appState.addFormSellerAutoFilled = true;
 }
 
 function getPlatformPickerLabel(platform, fallback = '') {
@@ -2743,6 +2990,8 @@ function buildAccountSaveInput(input = {}) {
             platform,
             sellerName: String(input.sellerName || '').trim(),
             sellerPlatform: input.sellerPlatform || 'other',
+            sellerLink: String(input.sellerLink || '').trim(),
+            purchasePrice: (typeof parsePriceValue === 'function' ? parsePriceValue(input.purchasePrice) : (input.purchasePrice || null)) ?? null,
             displayUsername: maskUsername(sensitiveData.username),
             purchaseDate,
             expiryDate: expiryDate || null,
@@ -2839,6 +3088,8 @@ async function saveNewAccount(type) {
     const note = autoTagNoteLinks(document.getElementById('add-note').value.trim());
     const sellerName = document.getElementById('add-seller-name')?.value.trim() || '';
     const sellerPlatform = document.getElementById('add-seller-platform')?.value || 'other';
+    const sellerLink = document.getElementById('add-seller-link')?.value.trim() || '';
+    const purchasePrice = typeof parsePriceValue === 'function' ? parsePriceValue(document.getElementById('add-price')?.value) : null;
     const tags = typeof normalizeTags === 'function' ? normalizeTags([...getAddTags(), ...smartName.tags]) : [...getAddTags(), ...smartName.tags];
     const categoryIds = getSelectedCategoryIdsFromForm();
     const notificationSettings = typeof getNotificationSettings === 'function' ? getNotificationSettings() : { daysBefore: [5, 3, 1] };
@@ -2856,6 +3107,8 @@ async function saveNewAccount(type) {
         platform: smartName.platform || getCurrentAddPlatform() || detectPlatform(name),
         sellerName,
         sellerPlatform: sellerPlatform || 'other',
+        sellerLink,
+        purchasePrice: purchasePrice ?? null,
         displayUsername: maskUsername(sensitiveData.username),
         purchaseDate: pDate,
         expiryDate: eDate || null,
@@ -2880,6 +3133,7 @@ async function saveNewAccount(type) {
         const data = { ...baseData, ...sensitiveData };
         data.id = 'demo_' + Date.now();
         window.appState.accounts.unshift(data);
+        if (typeof markAccountAsJustAdded === 'function') markAccountAsJustAdded(data.id);
         updateHeader();
         closeModal();
         showToast(`Đã thêm "${name}"`, 'success');
@@ -2894,7 +3148,7 @@ async function saveNewAccount(type) {
                 payload = { ...baseData, ...encryptedPayload };
             }
             const id = await addAccountToDB(payload);
-            if (id) { closeModal(); showToast(`Đã thêm "${name}"`, 'success'); }
+            if (id) { if (typeof markAccountAsJustAdded === 'function') markAccountAsJustAdded(id); closeModal(); showToast(`Đã thêm "${name}"`, 'success'); }
         } catch (error) {
             console.error('❌ Lỗi mã hoá/lưu tài khoản:', error);
             showToast(error.message || 'Không thể mã hoá tài khoản', 'error');

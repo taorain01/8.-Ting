@@ -14,6 +14,8 @@ pc-test-server.out.log
 
 # Build output
 DongGoi/dist-electron/
+14. MyPlugin/dist/
+14. MyPlugin/*.exe
 .ting-test-user-data/
 tmp_icon_check/
 www/

@@ -518,3 +518,40 @@ function renderSmartNote(note) {
 
     return `<div class="smart-note">${rows}</div>`;
 }
+
+
+// ===== GIÁ MUA / TIỀN TỆ =====
+function parsePriceValue(value) {
+    if (value === null || value === undefined) return null;
+    const digits = String(value).replace(/[^\d]/g, '');
+    if (!digits) return null;
+    const num = Number(digits);
+    return Number.isFinite(num) && num > 0 ? num : null;
+}
+
+function formatPriceInput(value) {
+    const num = parsePriceValue(value);
+    if (num === null) return '';
+    return num.toLocaleString('vi-VN');
+}
+
+function formatPriceVN(value) {
+    const num = parsePriceValue(value);
+    if (num === null) return '';
+    return `${num.toLocaleString('vi-VN')} ₫`;
+}
+
+// Định dạng trực tiếp trong ô input khi người dùng gõ
+function formatPriceField(input) {
+    if (!input) return;
+    const raw = String(input.value || '');
+    const digits = raw.replace(/[^\d]/g, '');
+    input.value = digits ? Number(digits).toLocaleString('vi-VN') : '';
+}
+
+if (typeof window !== 'undefined') {
+    window.parsePriceValue = parsePriceValue;
+    window.formatPriceInput = formatPriceInput;
+    window.formatPriceVN = formatPriceVN;
+    window.formatPriceField = formatPriceField;
+}

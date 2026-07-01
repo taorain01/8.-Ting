@@ -881,9 +881,11 @@ async function setupAuthListener() {
     } catch (error) {
         console.error('❌ Không thể tải Firebase:', error);
         updateSplashStatus('Lỗi kết nối — thử chế độ Demo');
+        if (window.appState) window.appState.authChecking = false;
         if (typeof showToast === 'function') {
             showToast('Không tải được Firebase. Bạn vẫn có thể dùng chế độ Demo.', 'error');
         }
+        showAuthScreen();
         hideSplash();
         return;
     }
@@ -951,6 +953,7 @@ async function handleAuthenticatedUser(user) {
     });
     clearAuthNotice();
     updateSplashStatus(`Xin chào, ${user.displayName || user.email}!`);
+    window.appState.authChecking = false;
     window.appState.isLoggedIn = true;
     window.appState.masterUnlocked = false;
     window.appState.masterPassword = null;
@@ -983,6 +986,7 @@ async function handleAuthenticatedUser(user) {
 
 function handleUnverifiedEmailUser(user) {
     resetAppSessionState();
+    window.appState.authChecking = false;
     switchAuthFormToLogin();
     setAuthEmailInput(user.email || '');
     window.appState.user = {
@@ -1000,6 +1004,7 @@ function handleUnverifiedEmailUser(user) {
 function handleSignedOutUser() {
     stopBackgroundNotificationCheck?.();
     resetAppSessionState();
+    window.appState.authChecking = false;
     pendingGoogleLinkCredential = null;
     pendingGoogleLinkEmail = '';
     updateEmailVerificationBanner(null);

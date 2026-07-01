@@ -104,6 +104,7 @@ fs.writeFileSync(path.join(androidDir, 'local.properties'), localProperties);
 run(process.execPath, [path.join('scripts', 'prepare-android-web.js')], { env });
 
 run(process.execPath, [path.join('node_modules', '@capacitor', 'cli', 'bin', 'capacitor'), 'sync', 'android'], { env });
+run(process.execPath, [path.join('scripts', 'patch-android-back-button.cjs')], { env });
 
 if (process.platform === 'win32') {
   run('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join('scripts', 'sync-app-icons.ps1')], { env });

@@ -140,3 +140,72 @@ window.encryptAccountData = encryptAccountData;
 window.decryptAccountData = decryptAccountData;
 window.hashMasterPassword = hashMasterPassword;
 window.verifyMasterPasswordHash = verifyMasterPasswordHash;
+
+
+// ===== TOTP (2FA) — tạo mã 6 số trực tiếp từ secret key =====
+function base32ToBytes(base32) {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    const clean = String(base32 || '').toUpperCase().replace(/[^A-Z2-7]/g, '');
+    if (!clean) return null;
+    let bits = '';
+    for (const ch of clean) {
+        const val = alphabet.indexOf(ch);
+        if (val < 0) continue;
+        bits += val.toString(2).padStart(5, '0');
+    }
+    const bytes = [];
+    for (let i = 0; i + 8 <= bits.length; i += 8) {
+        bytes.push(parseInt(bits.slice(i, i + 8), 2));
+    }
+    return bytes.length ? new Uint8Array(bytes) : null;
+}
+
+// Chuỗi có vẻ là secret TOTP hợp lệ (base32, đủ dài) hay không
+function isLikelyTotpSecret(value) {
+    const clean = String(value || '').toUpperCase().replace(/[^A-Z2-7]/g, '');
+    // Loại bỏ trường hợp toàn chữ ngắn / mã số 6-8 chữ số tĩnh
+    if (/^\d+$/.test(String(value || '').replace(/\s/g, ''))) return false;
+    return clean.length >= 16;
+}
+
+function totpTimeRemaining(period = 30, timestamp = Date.now()) {
+    return period - (Math.floor(timestamp / 1000) % period);
+}
+
+async function generateTOTP(secret, options = {}) {
+    const digits = options.digits || 6;
+    const period = options.period || 30;
+    const timestamp = options.timestamp || Date.now();
+    const keyBytes = base32ToBytes(secret);
+    if (!keyBytes || !keyBytes.length) return null;
+
+    const counter = Math.floor(timestamp / 1000 / period);
+    const counterBytes = new Uint8Array(8);
+    let temp = counter;
+    for (let i = 7; i >= 0; i -= 1) {
+        counterBytes[i] = temp & 0xff;
+        temp = Math.floor(temp / 256);
+    }
+
+    try {
+        const cryptoKey = await crypto.subtle.importKey(
+            'raw', keyBytes, { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']
+        );
+        const sig = new Uint8Array(await crypto.subtle.sign('HMAC', cryptoKey, counterBytes));
+        const offset = sig[sig.length - 1] & 0x0f;
+        const binary = ((sig[offset] & 0x7f) << 24)
+            | ((sig[offset + 1] & 0xff) << 16)
+            | ((sig[offset + 2] & 0xff) << 8)
+            | (sig[offset + 3] & 0xff);
+        return (binary % 10 ** digits).toString().padStart(digits, '0');
+    } catch (_) {
+        return null;
+    }
+}
+
+if (typeof window !== 'undefined') {
+    window.base32ToBytes = base32ToBytes;
+    window.isLikelyTotpSecret = isLikelyTotpSecret;
+    window.totpTimeRemaining = totpTimeRemaining;
+    window.generateTOTP = generateTOTP;
+}

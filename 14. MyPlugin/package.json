@@ -1,0 +1,42 @@
+{
+  "name": "myplugin",
+  "version": "1.0.0",
+  "description": "MyPlugin desktop app",
+  "main": "electron-main.cjs",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win portable --x64"
+  },
+  "build": {
+    "appId": "app.myplugin.desktop",
+    "productName": "MyPlugin",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "index.html",
+      "firebase-config.js",
+      "css/**/*",
+      "js/**/*",
+      "electron-main.cjs",
+      "electron-preload.cjs"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "MyPlugin.exe"
+    }
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.12"
+  }
+}

@@ -23,6 +23,23 @@ const PARSER_PLATFORM_LINE_ALIASES = [
     'lastpass', 'last pass', 'proton mail', 'protonmail', 'proton', 'coursera',
     'udemy', 'duolingo', 'linear', 'asana', 'airtable', 'miro', 'firebase', 'mongodb',
     'mongo db', 'supabase',
+    // --- Kiro + new AI tools (2026) ---
+    'kiro', 'grok', 'windsurf', 'codeium', 'bolt', 'bolt.new', 'lovable', 'v0', 'v0.dev',
+    'runway', 'runwayml', 'luma', 'luma ai', 'dream machine', 'pika', 'ideogram',
+    'leonardo', 'leonardo ai', 'krea', 'kling', 'qwen', 'kimi', 'moonshot',
+    'notebooklm', 'notebook lm', 'manus', 'flux', 'udio', 'gamma', 'genspark',
+    'character ai', 'character.ai', 'jasper',
+    // --- Vietnam apps ---
+    'vneid', 'vssid', 'dich vu cong', 'dichvucong', 'so suc khoe', 'etax', 'vetc', 'epass',
+    'momo', 'zalopay', 'zalo pay', 'vnpay', 'viettel money', 'viettelpay', 'shopeepay',
+    'vietcombank', 'techcombank', 'bidv', 'mb bank', 'mbbank', 'vpbank', 'acb', 'tpbank',
+    'agribank', 'vietinbank', 'sacombank', 'cake', 'timo',
+    'shopee', 'lazada', 'tiki', 'sendo',
+    'grab', 'gojek', 'baemin', 'be app', 'begroup',
+    'zing mp3', 'zingmp3', 'nhaccuatui', 'nhac cua tui', 'fpt play', 'fptplay', 'vieon',
+    'galaxy play', 'k+', 'k plus',
+    'viettel', 'vinaphone', 'mobifone', 'coc coc', 'coccoc',
+    'vng', 'garena', 'vtc game', 'vtc',
 ];
 
 function normalizeParserToken(value) {
@@ -220,6 +237,7 @@ function detectPlatform(serviceName) {
     const name = serviceName.toLowerCase();
     const trimmedName = name.trim();
     if (trimmedName === 'x' || trimmedName === 'x premium') return 'x';
+    if (trimmedName === 'be' || trimmedName === 'be app' || trimmedName === 'begroup' || trimmedName === 'be ride') return 'be';
     
     const platforms = [
         { keys: ['youtube premium','youtube','yt'], platform: 'youtube' },
@@ -255,8 +273,7 @@ function detectPlatform(serviceName) {
         { keys: ['gemini pro','google gemini pro','gemini advanced'], platform: 'gemini-pro' },
         { keys: ['google cloud','gcp'], platform: 'googlecloud' },
         { keys: ['google drive','gdrive'], platform: 'googledrive' },
-        { keys: ['gmail'], platform: 'gmail' },
-        { keys: ['google one','google workspace','google'], platform: 'google' },
+        { keys: ['gmail','google mail','google one','google workspace','google'], platform: 'google' },
         { keys: ['office 365','microsoft 365','ms 365','office'], platform: 'office365' },
         { keys: ['microsoft'], platform: 'microsoft' },
         { keys: ['icloud','apple'], platform: 'apple' },
@@ -287,6 +304,29 @@ function detectPlatform(serviceName) {
         { keys: ['elevenlabs','eleven labs'], platform: 'elevenlabs' },
         { keys: ['replicate'], platform: 'replicate' },
         { keys: ['poe'], platform: 'poe' },
+        { keys: ['kiro'], platform: 'kiro' },
+        { keys: ['grok','xai'], platform: 'grok' },
+        { keys: ['windsurf','codeium'], platform: 'windsurf' },
+        { keys: ['bolt.new','bolt new','boltnew'], platform: 'bolt' },
+        { keys: ['lovable'], platform: 'lovable' },
+        { keys: ['v0.dev','v0 by vercel','v0dev','vercel v0'], platform: 'v0' },
+        { keys: ['runwayml','runway ml','runway'], platform: 'runway' },
+        { keys: ['luma ai','luma labs','dream machine','lumaai'], platform: 'luma' },
+        { keys: ['pika labs','pika art','pika ai','pika'], platform: 'pika' },
+        { keys: ['ideogram'], platform: 'ideogram' },
+        { keys: ['leonardo ai','leonardo.ai','leonardoai','leonardo'], platform: 'leonardo' },
+        { keys: ['krea ai','krea.ai','krea'], platform: 'krea' },
+        { keys: ['kling ai','kling'], platform: 'kling' },
+        { keys: ['qwen','tongyi','qianwen'], platform: 'qwen' },
+        { keys: ['kimi','moonshot'], platform: 'kimi' },
+        { keys: ['notebooklm','notebook lm'], platform: 'notebooklm' },
+        { keys: ['manus ai','manus.im','manus'], platform: 'manus' },
+        { keys: ['flux ai','flux.1','black forest','flux'], platform: 'flux' },
+        { keys: ['udio'], platform: 'udio' },
+        { keys: ['gamma app','gamma.app','gamma'], platform: 'gamma' },
+        { keys: ['genspark'], platform: 'genspark' },
+        { keys: ['character ai','character.ai','characterai'], platform: 'characterai' },
+        { keys: ['jasper ai','jasper'], platform: 'jasper' },
         { keys: ['deepl','deep l'], platform: 'deepl' },
         { keys: ['grammarly'], platform: 'grammarly' },
         { keys: ['zapier'], platform: 'zapier' },
@@ -307,12 +347,117 @@ function detectPlatform(serviceName) {
         { keys: ['firebase'], platform: 'firebase' },
         { keys: ['mongodb','mongo db'], platform: 'mongodb' },
         { keys: ['supabase'], platform: 'supabase' },
+        // --- Vietnam apps ---
+        { keys: ['vneid','vn-eid','dinh danh dien tu','định danh điện tử'], platform: 'vneid' },
+        { keys: ['vssid','bao hiem xa hoi','bảo hiểm xã hội'], platform: 'vssid' },
+        { keys: ['dich vu cong','dịch vụ công','dichvucong','cong dich vu cong'], platform: 'dichvucong' },
+        { keys: ['so suc khoe','sổ sức khỏe','so tay suc khoe'], platform: 'thongbaosk' },
+        { keys: ['etax','thue dien tu','thuế điện tử'], platform: 'etax' },
+        { keys: ['vetc'], platform: 'vetc' },
+        { keys: ['epass'], platform: 'epass' },
+        { keys: ['shopeepay','shopee pay'], platform: 'shopeepay' },
+        { keys: ['momo'], platform: 'momo' },
+        { keys: ['zalopay','zalo pay'], platform: 'zalopay' },
+        { keys: ['vnpay'], platform: 'vnpay' },
+        { keys: ['viettel money','viettelpay','viettel pay'], platform: 'viettelmoney' },
+        { keys: ['vietcombank','vcb'], platform: 'vietcombank' },
+        { keys: ['techcombank'], platform: 'techcombank' },
+        { keys: ['bidv'], platform: 'bidv' },
+        { keys: ['mb bank','mbbank'], platform: 'mbbank' },
+        { keys: ['vpbank'], platform: 'vpbank' },
+        { keys: ['tpbank'], platform: 'tpbank' },
+        { keys: ['agribank'], platform: 'agribank' },
+        { keys: ['vietinbank'], platform: 'vietinbank' },
+        { keys: ['sacombank'], platform: 'sacombank' },
+        { keys: ['acb'], platform: 'acb' },
+        { keys: ['cake by vpbank','cake bank'], platform: 'cake' },
+        { keys: ['timo'], platform: 'timo' },
+        { keys: ['shopee'], platform: 'shopee' },
+        { keys: ['lazada'], platform: 'lazada' },
+        { keys: ['tiki'], platform: 'tiki' },
+        { keys: ['sendo'], platform: 'sendo' },
+        { keys: ['grab'], platform: 'grab' },
+        { keys: ['gojek'], platform: 'gojek' },
+        { keys: ['baemin'], platform: 'baemin' },
+        { keys: ['zing mp3','zingmp3'], platform: 'zingmp3' },
+        { keys: ['nhaccuatui','nhac cua tui'], platform: 'nhaccuatui' },
+        { keys: ['fpt play','fptplay'], platform: 'fptplay' },
+        { keys: ['vieon'], platform: 'vieon' },
+        { keys: ['galaxy play','galaxyplay'], platform: 'galaxyplay' },
+        { keys: ['k+','k plus','kplus'], platform: 'kplus' },
+        { keys: ['viettel'], platform: 'viettel' },
+        { keys: ['vinaphone'], platform: 'vinaphone' },
+        { keys: ['mobifone'], platform: 'mobifone' },
+        { keys: ['coc coc','coccoc'], platform: 'coccoc' },
+        { keys: ['vng'], platform: 'vng' },
+        { keys: ['garena','free fire'], platform: 'garena' },
+        { keys: ['vtc game','vtcgame'], platform: 'vtcgame' },
     ];
     
     for (const p of platforms) {
         if (p.keys.some(k => name.includes(k))) return p.platform;
     }
     return null;
+}
+
+/**
+ * Tìm URL đầu tiên trong chuỗi
+ */
+function extractFirstUrl(text) {
+    const raw = String(text || '');
+    const match = raw.match(/\bhttps?:\/\/[^\s"'<>|]+/i)
+        || raw.match(/\b(?:www\.|t\.me\/|zalo\.me\/|fb\.com\/|discord\.gg\/)[^\s"'<>|]+/i);
+    return match ? match[0].replace(/[.,)\]}>'"]+$/, '') : '';
+}
+
+/**
+ * Nhận diện nguồn/người bán từ link dán vào.
+ * Trả về { platform, url, name, host } hoặc null.
+ * Zalo -> zalo, Telegram -> telegram, Facebook -> facebook, Discord -> discord, còn lại -> other (Web)
+ */
+function detectSellerFromText(text) {
+    const url = extractFirstUrl(text);
+    if (!url) return null;
+
+    let normalized = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    let host = '';
+    let pathname = '';
+    try {
+        const parsed = new URL(normalized);
+        host = parsed.hostname.replace(/^www\./i, '').toLowerCase();
+        pathname = parsed.pathname || '';
+    } catch (_) {
+        return null;
+    }
+    if (!host) return null;
+
+    const rules = [
+        { platform: 'zalo', hosts: ['zalo.me', 'chat.zalo.me', 'zaloapp.com', 'oa.zalo.me'] },
+        { platform: 'telegram', hosts: ['t.me', 'telegram.me', 'telegram.org'] },
+        { platform: 'facebook', hosts: ['facebook.com', 'fb.com', 'fb.watch', 'm.facebook.com', 'messenger.com'] },
+        { platform: 'discord', hosts: ['discord.gg', 'discord.com', 'discordapp.com', 'discord.new'] },
+    ];
+    const matched = rules.find(rule => rule.hosts.some(h => host === h || host.endsWith(`.${h}`)));
+    const platform = matched ? matched.platform : 'other';
+
+    const segments = pathname.split('/').filter(Boolean).map(seg => {
+        try { return decodeURIComponent(seg); } catch (_) { return seg; }
+    });
+    let name = '';
+    if (platform === 'telegram') {
+        const handle = segments[0] || '';
+        name = handle ? (handle.startsWith('@') ? handle : `@${handle}`) : 'Telegram';
+    } else if (platform === 'zalo') {
+        name = segments[segments.length - 1] || 'Nhóm Zalo';
+    } else if (platform === 'discord') {
+        name = segments[segments.length - 1] || 'Discord';
+    } else if (platform === 'facebook') {
+        name = segments[0] || 'Facebook';
+    } else {
+        name = host;
+    }
+
+    return { platform, url: normalized, name: name || host, host };
 }
 
 /**

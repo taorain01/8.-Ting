@@ -110,6 +110,19 @@ function getDashboardAccountKey(acc) {
     return acc?.id || `${acc?.name || ''}:${acc?.expiryDate || ''}:${acc?.displayUsername || acc?.username || ''}`;
 }
 
+// Trả về tài khoản vừa thêm (còn hiệu lực trong 2 phút) để hiện nổi bật ở đầu Tổng quan
+function getJustAddedAccount(accounts = []) {
+    const id = window.appState?.justAddedAccountId;
+    const at = window.appState?.justAddedAt;
+    if (!id || !at) return null;
+    if (Date.now() - at > 2 * 60 * 1000) {
+        window.appState.justAddedAccountId = null;
+        window.appState.justAddedAt = null;
+        return null;
+    }
+    return accounts.find(acc => acc.id === id) || null;
+}
+
 function takeUniqueDashboardAccounts(accounts, shownKeys, limit) {
     const result = [];
     for (const acc of accounts || []) {
@@ -760,6 +773,16 @@ function renderDashboard() {
 
     if (total > 0) h += renderDashboardInsights(accs);
 
+    const justAdded = getJustAddedAccount(accs);
+    if (justAdded) {
+        shownKeys.add(justAdded.id);
+        h += `<div class="section-header just-added-header" style="margin-top:20px">
+            <span class="section-title">✨ Vừa thêm</span>
+            <button type="button" class="just-added-dismiss" onclick="dismissJustAddedAccount()" aria-label="Ẩn">×</button>
+        </div>`;
+        h += `<div class="d-account-grid anim-stagger just-added-grid">${renderDesktopCard(justAdded, justAdded.type === 'personal')}</div>`;
+    }
+
     if (alerts.length > 0) {
         h += `<div class="d-alert-banner anim-fade-in-up"><span style="font-size:22px">⚠️</span><span style="flex:1"><strong>${alerts.length}</strong> tài khoản cần chú ý</span></div>`;
         h += `<div class="section-header"><span class="section-title">Cần chú ý</span></div>`;
@@ -1121,23 +1144,49 @@ function renderAccountCategoryForm(acc) {
 }
 
 // ===== ACCOUNT LIST =====
-function renderTagFilterRow(accounts) {
-    const tags = typeof getAllAccountTags === 'function' ? getAllAccountTags(accounts) : [];
-    if (!tags.length) return '';
-    const active = window.appState.currentTagFilter || '';
-    const chips = tags.map(tag => {
-        const isActive = typeof normalizeTagKey === 'function'
-            ? normalizeTagKey(active) === normalizeTagKey(tag)
-            : active === tag;
-        return `<button type="button" class="tag-filter-chip ${isActive ? 'active' : ''}" onclick="setTagFilter('${escapeJsAttr(tag)}')">${escapeHtml(tag)}</button>`;
-    }).join('');
-    return `<div class="tag-filter-row">
-        <button type="button" class="tag-filter-chip ${active ? '' : 'active'}" onclick="setTagFilter('')">Tất cả tag</button>
-        ${chips}
-    </div>`;
+function getActiveFilterLabel(filter, tagFilter, platformFilter) {
+    const parts = [];
+    if (filter === 'active') parts.push('Hoạt động');
+    else if (filter === 'expiring') parts.push('Sắp hết');
+    else if (filter === 'expired') parts.push('Đã hết');
+    else if (filter === 'favorite') parts.push('⭐ Yêu thích');
+    if (tagFilter) parts.push(tagFilter);
+    if (platformFilter) parts.push(getPlatformLabel(platformFilter, []));
+    return parts.length ? `<span class="active-filter-tags">${parts.map(p => `<span class="active-filter-tag">${escapeHtml(p)}</span>`).join('')}</span>` : '';
 }
 
-function renderDesktopPlatformFilter(accounts) {
+function renderFilterPanel(accounts) {
+    const filter = window.appState.currentFilter || 'all';
+    const tagFilter = window.appState.currentTagFilter || '';
+    const tags = typeof getAllAccountTags === 'function' ? getAllAccountTags(accounts) : [];
+    let html = `<div class="filter-panel-section">
+        <div class="filter-panel-label">Trạng thái</div>
+        <div class="filter-chip-row">
+            <button class="filter-chip ${filter==='all'?'active':''}" onclick="setFilter('all')">Tất cả</button>
+            <button class="filter-chip ${filter==='active'?'active':''}" onclick="setFilter('active')">Hoạt động</button>
+            <button class="filter-chip ${filter==='expiring'?'active':''}" onclick="setFilter('expiring')">Sắp hết</button>
+            <button class="filter-chip ${filter==='expired'?'active':''}" onclick="setFilter('expired')">Đã hết</button>
+            <button class="filter-chip ${filter==='favorite'?'active':''}" onclick="setFilter('favorite')">⭐ Yêu thích</button>
+        </div>
+    </div>`;
+    if (tags.length) {
+        html += `<div class="filter-panel-section">
+            <div class="filter-panel-label">Gói / Tag</div>
+            <div class="filter-chip-row">
+                <button class="filter-chip ${tagFilter?'':'active'}" onclick="setTagFilter('')">Tất cả</button>
+                ${tags.map(tag => {
+                    const isActive = typeof normalizeTagKey === 'function'
+                        ? normalizeTagKey(tagFilter) === normalizeTagKey(tag)
+                        : tagFilter === tag;
+                    return `<button class="filter-chip ${isActive ? 'active' : ''}" onclick="setTagFilter('${escapeJsAttr(tag)}')">${escapeHtml(tag)}</button>`;
+                }).join('')}
+            </div>
+        </div>`;
+    }
+    return html;
+}
+
+function renderPlatformQuickFilter(accounts) {
     const platformMap = new Map();
     accounts.forEach(acc => {
         const key = getResolvedPlatform(acc) || '';
@@ -1145,11 +1194,13 @@ function renderDesktopPlatformFilter(accounts) {
         if (!platformMap.has(key)) platformMap.set(key, 0);
         platformMap.set(key, platformMap.get(key) + 1);
     });
-    if (!platformMap.size) return '';
+    if (!platformMap.size) return '<div class="platform-filter-empty">Chưa có nền tảng nào</div>';
     const activePlatform = window.appState.currentPlatformFilter || '';
     const sorted = [...platformMap.entries()].sort((a, b) => b[1] - a[1]);
-    let chips = `<button type="button" class="d-platform-chip ${!activePlatform ? 'active' : ''}" onclick="setPlatformFilter('')">
-        <span class="d-platform-chip-all">✦</span><span>Tất cả</span>
+    let html = `<div class="platform-filter-grid">`;
+    html += `<button class="platform-filter-item ${!activePlatform ? 'active' : ''}" onclick="setPlatformFilter('')">
+        <span class="platform-filter-icon-all">✦</span>
+        <span class="platform-filter-name">Tất cả</span>
     </button>`;
     sorted.forEach(([platform, count]) => {
         const isActive = activePlatform === platform;
@@ -1158,12 +1209,30 @@ function renderDesktopPlatformFilter(accounts) {
             ? renderPlatformLogoMark(platform, getPlatformEmoji(platform))
             : getPlatformEmoji(platform);
         const label = getPlatformLabel(platform, []);
-        chips += `<button type="button" class="d-platform-chip ${isActive ? 'active' : ''}" onclick="setPlatformFilter('${escapeJsAttr(platform)}')" title="${escapeHtml(label)} (${count})">
-            <span class="d-platform-chip-icon" style="${logoStyle}">${logoMark}</span>
-            <span>${escapeHtml(label)}</span>
+        html += `<button class="platform-filter-item ${isActive ? 'active' : ''}" onclick="setPlatformFilter('${escapeJsAttr(platform)}')">
+            <span class="platform-filter-icon" style="${logoStyle}">${logoMark}</span>
+            <span class="platform-filter-name">${escapeHtml(label)}</span>
+            <span class="platform-filter-count">${count}</span>
         </button>`;
     });
-    return `<div class="d-platform-filter-row">${chips}</div>`;
+    html += `</div>`;
+    return html;
+}
+
+function toggleFilterPanel() {
+    const panel = document.getElementById('filter-panel');
+    const platformPanel = document.getElementById('platform-panel');
+    if (!panel) return;
+    if (platformPanel) platformPanel.style.display = 'none';
+    panel.style.display = panel.style.display === 'none' ? '' : 'none';
+}
+
+function togglePlatformPanel() {
+    const panel = document.getElementById('platform-panel');
+    const filterPanel = document.getElementById('filter-panel');
+    if (!panel) return;
+    if (filterPanel) filterPanel.style.display = 'none';
+    panel.style.display = panel.style.display === 'none' ? '' : 'none';
 }
 
 function renderAccountList(type) {
@@ -1188,17 +1257,26 @@ function renderAccountList(type) {
 
     const title = type==='bought' ? 'Tài khoản mua' : 'Tài khoản cá nhân';
     const hasActiveFilter = filter !== 'all' || tagFilter || platformFilter;
-    let h = `<div class="d-filter-row">
-        <div class="d-filter-tabs">
-            <button class="filter-tab ${filter==='all'?'active':''}" onclick="setFilter('all')">Tất cả (${accs.length})</button>
-            <button class="filter-tab ${filter==='active'?'active':''}" onclick="setFilter('active')">Hoạt động</button>
-            <button class="filter-tab ${filter==='expiring'?'active':''}" onclick="setFilter('expiring')">Sắp hết</button>
-            <button class="filter-tab ${filter==='expired'?'active':''}" onclick="setFilter('expired')">Đã hết</button>
-            <button class="filter-tab ${filter==='favorite'?'active':''}" onclick="setFilter('favorite')">Yêu thích (${accs.filter(a=>isAccountFavorite(a)).length})</button>
+    const filterLabel = getActiveFilterLabel(filter, tagFilter, platformFilter);
+    let h = `<div class="list-toolbar">
+        <div class="list-toolbar-left">
+            <span class="section-title">${escapeHtml(title)}</span>
+            <span class="section-badge">${filtered.length}</span>
         </div>
-        ${hasActiveFilter ? `<button class="d-clear-filters-btn" onclick="clearAllFilters()">✕ Xoá lọc</button>` : ''}
+        <div class="list-toolbar-right">
+            <button class="toolbar-filter-btn ${hasActiveFilter ? 'has-filter' : ''}" onclick="toggleFilterPanel()" title="Lọc">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                ${hasActiveFilter ? `<span class="toolbar-filter-dot"></span>` : ''}
+            </button>
+            <button class="toolbar-platform-btn" onclick="togglePlatformPanel()" title="Lọc nền tảng">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+                ${platformFilter ? `<span class="toolbar-filter-dot"></span>` : ''}
+            </button>
+        </div>
     </div>
-    ${renderDesktopPlatformFilter(accs)}`;
+    ${hasActiveFilter ? `<div class="active-filter-bar">${filterLabel}<button class="active-filter-clear" onclick="clearAllFilters()">✕ Xoá lọc</button></div>` : ''}
+    <div id="filter-panel" class="filter-panel" style="display:none">${renderFilterPanel(accs)}</div>
+    <div id="platform-panel" class="platform-panel" style="display:none">${renderPlatformQuickFilter(accs)}</div>`;
 
     if (filtered.length > 0) {
         const displayItems = buildAccountDisplayItems(filtered);
@@ -1436,9 +1514,11 @@ function renderDetail(accId) {
     const twoFaText = revealedTwoFa || decrypted?.twoFaCode || (needsMaster ? '******' : (acc.twoFaCode || '******'));
     const noteText = decrypted?.note || acc.note || '';
     const hasTwoFa = Boolean(decrypted?.twoFaCode || (!needsMaster && acc.twoFaCode) || (needsMaster && acc.twoFaCode));
-    const usernameEye = needsMaster ? renderEyeButton(acc.id, 'username', 'Hiá»‡n tÃ i khoáº£n') : '';
-    const passwordEye = needsMaster ? renderEyeButton(acc.id, 'password', 'Hiá»‡n máº­t kháº©u') : '';
-    const twoFaEye = needsMaster ? renderEyeButton(acc.id, 'twoFaCode', 'Hiá»‡n 2FA') : '';
+    const twoFaSecret = decrypted?.twoFaCode || (!needsMaster ? (acc.twoFaCode || '') : (revealedTwoFa || ''));
+    const twoFaIsTotp = Boolean(hasTwoFa && twoFaSecret && typeof isLikelyTotpSecret === 'function' && isLikelyTotpSecret(twoFaSecret));
+    const usernameEye = needsMaster ? renderEyeButton(acc.id, 'username', 'Hiện tài khoản') : '';
+    const passwordEye = needsMaster ? renderEyeButton(acc.id, 'password', 'Hiện mật khẩu') : '';
+    const twoFaEye = needsMaster ? renderEyeButton(acc.id, 'twoFaCode', 'Hiện 2FA') : '';
 
     const sellerRow = renderSellerDetailRow(acc);
     let h = `
@@ -1463,15 +1543,16 @@ function renderDetail(accId) {
         <div class="detail-section anim-fade-in-up">
             <div class="detail-row"><span class="detail-label">Tài khoản</span><span class="detail-value secret-value">${escapeHtml(usernameText)} ${renderEyeButton(acc.id, 'username', 'Hiện tài khoản')} ${canCopy ? renderCopyButton(acc.id, 'username', 'Copy tài khoản') : ''}</span></div>
             <div class="detail-row"><span class="detail-label">Mật khẩu</span><span class="detail-value secret-value">${getAuthMethod(acc) === 'email' ? `${escapeHtml(passwordText)} ${renderEyeButton(acc.id, 'password', 'Hiện mật khẩu')} ${canCopy ? renderCopyButton(acc.id, 'password', 'Copy mật khẩu') : ''}` : renderSsoPasswordDetail(acc)}</span></div>
-            ${hasTwoFa?`<div class="detail-row"><span class="detail-label">2FA</span><span class="detail-value secret-value">${escapeHtml(twoFaText)} ${renderEyeButton(acc.id, 'twoFaCode', 'Hiện 2FA')} ${canCopy ? renderCopyButton(acc.id, '2fa', 'Copy 2FA') : ''}</span></div>`:''}
+            ${hasTwoFa?`<div class="detail-row"><span class="detail-label">2FA</span><span class="detail-value secret-value">${escapeHtml(twoFaText)} ${renderEyeButton(acc.id, 'twoFaCode', 'Hiện 2FA')} ${canCopy ? renderCopyButton(acc.id, '2fa', 'Copy 2FA') : ''}</span></div>${renderTwoFaExtra(acc, twoFaSecret, twoFaIsTotp)}`:''}
             ${noteText?`<div class="detail-row detail-note-row"><span class="detail-label">Ghi chú</span><div class="detail-note-value">${renderSmartNote(noteText)}</div></div>`:''}
             ${sellerRow}
         </div>
         <div class="detail-section anim-fade-in-up">
             <div class="detail-row"><span class="detail-label">Ngày mua</span><span class="detail-value">${formatDateVN(acc.purchaseDate)}</span></div>
+            ${acc.purchasePrice && typeof formatPriceVN === 'function' ? `<div class="detail-row"><span class="detail-label">Giá mua</span><span class="detail-value detail-price-value">${escapeHtml(formatPriceVN(acc.purchasePrice))}</span></div>` : ''}
             <div class="detail-row"><span class="detail-label">Hết hạn</span><span class="detail-value">${acc.expiryType==='lifetime'?'♾️ Vĩnh viễn':formatDateVN(acc.expiryDate)}</span></div>
             ${acc.expiryType!=='lifetime'?`<div class="detail-row"><span class="detail-label">Còn lại</span><span class="detail-value" style="color:${days<0?'var(--danger)':days<=5?'var(--warning)':'var(--success)'}">${days<0?'Đã hết '+Math.abs(days)+' ngày':days+' ngày'}</span></div>`:''}
-            ${acc.expiryType!=='lifetime'?`<div style="margin-top:12px"><div style="font-size:13px;font-weight:600;margin-bottom:8px">Gia hạn nhanh</div><div class="renew-options"><button class="renew-btn" onclick="renewAccount('${acc.id}',7)">+7 ngày</button><button class="renew-btn" onclick="renewAccount('${acc.id}',15)">+15</button><button class="renew-btn" onclick="renewAccount('${acc.id}',30)">+30</button><button class="renew-btn" onclick="renewAccount('${acc.id}',90)">+90</button><button class="renew-btn" onclick="renewAccount('${acc.id}',365)">+365</button></div></div>`:''}
+            ${acc.expiryType!=='lifetime'?`<div style="margin-top:12px"><div style="font-size:13px;font-weight:600;margin-bottom:8px">Gia hạn nhanh</div><div class="renew-options"><button class="renew-btn" onclick="renewAccount('${acc.id}',7)">+7 ngày</button><button class="renew-btn" onclick="renewAccount('${acc.id}',15)">+15</button><button class="renew-btn" onclick="renewAccount('${acc.id}',30)">+30</button><button class="renew-btn" onclick="renewAccount('${acc.id}',90)">+90</button><button class="renew-btn" onclick="renewAccount('${acc.id}',365)">+365</button>${acc.status!=='expired'?`<button class="renew-btn renew-btn-expire" onclick="markAccountExpired('${acc.id}')" title="Đặt hết hạn ngay hôm nay">⏱️ Hết hạn ngay</button>`:''}</div></div>`:''}
         </div>
         ${renderLinkedServicesSection(acc.id)}
         <div class="d-detail-full" style="display:flex;gap:12px;margin-top:8px">
@@ -1480,6 +1561,30 @@ function renderDetail(accId) {
         </div>
     </div>`;
     document.getElementById('page-content').innerHTML = h;
+    if (twoFaIsTotp && typeof startTotpTicker === 'function') startTotpTicker(twoFaSecret);
+    else if (typeof stopTotpTicker === 'function') stopTotpTicker();
+}
+
+// Widget tạo mã 2FA trực tiếp + link web dự phòng
+function renderTwoFaExtra(acc, secret, isTotp) {
+    if (!secret) return '';
+    const safeSecret = escapeJsAttr(secret);
+    const copyIcon = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+    if (isTotp) {
+        return `<div class="totp-widget" id="totp-widget">
+            <div class="totp-main">
+                <span class="totp-label">Mã hiện tại</span>
+                <span class="totp-code" id="totp-code">------</span>
+                <button type="button" class="icon-btn totp-copy" onclick="copyTotpCode()" title="Copy mã 2FA">${copyIcon}</button>
+            </div>
+            <div class="totp-timer">
+                <span class="totp-count" id="totp-count">30s</span>
+                <div class="totp-progress"><div class="totp-bar" id="totp-bar"></div></div>
+            </div>
+            <button type="button" class="totp-web-link" onclick="openWeb2FA('${safeSecret}')" title="Mở trang web 2FA dự phòng">🌐 Web 2FA</button>
+        </div>`;
+    }
+    return `<div class="detail-row totp-web-row"><span class="detail-label"></span><button type="button" class="btn btn-sm btn-outline" onclick="openWeb2FA('${safeSecret}')">🌐 Tạo mã 2FA trên web</button></div>`;
 }
 
 function renderTagEditorForm(acc) {
@@ -1761,8 +1866,17 @@ function getAddFormPlatformOptions() {
         { name: 'Midjourney', id: 'midjourney' },
         { name: 'Perplexity', id: 'perplexity' },
         { name: 'DeepSeek', id: 'deepseek' },
+        { name: 'Kiro', id: 'kiro' },
+        { name: 'Grok', id: 'grok' },
+        { name: 'Cursor', id: 'cursor' },
         { name: 'Google Drive', id: 'googledrive' },
         { name: 'Google Account', id: 'google-account' },
+        { name: 'VNeID', id: 'vneid' },
+        { name: 'MoMo', id: 'momo' },
+        { name: 'ZaloPay', id: 'zalopay' },
+        { name: 'Shopee', id: 'shopee' },
+        { name: 'Vietcombank', id: 'vietcombank' },
+        { name: 'FPT Play', id: 'fptplay' },
         { name: 'Others', id: 'other' },
     ];
 }
@@ -1805,16 +1919,27 @@ function getSellerPlatformLabel(platform) {
     return match?.name || config?.label || 'Web';
 }
 
-function renderSellerPlatformPicker(selected = 'other') {
+function renderSellerPlatformPicker(selected = 'other', sellerLink = '') {
     const active = selected || 'other';
     const options = getSellerPlatformOptions();
     return `<input type="hidden" id="add-seller-platform" value="${escapeHtml(active)}">
+    <input type="hidden" id="add-seller-link" value="${escapeHtml(sellerLink || '')}">
     <div class="seller-source-grid platform-picker-grid">
         ${options.map(option => `<button type="button" class="platform-picker-item ${active === option.id ? 'active' : ''}" data-seller-platform="${escapeJsAttr(option.id)}" onclick="selectSellerPlatform('${escapeJsAttr(option.id)}')">
             ${renderPlatformPickerIcon(option.id, option.name)}
             <span>${escapeHtml(option.name)}</span>
         </button>`).join('')}
-    </div>`;
+    </div>
+    <div id="seller-link-hint" class="seller-link-hint"${sellerLink ? '' : ' hidden'}>${sellerLink ? renderSellerLinkHint(sellerLink) : ''}</div>`;
+}
+
+function renderSellerLinkHint(url) {
+    if (!url) return '';
+    const safe = escapeHtml(url);
+    return `<span class="seller-link-chip" title="${safe}">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7L12 19"/></svg>
+        <span class="seller-link-chip-text">${safe}</span>
+    </span>`;
 }
 
 function selectSellerPlatform(platform) {
@@ -1828,16 +1953,21 @@ function selectSellerPlatform(platform) {
 
 function renderSellerDetailRow(acc) {
     const sellerName = String(acc?.sellerName || '').trim();
-    if (!sellerName) return '';
+    const sellerLink = String(acc?.sellerLink || '').trim();
+    if (!sellerName && !sellerLink) return '';
     const platform = acc.sellerPlatform || 'other';
     const label = getSellerPlatformLabel(platform);
     const style = typeof getPlatformLogoStyle === 'function' ? getPlatformLogoStyle(platform, label) : '';
     const mark = typeof renderPlatformLogoMark === 'function'
         ? renderPlatformLogoMark(platform, getPlatformEmoji(platform))
         : getPlatformEmoji(platform);
+    const displayName = sellerName || sellerLink;
+    const nameHtml = sellerLink
+        ? `<a href="#" class="seller-source-name seller-source-link" title="${escapeHtml(sellerLink)}" onclick="event.preventDefault();openExternalLink('${escapeJsAttr(sellerLink)}')">${escapeHtml(displayName)}<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" style="margin-left:4px"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>`
+        : `<span class="seller-source-name">${escapeHtml(displayName)}</span>`;
     return `<div class="detail-row">
         <span class="detail-label">Ng&#432;&#7901;i b&#225;n</span>
-        <span class="detail-value seller-info-value"><span class="seller-source-icon" style="${style}" title="${escapeHtml(label)}">${mark}</span><span class="seller-source-name">${escapeHtml(sellerName)}</span></span>
+        <span class="detail-value seller-info-value"><span class="seller-source-icon" style="${style}" title="${escapeHtml(label)}">${mark}</span>${nameHtml}</span>
     </div>`;
 }
 
@@ -2054,7 +2184,14 @@ https://example.com" style="min-height:110px">${escapeHtml(editData?.note || '')
         <input type="text" id="add-seller-name" class="input" placeholder=" " style="padding-left:16px" value="${escapeHtml(editData?.sellerName || '')}">
         <label for="add-seller-name" class="input-label" style="left:16px">T&#234;n ng&#432;&#7901;i b&#225;n</label>
     </div>
-    ${renderSellerPlatformPicker(editData?.sellerPlatform || 'other')}
+    ${renderSellerPlatformPicker(editData?.sellerPlatform || 'other', editData?.sellerLink || '')}
+
+    <div class="form-section-title">Giá mua <span class="optional-label">(Tùy chọn)</span></div>
+    <div class="input-group price-input-group" style="margin-bottom:8px">
+        <input type="text" id="add-price" class="input" inputmode="numeric" autocomplete="off" placeholder=" " style="padding-left:16px" value="${editData?.purchasePrice ? formatPriceInput(editData.purchasePrice) : ''}" oninput="formatPriceField(this)">
+        <label for="add-price" class="input-label" style="left:16px">VD: 50.000 (để trống nếu không nhập)</label>
+        <span class="price-suffix" aria-hidden="true">₫</span>
+    </div>
 
     <div class="form-section-title add-advanced-title">Tùy chọn nâng cao</div>
     ${renderCollapsibleSection('category', '📁', `Danh mục (${defaultCategoryIds.length})`, categoryContent)}
