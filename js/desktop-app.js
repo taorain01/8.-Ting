@@ -3496,9 +3496,7 @@ async function renewAccount(id, days) {
     if (window.appState.isDemo) {
         const acc = window.appState.accounts.find(a => a.id === id);
         if (acc) {
-            const base = acc.expiryDate ? new Date(acc.expiryDate) : new Date();
-            base.setDate(base.getDate() + days);
-            acc.expiryDate = base.toISOString().split('T')[0];
+            acc.expiryDate = getRenewedExpiryDate(acc.expiryDate, days);
             acc.status = getStatusFromExpiry(acc.expiryDate, acc.expiryType);
             acc.renewalHistory = [...(acc.renewalHistory || []), { date: todayStr(), days }];
             updateHeader();

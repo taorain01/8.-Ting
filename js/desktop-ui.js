@@ -2637,7 +2637,7 @@ function renderAddForm(type, editData = null) {
     ${renderPlatformSection(platforms)}
 
     <div class="form-section-title">Thời hạn ${renderHintButton('Nhập linh hoạt: 30 = +30 ngày, 28/04 30 = mua 28/04 +30 ngày, 28/04 > 28/05 = khoảng ngày.')}</div>
-    <input type="text" id="add-smart-date" class="input smart-date-input" value="30 ngày" placeholder="30 ngày, 28/04 30, 28/04 > 28/05" oninput="applySmartDateInput(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();applySmartDateInput(this.value)}">
+    <input type="text" id="add-smart-date" class="input smart-date-input" value="${escapeHtml(smartDateValue)}" placeholder="30 ngày, 28/04 30, 28/04 > 28/05" oninput="applySmartDateInput(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();applySmartDateInput(this.value)}">
     <input type="hidden" id="add-purchase" value="${escapeHtml(purchaseValue)}">
     <input type="hidden" id="add-expiry" value="${escapeHtml(expiryValue)}">
     <div id="add-expiry-hint" class="quick-date-hint smart-date-preview"></div>

@@ -201,9 +201,7 @@ async function renewAccountInDB(accountId, days) {
     const acc = window.appState.accounts.find(a => a.id === accountId);
     if (!acc) return false;
 
-    const base = acc.expiryDate ? new Date(acc.expiryDate) : new Date();
-    base.setDate(base.getDate() + days);
-    const newExpiry = base.toISOString().split('T')[0];
+    const newExpiry = getRenewedExpiryDate(acc.expiryDate, days);
 
     const history = acc.renewalHistory || [];
     history.push({ date: todayStr(), days });

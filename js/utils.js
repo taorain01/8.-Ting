@@ -11,6 +11,29 @@ function daysUntil(dateStr) {
 }
 
 /**
+ * Tính ngày hết hạn mới khi gia hạn +N ngày.
+ * Gia hạn tính từ mốc MUỘN HƠN giữa hôm nay và ngày hết hạn hiện tại:
+ * - TK đã quá hạn (hoặc hết hạn hôm nay): tính từ hôm nay -> hôm nay + N ngày.
+ * - TK còn hạn: cộng dồn vào ngày hết hạn hiện tại (không mất ngày còn lại).
+ * Trả về chuỗi YYYY-MM-DD theo giờ địa phương.
+ */
+function getRenewedExpiryDate(currentExpiry, days) {
+    const addDays = Number(days) || 0;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    let base = today;
+    if (currentExpiry) {
+        const cur = new Date(currentExpiry); cur.setHours(0, 0, 0, 0);
+        if (!Number.isNaN(cur.getTime()) && cur.getTime() > today.getTime()) base = cur;
+    }
+    const result = new Date(base.getTime());
+    result.setDate(result.getDate() + addDays);
+    const y = result.getFullYear();
+    const m = String(result.getMonth() + 1).padStart(2, '0');
+    const d = String(result.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+/**
  * Format ngày theo kiểu Việt Nam: "26/04/2026"
  */
 function formatDateVN(dateStr) {
