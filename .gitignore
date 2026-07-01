@@ -21,6 +21,9 @@ tmp_icon_check/
 www/
 android/
 ios/
+output/
+*.apk
+*.exe
 
 # Environment
 .env

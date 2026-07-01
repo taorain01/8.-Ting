@@ -37,4 +37,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('quick-add:save-request', handler);
   },
   sendQuickAddResult: result => ipcRenderer.send('quick-add:save-result', result),
+
+  // ===== ĐIỀU KHIỂN CỬA SỔ (title bar tùy chỉnh) =====
+  minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
+  toggleMaximizeWindow: () => ipcRenderer.invoke('window:toggle-maximize'),
+  closeWindow: () => ipcRenderer.invoke('window:close'),
+  isWindowMaximized: () => ipcRenderer.invoke('window:is-maximized'),
+  onMaximizeChanged: callback => {
+    const handler = (_event, isMaximized) => callback(isMaximized);
+    ipcRenderer.on('window:maximize-changed', handler);
+    return () => ipcRenderer.removeListener('window:maximize-changed', handler);
+  },
 });

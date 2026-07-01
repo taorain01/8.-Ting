@@ -16,12 +16,14 @@
     "android:add": "npm run prepare:android-web && npx cap add android && node scripts/patch-android-back-button.cjs && npm run icons:sync",
     "android:sync": "npm run prepare:android-web && npx cap sync android && node scripts/patch-android-back-button.cjs && npm run icons:sync",
     "android:open": "npm run android:sync && npx cap open android",
-    "android:build:debug": "node scripts/build-android-debug.cjs"
+    "android:build:debug": "node scripts/build-android-debug.cjs",
+    "build:all": "node scripts/build-all.cjs"
   },
   "dependencies": {
     "@capacitor-firebase/authentication": "^7.2.0",
     "@capacitor/android": "7.4.3",
     "@capacitor/core": "7.4.3",
+    "@capacitor/ios": "^7.4.3",
     "@capacitor/local-notifications": "^7.0.0",
     "electron-store": "^8.2.0",
     "electron-updater": "^6.8.3"

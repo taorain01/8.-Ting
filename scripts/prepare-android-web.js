@@ -42,6 +42,7 @@ const sharedScripts = [
   'crypto.js',
   'db.js',
   'auth.js',
+  'groups.js',
 ];
 
 for (const file of sharedScripts) {

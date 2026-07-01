@@ -1,0 +1,102 @@
+# Cấu hình Codemagic CI/CD để build iOS cho ứng dụng Ting!
+# Đặt file này ở thư mục gốc của dự án (commit lên Git)
+
+workflows:
+  # WORKFLOW 1: Build cho giả lập iOS (KHÔNG cần tài khoản Apple Developer - Hoàn toàn MIỄN PHÍ)
+  ios-simulator:
+    name: Ting! iOS Simulator Build
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    environment:
+      node: latest
+      xcode: latest
+      cocoapods: default
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: '*'
+          include: true
+    scripts:
+      - name: Install npm dependencies
+        script: npm install
+      - name: Prepare web assets
+        script: npm run prepare:android-web
+      - name: Add and Sync Capacitor for iOS
+        script: |
+          if [ ! -d "ios" ]; then
+            npx cap add ios
+          else
+            npx cap sync ios
+          fi
+      - name: Install Cocoapods
+        script: |
+          cd ios/App
+          pod install
+      - name: Build for iOS Simulator (No Sign)
+        script: |
+          cd ios/App
+          xcodebuild -workspace App.xcworkspace \
+            -scheme App \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            clean build
+      - name: Compress simulator build artifact
+        script: |
+          cd ios/App/build/Build/Products/Debug-iphonesimulator
+          zip -r Ting-Simulator.zip App.app
+    artifacts:
+      - ios/App/build/Build/Products/Debug-iphonesimulator/Ting-Simulator.zip
+
+  # WORKFLOW 2: Build file IPA cho máy thật (Yêu cầu tài khoản Apple Developer $99/năm)
+  ios-device:
+    name: Ting! iOS Device Build (IPA)
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    integrations:
+      # Liên kết với App Store Connect API trong phần cấu hình của Codemagic
+      app_store_connect: codemagic 
+    environment:
+      ios_signing:
+        distribution_type: development # hoặc ad_hoc, app_store
+        bundle_identifier: app.ting.manager
+      vars:
+        XCODE_WORKSPACE: "ios/App/App.xcworkspace"
+        XCODE_SCHEME: "App"
+      node: latest
+      xcode: latest
+      cocoapods: default
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+    scripts:
+      - name: Install npm dependencies
+        script: npm install
+      - name: Prepare web assets
+        script: npm run prepare:android-web
+      - name: Add and Sync Capacitor for iOS
+        script: |
+          if [ ! -d "ios" ]; then
+            npx cap add ios
+          else
+            npx cap sync ios
+          fi
+      - name: Install Cocoapods
+        script: |
+          cd ios/App
+          pod install
+      - name: Set up code signing
+        script: xcode-project use-profiles
+      - name: Build IPA
+        script: |
+          xcode-project build-ipa \
+            --workspace "$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - ios/App/build/ios/ipa/*.ipa

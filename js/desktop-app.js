@@ -9,6 +9,15 @@ window.appState = {
     accounts: [],
     trashAccounts: [],
     customCategories: [],
+    groups: [],
+    groupInvites: [],
+    sharedAccounts: {},
+    sharedAccountCounts: {},
+    sharedEditRequests: {},
+    sharedEditRequestCounts: {},
+    decryptedSharedAccounts: {},
+    groupUnlocked: {},
+    currentGroupId: null,
     isOnline: typeof navigator === 'undefined' ? true : navigator.onLine !== false,
     firestoreFromCache: false,
     pendingSyncCount: 0,
@@ -113,6 +122,15 @@ function enterDemoMode() {
     }));
     window.appState.trashAccounts = [];
     window.appState.customCategories = DEFAULT_DEMO_CATEGORIES.map(category => ({ ...category }));
+    window.appState.groups = [];
+    window.appState.groupInvites = [];
+    window.appState.sharedAccounts = {};
+    window.appState.sharedAccountCounts = {};
+    window.appState.sharedEditRequests = {};
+    window.appState.sharedEditRequestCounts = {};
+    window.appState.decryptedSharedAccounts = {};
+    window.appState.groupUnlocked = {};
+    window.appState.currentGroupId = null;
     showAppShell();
     if (typeof hideSplash === 'function') hideSplash();
     updateHeader();
@@ -122,7 +140,7 @@ function enterDemoMode() {
 }
 
 // ===== NAVIGATION =====
-const pageTitles = { dashboard:'Tổng quan', bought:'TK Mua', personal:'Cá nhân', categories:'Danh mục', trash:'Thùng rác', settings:'Cài đặt', detail:'Chi tiết' };
+const pageTitles = { dashboard:'Tổng quan', bought:'TK Mua', personal:'Cá nhân', groups:'Nhóm', 'group-detail':'Chi tiết nhóm', categories:'Danh mục', trash:'Thùng rác', settings:'Cài đặt', detail:'Chi tiết' };
 
 function navigateTo(page) {
     window.appState.previousPage = window.appState.currentPage;
@@ -136,7 +154,9 @@ function navigateTo(page) {
     document.getElementById('search-input').value = '';
     // Sidebar active
     document.querySelectorAll('.d-nav-item[data-page]').forEach(i => {
-        i.classList.toggle('active', i.dataset.page === page || (page.startsWith('category:') && i.dataset.page === 'categories'));
+        i.classList.toggle('active', i.dataset.page === page
+            || (page === 'group-detail' && i.dataset.page === 'groups')
+            || (page.startsWith('category:') && i.dataset.page === 'categories'));
     });
     // Page title
     const categoryId = page.startsWith('category:') ? page.slice('category:'.length) : '';
@@ -147,6 +167,7 @@ function navigateTo(page) {
         case 'dashboard': renderDashboard(); break;
         case 'bought': renderAccountList('bought'); break;
         case 'personal': handlePersonalPage(); break;
+        case 'groups': renderGroupList(); break;
         case 'categories': renderCategoriesPage(); break;
         case 'trash': renderTrashList(); break;
         case 'settings': renderSettings(); break;
@@ -172,12 +193,21 @@ function updateHeader() {
     const personal = window.appState.accounts.filter(a => a.type === 'personal').length;
     const categories = window.appState.customCategories?.length || 0;
     const trash = window.appState.trashAccounts?.length || 0;
+    const groupInvites = window.appState.groupInvites?.length || 0;
+    const pendingGroupEdits = Object.values(window.appState.sharedEditRequests || {})
+        .flat()
+        .filter(request => request.status === 'pending'
+            && (request.reviewerUid === window.appState.user?.uid
+                || normalizeGroupEmail?.(request.reviewerEmail) === normalizeGroupEmail?.(window.appState.user?.email))).length;
+    const groups = (window.appState.groups?.length || 0) + groupInvites + pendingGroupEdits;
     document.getElementById('nav-badge-bought').textContent = bought || '';
     document.getElementById('nav-badge-personal').textContent = personal || '';
     const categoriesBadge = document.getElementById('nav-badge-categories');
     if (categoriesBadge) categoriesBadge.textContent = categories || '';
     const trashBadge = document.getElementById('nav-badge-trash');
     if (trashBadge) trashBadge.textContent = trash || '';
+    const groupsBadge = document.getElementById('nav-badge-groups');
+    if (groupsBadge) groupsBadge.textContent = groups || '';
     // Notification badge
     const notificationSettings = typeof getNotificationSettings === 'function' ? getNotificationSettings() : { inAppEnabled: true };
     const urgent = notificationSettings.inAppEnabled
@@ -198,6 +228,8 @@ function handleSearch(v) {
     const p = window.appState.currentPage;
     if (p === 'bought') renderAccountList('bought');
     else if (p === 'personal') renderAccountList('personal');
+    else if (p === 'groups') renderGroupList();
+    else if (p === 'group-detail') renderGroupDetail(window.appState.currentGroupId);
     else if (p === 'trash') renderTrashList();
     else if (p === 'categories') renderCategoriesPage();
     else if (p.startsWith('category:')) renderCategoryDetail(p.slice('category:'.length));
@@ -1211,6 +1243,8 @@ function rerenderCurrentView(accountId) {
     else if (page === 'dashboard') renderDashboard();
     else if (page === 'bought') renderAccountList('bought');
     else if (page === 'personal') renderAccountList('personal');
+    else if (page === 'groups') renderGroupList();
+    else if (page === 'group-detail') renderGroupDetail(window.appState.currentGroupId);
     else if (page === 'trash') renderTrashList();
     else if (page === 'categories') renderCategoriesPage();
     else if (page.startsWith('category:')) renderCategoryDetail(page.slice('category:'.length));
@@ -1333,6 +1367,484 @@ async function copyField(id, field) {
         return;
     }
     if (v) await copyToClipboard(v, l);
+}
+
+// ===== GROUPS =====
+function openCreateGroupModal() {
+    openModal('Tạo nhóm', `
+        <div class="form-section-title">Tên nhóm</div>
+        <input type="text" id="group-name" class="input" placeholder="VD: Team AI" style="padding-left:16px">
+        <div class="form-section-title">Mật khẩu chung</div>
+        <input type="password" id="group-password" class="input" placeholder="Tối thiểu 6 ký tự" style="padding-left:16px">
+        <div class="form-section-title">Nhập lại mật khẩu chung</div>
+        <input type="password" id="group-password-confirm" class="input" placeholder="Nhập lại mật khẩu" style="padding-left:16px" onkeydown="if(event.key==='Enter'){event.preventDefault();submitCreateGroup()}">
+        <button class="btn btn-primary" style="margin-top:18px" onclick="submitCreateGroup()">Tạo nhóm</button>
+    `);
+}
+
+async function submitCreateGroup() {
+    const name = document.getElementById('group-name')?.value || '';
+    const password = document.getElementById('group-password')?.value || '';
+    const confirmPassword = document.getElementById('group-password-confirm')?.value || '';
+    if (password !== confirmPassword) {
+        showToast('Mật khẩu nhập lại chưa khớp', 'error');
+        return;
+    }
+    try {
+        const groupId = await createGroup(name, password);
+        closeModal();
+        showToast('Đã tạo nhóm', 'success');
+        openGroupDetail(groupId);
+    } catch (error) {
+        console.error('Create group error:', error);
+        showToast(error.message || 'Không tạo được nhóm', 'error');
+    }
+}
+
+function openGroupDetail(groupId) {
+    const group = getGroupById?.(groupId);
+    if (!group) {
+        showToast('Không tìm thấy nhóm', 'error');
+        return;
+    }
+    window.appState.previousPage = window.appState.currentPage;
+    window.appState.currentPage = 'group-detail';
+    window.appState.currentGroupId = groupId;
+    document.querySelectorAll('.d-nav-item[data-page]').forEach(item => {
+        item.classList.toggle('active', item.dataset.page === 'groups');
+    });
+    document.getElementById('page-title').textContent = group.name || 'Chi tiết nhóm';
+    loadSharedAccountsRealtime?.(groupId);
+    loadSharedEditRequestsRealtime?.(groupId);
+    renderGroupDetail(groupId);
+    if (!isGroupUnlocked?.(groupId)) {
+        setTimeout(() => openUnlockGroupModal(groupId), 120);
+    }
+    document.getElementById('page-content')?.scrollTo?.({ top: 0 });
+}
+
+function openUnlockGroupModal(groupId) {
+    const group = getGroupById?.(groupId);
+    if (!group) return;
+    openModal('Mở khoá nhóm', `
+        <div class="group-unlock-title">${escapeHtml(group.name || '')}</div>
+        <div class="form-section-title">Mật khẩu chung</div>
+        <input type="password" id="group-unlock-password" class="input" placeholder="Nhập mật khẩu chung" style="padding-left:16px" onkeydown="if(event.key==='Enter'){event.preventDefault();submitUnlockGroup('${escapeJsAttr(groupId)}')}">
+        <button class="btn btn-primary" style="margin-top:18px" onclick="submitUnlockGroup('${escapeJsAttr(groupId)}')">Mở khoá</button>
+    `);
+    setTimeout(() => document.getElementById('group-unlock-password')?.focus(), 50);
+}
+
+async function submitUnlockGroup(groupId) {
+    const password = document.getElementById('group-unlock-password')?.value || '';
+    const ok = await unlockGroupWithPassword(groupId, password);
+    if (ok) closeModal();
+}
+
+async function unlockGroupWithPassword(groupId, password) {
+    const group = getGroupById?.(groupId);
+    if (!group) return false;
+    if (!password) {
+        showToast('Nhập mật khẩu chung', 'error');
+        return false;
+    }
+    try {
+        const ok = await verifyGroupPassword(group, password);
+        if (!ok) {
+            showToast('Mật khẩu chung không đúng', 'error');
+            return false;
+        }
+        setGroupUnlocked(groupId, password);
+        window.appState.decryptedSharedAccounts = Object.fromEntries(
+            Object.entries(window.appState.decryptedSharedAccounts || {}).filter(([key]) => !key.startsWith(`${groupId}:`))
+        );
+        showToast('Đã mở khoá nhóm', 'success');
+        if (window.appState.currentPage === 'group-detail') renderGroupDetail(groupId);
+        return true;
+    } catch (error) {
+        console.error('Unlock group error:', error);
+        showToast(error.message || 'Không mở khoá được nhóm', 'error');
+        return false;
+    }
+}
+
+async function handleAddGroupMember(groupId) {
+    const input = document.getElementById('group-member-email');
+    const email = input?.value || '';
+    try {
+        await addGroupMember(groupId, email);
+        if (input) input.value = '';
+        showToast('Đã gửi lời mời', 'success');
+    } catch (error) {
+        showToast(error.message || 'Không thêm được thành viên', 'error');
+    }
+}
+
+function openAcceptGroupInviteModal(groupId) {
+    const invite = getGroupInviteById?.(groupId);
+    if (!invite) return;
+    openModal('Chap nhan loi moi', `
+        <div class="group-unlock-title">${escapeHtml(invite.name || '')}</div>
+        <div class="form-section-title">Mat khau chung</div>
+        <input type="password" id="group-invite-password" class="input" placeholder="Nhap mat khau nhom" style="padding-left:16px" onkeydown="if(event.key==='Enter'){event.preventDefault();submitAcceptGroupInvite('${escapeJsAttr(groupId)}')}">
+        <button class="btn btn-primary" style="margin-top:18px" onclick="submitAcceptGroupInvite('${escapeJsAttr(groupId)}')">Chap nhan</button>
+    `);
+    setTimeout(() => document.getElementById('group-invite-password')?.focus(), 50);
+}
+
+async function submitAcceptGroupInvite(groupId) {
+    const password = document.getElementById('group-invite-password')?.value || '';
+    try {
+        await acceptGroupInvite(groupId, password);
+        closeModal();
+        showToast('Da tham gia nhom', 'success');
+        openGroupDetail(groupId);
+    } catch (error) {
+        showToast(error.message || 'Khong the tham gia nhom', 'error');
+    }
+}
+
+async function handleCancelGroupInvite(groupId, email = '') {
+    if (!confirm('Huy loi moi nay?')) return;
+    try {
+        await cancelGroupInvite(groupId, email);
+        showToast('Da huy loi moi', 'success');
+    } catch (error) {
+        showToast(error.message || 'Khong huy duoc loi moi', 'error');
+    }
+}
+
+async function handleRemoveGroupMember(groupId, email) {
+    if (!confirm(`Xoá ${email} khỏi nhóm?`)) return;
+    try {
+        await removeGroupMember(groupId, email);
+        showToast('Đã xoá thành viên', 'success');
+    } catch (error) {
+        showToast(error.message || 'Không xoá được thành viên', 'error');
+    }
+}
+
+async function handleRenameGroup(groupId) {
+    const group = getGroupById?.(groupId);
+    if (!group) return;
+    const name = prompt('Tên nhóm mới:', group.name || '');
+    if (name === null) return;
+    try {
+        await renameGroup(groupId, name);
+        showToast('Đã đổi tên nhóm', 'success');
+    } catch (error) {
+        showToast(error.message || 'Không đổi tên được nhóm', 'error');
+    }
+}
+
+async function handleDeleteGroup(groupId) {
+    const group = getGroupById?.(groupId);
+    if (!group) return;
+    if (!confirm(`Xoá nhóm "${group.name}"?`)) return;
+    try {
+        await deleteGroup(groupId);
+        showToast('Đã xoá nhóm', 'success');
+        navigateTo('groups');
+    } catch (error) {
+        showToast(error.message || 'Không xoá được nhóm', 'error');
+    }
+}
+
+function getSharedAccountById(groupId, accountId) {
+    return (window.appState.sharedAccounts?.[groupId] || []).find(account => account.id === accountId) || null;
+}
+
+function getSharedAccountCacheKey(groupId, accountId) {
+    return `${groupId}:${accountId}`;
+}
+
+async function decryptSharedAccountForDisplay(groupId, accountId) {
+    const key = getSharedAccountCacheKey(groupId, accountId);
+    if (window.appState.decryptedSharedAccounts?.[key]) return window.appState.decryptedSharedAccounts[key];
+    const password = getUnlockedGroupPassword?.(groupId);
+    const account = getSharedAccountById(groupId, accountId);
+    if (!password || !account) return null;
+    try {
+        const decrypted = await decryptSharedAccount(account, password);
+        window.appState.decryptedSharedAccounts[key] = decrypted;
+        if (window.appState.currentPage === 'group-detail' && window.appState.currentGroupId === groupId) {
+            renderGroupDetail(groupId);
+        }
+        return decrypted;
+    } catch (error) {
+        console.error('Decrypt shared account error:', error);
+        showToast('Không giải mã được tài khoản chia sẻ', 'error');
+        return null;
+    }
+}
+
+async function copySharedField(groupId, accountId, field) {
+    const decrypted = await decryptSharedAccountForDisplay(groupId, accountId);
+    if (!decrypted) return;
+    let value = '';
+    let label = '';
+    if (field === 'username') { value = decrypted.username; label = 'tài khoản'; }
+    else if (field === 'password') { value = decrypted.password; label = 'mật khẩu'; }
+    else if (field === '2fa' || field === 'twoFaCode') { value = decrypted.twoFaCode; label = '2FA'; }
+    if (!value) {
+        showToast(`Chưa lưu ${label || 'dữ liệu'} cho tài khoản này`, 'error');
+        return;
+    }
+    await copyToClipboard(value, label);
+}
+
+async function handleRemoveSharedAccount(groupId, accountId) {
+    const group = getGroupById?.(groupId);
+    const account = getSharedAccountById(groupId, accountId);
+    const isOwner = group?.role === 'owner';
+    const isSharer = account?.sharedByUid && account.sharedByUid === window.appState.user?.uid;
+    if (!isOwner && !isSharer) {
+        showToast('Chỉ chủ nhóm hoặc người chia sẻ được gỡ tài khoản', 'error');
+        return;
+    }
+    if (!confirm('Gỡ tài khoản này khỏi nhóm?')) return;
+    try {
+        await removeSharedAccount(groupId, accountId);
+        delete window.appState.decryptedSharedAccounts?.[getSharedAccountCacheKey(groupId, accountId)];
+        showToast('Đã gỡ tài khoản khỏi nhóm', 'success');
+    } catch (error) {
+        showToast(error.message || 'Không gỡ được tài khoản', 'error');
+    }
+}
+
+function canDirectEditSharedAccount(group, account) {
+    return group?.role === 'owner' || (account?.sharedByUid && account.sharedByUid === window.appState.user?.uid);
+}
+
+function renderSharedAccountEditForm(group, account, decrypted) {
+    const today = todayStr();
+    const defaultExpiry = new Date();
+    defaultExpiry.setDate(defaultExpiry.getDate() + 30);
+    const defaultExpiryValue = dateToInputValue(defaultExpiry);
+    const purchaseValue = account.purchaseDate || today;
+    const expiryValue = account.expiryDate || defaultExpiryValue;
+    const isLifetime = account.expiryType === 'lifetime';
+    const rawValue = [decrypted?.username, decrypted?.password, decrypted?.twoFaCode].filter(Boolean).join('|');
+    const direct = canDirectEditSharedAccount(group, account);
+    return `
+        <div class="form-section-title">Dan thong tin tai khoan</div>
+        <textarea class="textarea-paste" id="paste-input" placeholder="user@email.com|password123|2FA_CODE" oninput="previewParse()">${escapeHtml(rawValue)}</textarea>
+        <div id="parse-preview"></div>
+
+        <div class="form-section-title">Ten dich vu</div>
+        <input type="text" id="add-name" class="input" value="${escapeHtml(account.name || account.serviceName || '')}" style="padding-left:16px">
+
+        <div class="form-section-title">Thoi han</div>
+        <input type="text" id="add-smart-date" class="input smart-date-input" value="${isLifetime ? 'Vinh vien' : '30 ngay'}" placeholder="30 ngay, 28/04 30, 28/04 > 28/05" oninput="applySmartDateInput(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();applySmartDateInput(this.value)}">
+        <input type="hidden" id="add-purchase" value="${escapeHtml(purchaseValue)}">
+        <input type="hidden" id="add-expiry" value="${escapeHtml(expiryValue)}">
+        <div id="add-expiry-hint" class="quick-date-hint smart-date-preview"></div>
+        <div class="smart-date-options">
+            <label class="quick-lifetime"><input type="checkbox" id="add-date-custom" onchange="toggleSmartDateDetails(this)" checked> Tuy chinh chi tiet</label>
+            <label class="quick-lifetime"><input type="checkbox" id="add-lifetime" onchange="handleAddLifetimeToggle(this)" ${isLifetime ? 'checked' : ''}> Vinh vien</label>
+        </div>
+        <div id="smart-date-details" class="smart-date-details">
+            <div class="quick-date-grid">
+                <div class="quick-date-field">
+                    <label>Ngay mua</label>
+                    <input type="date" id="add-purchase-detail" class="input" value="${escapeHtml(purchaseValue)}" onchange="setAddPurchaseDate(this.value)">
+                </div>
+                <div class="quick-date-field">
+                    <label>Ngay het han</label>
+                    <input type="date" id="add-expiry-detail" class="input" value="${escapeHtml(expiryValue)}" onchange="setExpiryDate(inputValueToDate(this.value), 'tuy chinh')">
+                </div>
+            </div>
+        </div>
+
+        <div class="form-section-title">Ghi chu</div>
+        <textarea class="textarea-paste" id="add-note" style="min-height:100px">${escapeHtml(decrypted?.note || '')}</textarea>
+        <button class="btn btn-primary" style="margin-top:18px" onclick="submitSharedAccountEdit('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}')">${direct ? 'Luu thay doi' : 'Gui yeu cau duyet'}</button>
+    `;
+}
+
+function finishSharedAccountEditForm(account) {
+    const lifetime = account.expiryType === 'lifetime';
+    const lifetimeInput = document.getElementById('add-lifetime');
+    const smart = document.getElementById('add-smart-date');
+    const expiryDetail = document.getElementById('add-expiry-detail');
+    if (lifetimeInput) lifetimeInput.checked = lifetime;
+    if (smart) smart.disabled = lifetime;
+    if (expiryDetail) expiryDetail.disabled = lifetime;
+    updateAddExpiryHint?.('edit');
+    previewParse?.();
+}
+
+async function openSharedAccountEditModal(groupId, accountId) {
+    const group = getGroupById?.(groupId);
+    const account = getSharedAccountById(groupId, accountId);
+    if (!group || !account) return;
+    if (!isGroupUnlocked?.(groupId)) {
+        openUnlockGroupModal(groupId);
+        showToast('Mo khoa nhom truoc khi sua tai khoan', 'error');
+        return;
+    }
+    const decrypted = await decryptSharedAccountForDisplay(groupId, accountId);
+    if (!decrypted) return;
+    openModal('Sua tai khoan chia se', renderSharedAccountEditForm(group, account, decrypted));
+    finishSharedAccountEditForm(account);
+}
+
+function collectSharedAccountEditInput(groupId, accountId) {
+    const account = getSharedAccountById(groupId, accountId);
+    const decrypted = window.appState.decryptedSharedAccounts?.[getSharedAccountCacheKey(groupId, accountId)] || {};
+    const raw = document.getElementById('paste-input')?.value || '';
+    const parsed = parseAccountInput(raw) || {};
+    const rawName = document.getElementById('add-name')?.value?.trim() || '';
+    const smartName = parseSmartName(rawName);
+    const name = smartName.tags?.length ? smartName.name : rawName;
+    if (!name) return { ok: false, message: 'Nhap ten dich vu' };
+    const isLifetime = document.getElementById('add-lifetime')?.checked === true;
+    const purchaseDate = document.getElementById('add-purchase')?.value || account?.purchaseDate || todayStr();
+    const expiryDate = isLifetime ? null : (document.getElementById('add-expiry')?.value || account?.expiryDate || '');
+    if (!isLifetime && !expiryDate) return { ok: false, message: 'Chon ngay het han hoac bat Vinh vien' };
+    const username = parsed.username || decrypted.username || '';
+    const password = parsed.password || decrypted.password || '';
+    const twoFaCode = parsed.twoFaCode || decrypted.twoFaCode || '';
+    const note = autoTagNoteLinks(String(document.getElementById('add-note')?.value || '').trim());
+    const platform = smartName.platform || account?.platform || detectPlatform(name);
+    const tags = typeof normalizeTags === 'function'
+        ? normalizeTags([...(Array.isArray(account?.tags) ? account.tags : []), ...(smartName.tags || [])])
+        : [...(Array.isArray(account?.tags) ? account.tags : []), ...(smartName.tags || [])];
+    return {
+        ok: true,
+        account: {
+            ...account,
+            name,
+            serviceName: name,
+            platform,
+            purchaseDate,
+            expiryDate,
+            expiryType: isLifetime ? 'lifetime' : 'fixed',
+            status: getStatusFromExpiry(expiryDate, isLifetime ? 'lifetime' : 'fixed'),
+            displayUsername: maskUsername(username),
+            tags,
+            planTag: tags[0] || account?.planTag || null,
+            username,
+            password,
+            twoFaCode,
+            note,
+        },
+    };
+}
+
+async function submitSharedAccountEdit(groupId, accountId) {
+    const group = getGroupById?.(groupId);
+    const account = getSharedAccountById(groupId, accountId);
+    if (!group || !account) return;
+    const built = collectSharedAccountEditInput(groupId, accountId);
+    if (!built.ok) {
+        showToast(built.message, 'error');
+        return;
+    }
+    const sharedPassword = getUnlockedGroupPassword?.(groupId) || '';
+    if (!sharedPassword) {
+        openUnlockGroupModal(groupId);
+        return;
+    }
+    try {
+        if (canDirectEditSharedAccount(group, account)) {
+            await updateSharedAccountInGroup(groupId, accountId, built.account, sharedPassword);
+            delete window.appState.decryptedSharedAccounts?.[getSharedAccountCacheKey(groupId, accountId)];
+            showToast('Da luu tai khoan chia se', 'success');
+        } else {
+            await createSharedEditRequest(groupId, accountId, built.account, sharedPassword);
+            showToast('Da gui yeu cau sua, cho nguoi goc Accept', 'success');
+        }
+        closeModal();
+        renderGroupDetail(groupId);
+    } catch (error) {
+        showToast(error.message || 'Khong luu duoc thay doi', 'error');
+    }
+}
+
+async function handleAcceptSharedEditRequest(groupId, requestId) {
+    const request = getSharedEditRequestById?.(groupId, requestId);
+    if (!request || !confirm('Accept thay doi nay?')) return;
+    try {
+        await acceptSharedEditRequest(groupId, requestId);
+        if (request.accountId) delete window.appState.decryptedSharedAccounts?.[getSharedAccountCacheKey(groupId, request.accountId)];
+        showToast('Da Accept thay doi', 'success');
+    } catch (error) {
+        showToast(error.message || 'Khong Accept duoc yeu cau', 'error');
+    }
+}
+
+async function handleRejectSharedEditRequest(groupId, requestId) {
+    if (!confirm('Tu choi yeu cau sua nay?')) return;
+    try {
+        await rejectSharedEditRequest(groupId, requestId);
+        showToast('Da tu choi yeu cau', 'success');
+    } catch (error) {
+        showToast(error.message || 'Khong tu choi duoc yeu cau', 'error');
+    }
+}
+
+function renderShareAccountModal(accId) {
+    const groups = window.appState.groups || [];
+    if (!groups.length) {
+        return `<div class="empty-state compact"><div class="empty-state-title">Chưa có nhóm</div></div>`;
+    }
+    const options = groups.map(group => {
+        const lockedText = isGroupUnlocked?.(group.id) ? 'đã mở' : 'cần mật khẩu';
+        return `<option value="${escapeHtml(group.id)}">${escapeHtml(group.name)} - ${lockedText}</option>`;
+    }).join('');
+    const firstGroup = groups[0];
+    const passwordHidden = isGroupUnlocked?.(firstGroup.id) ? 'hidden' : '';
+    return `
+        <div class="form-section-title">Nhóm đích</div>
+        <select id="share-group-id" class="input" onchange="updateShareGroupPasswordVisibility()" style="padding-left:16px">${options}</select>
+        <div id="share-group-password-wrap" ${passwordHidden}>
+            <div class="form-section-title">Mật khẩu chung</div>
+            <input type="password" id="share-group-password" class="input" placeholder="Nhập mật khẩu chung của nhóm" style="padding-left:16px">
+        </div>
+        <button class="btn btn-primary" style="margin-top:18px" onclick="submitShareAccountToGroup('${escapeJsAttr(accId)}')">Chia sẻ</button>
+    `;
+}
+
+function openShareAccountModal(accId) {
+    const groups = window.appState.groups || [];
+    if (!groups.length) {
+        showToast('Bạn chưa có nhóm nào', 'error');
+        return;
+    }
+    openModal('Chia sẻ lên nhóm', renderShareAccountModal(accId));
+}
+
+function updateShareGroupPasswordVisibility() {
+    const groupId = document.getElementById('share-group-id')?.value || '';
+    const wrap = document.getElementById('share-group-password-wrap');
+    if (wrap) wrap.hidden = Boolean(isGroupUnlocked?.(groupId));
+}
+
+async function submitShareAccountToGroup(accId) {
+    const groupId = document.getElementById('share-group-id')?.value || '';
+    const group = getGroupById?.(groupId);
+    const acc = window.appState.accounts.find(account => account.id === accId);
+    if (!group || !acc) return;
+
+    let sharedPassword = getUnlockedGroupPassword?.(groupId) || '';
+    if (!sharedPassword) {
+        const passwordInput = document.getElementById('share-group-password')?.value || '';
+        const unlocked = await unlockGroupWithPassword(groupId, passwordInput);
+        if (!unlocked) return;
+        sharedPassword = getUnlockedGroupPassword?.(groupId) || '';
+    }
+
+    const sensitive = await getSensitiveAccountData(acc, 'Để chia sẻ tài khoản lên nhóm');
+    if (!sensitive) return;
+    try {
+        await shareAccountToGroup(groupId, { ...acc, ...sensitive, id: acc.id }, sharedPassword);
+        closeModal();
+        showToast('Đã chia sẻ tài khoản lên nhóm', 'success');
+    } catch (error) {
+        console.error('Share account to group error:', error);
+        showToast(error.message || 'Không chia sẻ được tài khoản', 'error');
+    }
 }
 
 function openExternalLink(url) {
@@ -2375,7 +2887,22 @@ function wrapNoteSelection(type) {
 }
 
 function autoTagNoteLinks(noteText) {
+    let blockTag = null;
     return String(noteText || '').split(/\r?\n/).map(line => {
+        const trimmed = line.trim();
+        if (blockTag) {
+            const closePattern = blockTag === 'copy' ? /\[\/copy\]|\[copy\]/i : /\[\/code\]|\[code\]/i;
+            if (closePattern.test(line)) blockTag = null;
+            return line;
+        }
+        const blockStart = trimmed.match(/^\[(copy|code)\]/i);
+        if (blockStart) {
+            const tag = blockStart[1].toLowerCase();
+            const rest = trimmed.slice(blockStart[0].length);
+            const sameLineClose = tag === 'copy' ? /\[\/copy\]|\[copy\]/i.test(rest) : /\[\/code\]|\[code\]/i.test(rest);
+            if (!sameLineClose) blockTag = tag;
+            return line;
+        }
         if (/^\s*\[(?:open|open\+copy|copy\+open|link|combo)\]/i.test(line)) return line;
         return line.replace(/https?:\/\/[^\s<>"')]+/gi, (url, offset, source) => {
             const before = source.slice(Math.max(0, offset - 16), offset);
@@ -2567,6 +3094,11 @@ function parseSmartDateRange(input) {
 }
 
 function applySmartDateInput(value) {
+    const lifetime = document.getElementById('add-lifetime');
+    if (lifetime?.checked) {
+        lifetime.checked = false;
+        handleAddLifetimeToggle(lifetime);
+    }
     const result = parseSmartDateRange(value);
     const purchase = document.getElementById('add-purchase');
     const expiry = document.getElementById('add-expiry');
@@ -2580,6 +3112,11 @@ function applySmartDateInput(value) {
 }
 
 function toggleSmartDateDetails(input) {
+    const lifetime = document.getElementById('add-lifetime');
+    if (lifetime?.checked) {
+        input.checked = false;
+        return;
+    }
     const box = document.getElementById('smart-date-details');
     if (box) box.hidden = !input.checked;
 }
@@ -2613,6 +3150,10 @@ function applyPurchaseQuickInput(value) {
 function setExpiryDate(date, label = '') {
     if (!date || Number.isNaN(date.getTime())) return;
     const lifetime = document.getElementById('add-lifetime');
+    if (lifetime?.checked) {
+        lifetime.checked = false;
+        handleAddLifetimeToggle(lifetime);
+    }
     const expiry = document.getElementById('add-expiry');
     const expiryDetail = document.getElementById('add-expiry-detail');
     if (lifetime) lifetime.checked = false;
@@ -2654,10 +3195,17 @@ function handleAddLifetimeToggle(input) {
     const expiryDetail = document.getElementById('add-expiry-detail');
     const smart = document.getElementById('add-smart-date');
     const quick = document.getElementById('add-duration-quick');
+    const custom = document.getElementById('add-date-custom');
+    const details = document.getElementById('smart-date-details');
     if (expiry) expiry.disabled = Boolean(input.checked);
     if (expiryDetail) expiryDetail.disabled = Boolean(input.checked);
     if (smart) smart.disabled = Boolean(input.checked);
     if (quick) quick.disabled = Boolean(input.checked);
+    if (custom) {
+        custom.disabled = Boolean(input.checked);
+        if (input.checked) custom.checked = false;
+    }
+    if (details && input.checked) details.hidden = true;
     updateAddExpiryHint();
 }
 
@@ -2715,7 +3263,7 @@ function buildAccountSaveInput(input = {}) {
     const type = input.type === 'personal' ? 'personal' : 'bought';
     const authMethod = typeof getAuthMethod === 'function' ? getAuthMethod(input.authMethod || 'email') : (input.authMethod || 'email');
     const linkedAccountId = authMethod === 'email' ? null : (input.linkedAccountId || null);
-    if (!name) return { ok: false, message: 'Nhap ten dich vu' };
+    if (!name) return { ok: false, message: 'Nhập tên dịch vụ' };
 
     const isL = input.isLifetime === true || input.expiryType === 'lifetime';
     const purchaseDate = normalizeSaveDate(input.purchaseDate || todayStr(), todayStr());
@@ -2727,7 +3275,7 @@ function buildAccountSaveInput(input = {}) {
         const result = parseQuickDuration(String(quickExpiry || ''), baseDate);
         expiryDate = result?.date ? dateToInputValue(result.date) : '';
     }
-    if (!isL && !expiryDate) return { ok: false, message: 'Chon ngay het han hoac bat Vinh vien' };
+    if (!isL && !expiryDate) return { ok: false, message: 'Chọn ngày hết hạn hoặc bật Vĩnh viễn' };
 
     const platform = input.platform || smartName.platform || detectPlatform(name);
     const explicitTags = [
@@ -2795,8 +3343,8 @@ async function persistNewAccount(input = {}, options = {}) {
 
     const { name, baseData, sensitiveData } = built;
     const successMessage = window.appState.isOnline === false
-        ? `Da luu "${name}" cuc bo, se sync khi co mang`
-        : `Da them "${name}"`;
+        ? `Đã lưu "${name}" cục bộ, sẽ đồng bộ khi có mạng`
+        : `Đã thêm "${name}"`;
 
     if (window.appState.isDemo) {
         const data = { ...baseData, ...sensitiveData, id: `demo_${Date.now()}` };
@@ -2812,19 +3360,19 @@ async function persistNewAccount(input = {}, options = {}) {
     try {
         let payload = { ...baseData, ...sensitiveData };
         if (baseData.protectedByMasterPassword) {
-            const unlocked = await requireMasterPassword(options.masterReason || 'De ma hoa tai khoan truoc khi luu');
-            if (!unlocked) return { ok: false, message: 'Da huy Master Password' };
+            const unlocked = await requireMasterPassword(options.masterReason || 'Để mã hóa tài khoản trước khi lưu');
+            if (!unlocked) return { ok: false, message: 'Đã hủy Master Password' };
             const encryptedPayload = await encryptAccountData(sensitiveData, window.appState.masterPassword);
             payload = { ...baseData, ...encryptedPayload };
         }
         const id = await addAccountToDB(payload);
-        if (!id) return { ok: false, message: 'Khong the luu tai khoan' };
+        if (!id) return { ok: false, message: 'Không thể lưu tài khoản' };
         if (options.closeModal) closeModal();
         if (options.toast !== false) showToast(successMessage, 'success');
         return { ok: true, id, name, message: successMessage };
     } catch (error) {
         console.error('Quick/add save error:', error);
-        const message = error.message || 'Khong the ma hoa/luu tai khoan';
+        const message = error.message || 'Không thể mã hóa/lưu tài khoản';
         if (options.toast !== false) showToast(message, 'error');
         return { ok: false, message };
     }
@@ -3031,6 +3579,7 @@ function finishEditFormInit(acc) {
         if (acc.expiryDate) expiryDetail.value = acc.expiryDate;
         expiryDetail.disabled = lifetime;
     }
+    if (lifetimeInput) handleAddLifetimeToggle(lifetimeInput);
     updateAddTagSuggestions?.();
     renderSelectedAddTags?.();
     updatePlatformPickerState?.();
@@ -3042,13 +3591,13 @@ function finishEditFormInit(acc) {
 async function editAccount(accId) {
     const acc = (window.appState.accounts || []).find(item => item.id === accId);
     if (!acc) return;
-    const decrypted = await getSensitiveAccountData(acc, 'Mo khoa de sua tai khoan');
+    const decrypted = await getSensitiveAccountData(acc, 'Mở khóa để sửa tài khoản');
     if (decrypted === null) return;
     const editData = initEditFormState(acc, decrypted || {});
     const html = typeof renderEditForm === 'function'
         ? renderEditForm(acc, decrypted || {})
         : renderAddForm(acc.type || 'bought', editData);
-    openModal('Sua tai khoan', html);
+    openModal('Sửa tài khoản', html);
     finishEditFormInit(editData);
 }
 
@@ -3064,7 +3613,7 @@ function collectEditedAccountInput(acc) {
         : null;
     const linkedOptions = authMethod === 'email' ? [] : getLinkedAccountOptions(authMethod);
     if (authMethod !== 'email' && linkedOptions.length > 0 && !linkedAccountId) {
-        return { ok: false, message: `Chon TK ${getAuthMethodLabel(authMethod)} goc` };
+        return { ok: false, message: `Chọn TK ${getAuthMethodLabel(authMethod)} gốc` };
     }
     const ssoUsername = linkedAccount ? getLinkedAccountUsernameForSave(linkedAccount) : (acc.username || acc.displayUsername || '');
     return buildAccountSaveInput({
@@ -3111,30 +3660,32 @@ async function saveEditedAccount(accId) {
     try {
         let payload = { ...baseData, ...sensitiveData };
         if (baseData.protectedByMasterPassword) {
-            const unlocked = await requireMasterPassword('Ma hoa lai tai khoan truoc khi luu');
+            const unlocked = await requireMasterPassword('Mã hóa lại tài khoản trước khi lưu');
             if (!unlocked) return;
             const encryptedPayload = await encryptAccountData(sensitiveData, window.appState.masterPassword);
             payload = { ...baseData, ...encryptedPayload };
         }
         if (window.appState.isDemo) {
             Object.assign(acc, payload);
+            window.appState.activeDecryptedAccount = { id: accId, data: { ...sensitiveData } };
             updateHeader();
             closeModal();
             window.appState.editingAccount = null;
-            showToast(`Da luu "${name}"`, 'success');
+            showToast(`Đã lưu "${name}"`, 'success');
             renderDetail(accId);
             return;
         }
         if (await updateAccountInDB(accId, payload)) {
             closeModal();
             window.appState.editingAccount = null;
-            showToast(`Da luu "${name}"`, 'success');
+            showToast(`Đã lưu "${name}"`, 'success');
             Object.assign(acc, payload);
+            window.appState.activeDecryptedAccount = { id: accId, data: { ...sensitiveData } };
             renderDetail(accId);
         }
     } catch (error) {
         console.error('Edit account error:', error);
-        showToast(error.message || 'Khong the luu thay doi', 'error');
+        showToast(error.message || 'Không thể lưu thay đổi', 'error');
     }
 }
 

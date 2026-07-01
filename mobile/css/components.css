@@ -893,7 +893,7 @@
     border:1px solid var(--border); font-size:13px; font-weight:700;
     vertical-align:baseline; transition:all var(--duration-normal);
 }
-.smart-note-token code { font-family:inherit; font-weight:800; overflow-wrap:anywhere; }
+.smart-note-token code { font-family:inherit; font-weight:800; overflow-wrap:anywhere; white-space:pre-wrap; text-align:left; }
 .note-copy-token { background:var(--bg-card); color:var(--text-primary); }
 .note-copy-token:hover { border-color:var(--accent); color:var(--accent); background:var(--accent-bg); }
 .note-link-token { color:#2563EB; background:#EFF6FF; border-color:#BFDBFE; text-decoration:none; }
@@ -2407,3 +2407,252 @@
     box-shadow:0 0 0 2px rgba(108,92,231,0.16), var(--shadow-3d);
 }
 /* ===== End Mobile Add Form Parity ===== */
+
+/* ===== Groups ===== */
+.group-page-head,
+.group-detail-head {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    margin-bottom:14px;
+}
+.group-page-desc,
+.group-card-meta,
+.shared-account-meta {
+    color:var(--text-secondary);
+    font-size:12px;
+    line-height:1.4;
+}
+.group-grid,
+.group-detail-grid,
+.shared-account-list,
+.group-member-list {
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+}
+.group-card,
+.group-panel,
+.shared-account-card {
+    width:100%;
+    padding:12px;
+    border-radius:var(--radius-md);
+    border:1px solid var(--border-light);
+    background:var(--bg-card);
+    box-shadow:var(--shadow-3d);
+}
+.group-card {
+    display:flex;
+    align-items:center;
+    gap:10px;
+    text-align:left;
+    color:var(--text-primary);
+}
+.group-card-icon,
+.group-detail-icon {
+    width:40px;
+    height:40px;
+    border-radius:var(--radius-md);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex-shrink:0;
+    background:var(--accent-bg);
+    color:var(--accent);
+}
+.group-card-icon svg,
+.group-detail-icon svg { width:21px; height:21px; }
+.group-card-main,
+.group-detail-main,
+.shared-account-info {
+    min-width:0;
+    flex:1;
+}
+.group-card-title,
+.group-detail-title {
+    font-size:15px;
+    font-weight:800;
+    color:var(--text-primary);
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.group-lock-badge {
+    flex-shrink:0;
+    min-height:22px;
+    padding:4px 8px;
+    border-radius:var(--radius-full);
+    font-size:11px;
+    font-weight:800;
+    color:var(--warning);
+    background:var(--warning-bg);
+}
+.group-lock-badge.unlocked {
+    color:var(--success);
+    background:var(--success-bg);
+}
+.group-detail-head {
+    justify-content:flex-start;
+    background:var(--bg-card);
+    border:1px solid var(--border-light);
+    border-radius:var(--radius-md);
+    padding:12px;
+}
+.group-detail-actions-inline,
+.group-panel-head,
+.group-panel-actions {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    flex-wrap:wrap;
+}
+.group-detail-actions-inline {
+    margin:0 0 12px;
+    justify-content:flex-start;
+}
+.group-member-row {
+    display:flex;
+    align-items:center;
+    gap:8px;
+    min-height:38px;
+    padding:8px;
+    border-radius:var(--radius-md);
+    background:var(--bg-secondary);
+}
+.group-member-email {
+    min-width:0;
+    flex:1;
+    overflow-wrap:anywhere;
+    font-weight:700;
+}
+.group-member-role {
+    flex-shrink:0;
+    font-size:11px;
+    font-weight:800;
+    color:var(--text-secondary);
+}
+.group-member-add {
+    display:flex;
+    gap:8px;
+    margin-top:10px;
+}
+.group-unlock-title {
+    font-size:15px;
+    font-weight:800;
+    margin-bottom:10px;
+}
+.shared-account-top {
+    display:flex;
+    align-items:center;
+    gap:10px;
+}
+.shared-secret-rows {
+    margin-top:10px;
+    padding-top:10px;
+    border-top:1px solid var(--border-light);
+}
+.shared-locked-note {
+    display:flex;
+    flex-direction:column;
+    align-items:flex-start;
+    gap:8px;
+    margin-top:10px;
+    color:var(--text-secondary);
+    font-size:12px;
+}
+.shared-remove-btn { margin-top:10px; }
+.group-invite-section { margin-bottom:14px; }
+.group-invite-card {
+    cursor:default;
+}
+.group-invite-actions {
+    display:flex;
+    align-items:center;
+    gap:7px;
+    flex-shrink:0;
+    flex-wrap:wrap;
+}
+.group-members-panel {
+    padding:13px;
+}
+.group-member-row {
+    min-height:34px;
+    padding:7px 9px;
+}
+.group-member-row.pending {
+    border:1px dashed var(--border);
+    background:rgba(108,92,231,0.06);
+}
+.group-member-email {
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    overflow-wrap:normal;
+}
+.group-member-add {
+    display:grid;
+    grid-template-columns:minmax(0, 1fr) auto;
+}
+.group-member-add .input {
+    min-width:0;
+}
+.shared-account-actions {
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+    margin-top:10px;
+}
+.shared-edit-requests {
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    margin-bottom:12px;
+}
+.shared-edit-request-card {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding:10px;
+    border:1px solid rgba(108,92,231,0.18);
+    border-radius:var(--radius-md);
+    background:var(--accent-bg);
+}
+.shared-edit-request-main {
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+}
+.shared-edit-request-main strong,
+.shared-edit-request-main span {
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.shared-edit-request-main span {
+    color:var(--text-secondary);
+    font-size:12px;
+    font-weight:700;
+}
+.shared-edit-request-actions {
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-shrink:0;
+    flex-wrap:wrap;
+}
+.empty-state.compact {
+    min-height:90px;
+    padding:16px;
+}
+.bottom-nav .nav-item { min-width:0; }
+.bottom-nav .nav-label {
+    font-size:10px;
+    max-width:100%;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}

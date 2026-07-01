@@ -15,6 +15,13 @@ const GITHUB_REPO_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}`;
 const GITHUB_RELEASES_URL = `${GITHUB_REPO_URL}/releases`;
 const GITHUB_LATEST_RELEASE_API = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`;
 const IS_TEST = process.argv.includes('--ting-test') || process.env.TING_TEST === '1';
+const QUIT_FOR_INSTALL_ARGS = new Set(['--quit-for-install', '--quit-for-update']);
+
+function hasQuitForInstallArg(argv = []) {
+  return argv.some(arg => QUIT_FOR_INSTALL_ARGS.has(String(arg || '').toLowerCase()));
+}
+
+const SHOULD_QUIT_FOR_INSTALL = hasQuitForInstallArg(process.argv);
 
 // Keep the browser URL as localhost for Firebase Auth, but avoid slow localhost
 // DNS/proxy paths on Windows by binding and resolving to IPv4 directly.
@@ -222,6 +229,10 @@ if (!gotSingleInstanceLock) {
   testLog('single instance lock failed');
   app.quit();
 }
+if (gotSingleInstanceLock && SHOULD_QUIT_FOR_INSTALL) {
+  testLog('quit-for-install requested without existing instance');
+  app.quit();
+}
 
 Menu.setApplicationMenu(null);
 
@@ -325,7 +336,7 @@ function createLocalServer() {
 // ===== PRE-START SERVER NGAY KHI MODULE LOAD =====
 // Không cần chờ app.whenReady() — http.createServer là Node.js thuần
 // → Tiết kiệm 1-2s vì server sẵn sàng trước khi window cần
-const serverReadyPromise = gotSingleInstanceLock ? createLocalServer().catch((error) => {
+const serverReadyPromise = gotSingleInstanceLock && !SHOULD_QUIT_FOR_INSTALL ? createLocalServer().catch((error) => {
   testLog('server pre-start error', error?.message || String(error));
   return null;
 }) : Promise.resolve(null);
@@ -336,6 +347,22 @@ function closeLocalServer() {
   localServer = null;
   appOrigin = '';
   appUrl = '';
+}
+
+function quitForInstall(reason = 'installer') {
+  testLog('quit-for-install', reason);
+  isQuitting = true;
+  try {
+    quickAddWindow?.close();
+    mainWindow?.close();
+  } catch {}
+  try {
+    tray?.destroy();
+    tray = null;
+  } catch {}
+  closeLocalServer();
+  app.quit();
+  setTimeout(() => app.exit(0), 2000).unref?.();
 }
 
 // ===== WINDOW MANAGEMENT =====
@@ -477,6 +504,9 @@ async function createMainWindow() {
     title: 'Ting!',
     backgroundColor: '#F8F9FC',
     icon: WINDOW_ICON,
+    // Ẩn title bar native của OS — tự dựng title bar tùy chỉnh trong renderer
+    // (nút thu nhỏ / phóng to / đóng nằm trong index.html + desktop.css)
+    frame: false,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -491,6 +521,14 @@ async function createMainWindow() {
     },
   });
   testLog('browserWindow created');
+
+  // ===== TITLE BAR TÙY CHỈNH: báo trạng thái maximize cho renderer =====
+  const sendMaximizeState = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send('window:maximize-changed', mainWindow.isMaximized());
+  };
+  mainWindow.on('maximize', sendMaximizeState);
+  mainWindow.on('unmaximize', sendMaximizeState);
 
   let windowShown = false;
   const showWhenReady = (reason = 'show') => {
@@ -893,6 +931,26 @@ function setupAutoUpdater() {
 
 // ===== IPC HANDLERS =====
 function setupIpc() {
+  // ===== ĐIỀU KHIỂN CỬA SỔ (title bar tùy chỉnh) =====
+  ipcMain.handle('window:minimize', (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.minimize();
+    return true;
+  });
+  ipcMain.handle('window:toggle-maximize', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return false;
+    if (win.isMaximized()) win.unmaximize();
+    else win.maximize();
+    return win.isMaximized();
+  });
+  ipcMain.handle('window:close', (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.close();
+    return true;
+  });
+  ipcMain.handle('window:is-maximized', (event) => {
+    return Boolean(BrowserWindow.fromWebContents(event.sender)?.isMaximized());
+  });
+
   ipcMain.handle('tray:update-tooltip', (_event, text) => {
     tray?.setToolTip(String(text || 'Ting!'));
     return true;
@@ -1057,10 +1115,14 @@ function registerGlobalShortcuts() {
 }
 
 // ===== APP LIFECYCLE =====
-if (gotSingleInstanceLock) {
+if (gotSingleInstanceLock && !SHOULD_QUIT_FOR_INSTALL) {
   testLog('single instance lock acquired');
-  app.on('second-instance', () => {
-    testLog('second-instance');
+  app.on('second-instance', (_event, commandLine = []) => {
+    testLog('second-instance', Array.isArray(commandLine) ? commandLine.join(' | ') : '');
+    if (hasQuitForInstallArg(commandLine)) {
+      quitForInstall('second-instance');
+      return;
+    }
     showMainWindow();
   });
 

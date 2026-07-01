@@ -800,6 +800,7 @@ async function signOut() {
         await stopBackgroundNotificationCheck?.();
         if (window.appState?.isDemo) {
             stopAccountsRealtime?.();
+            stopGroupsRealtime?.();
             window.appState.isDemo = false;
             window.appState.isLoggedIn = false;
             window.appState.masterUnlocked = false;
@@ -808,6 +809,15 @@ async function signOut() {
             window.appState.accounts = [];
             window.appState.trashAccounts = [];
             window.appState.customCategories = [];
+            window.appState.groups = [];
+            window.appState.groupInvites = [];
+            window.appState.sharedAccounts = {};
+            window.appState.sharedAccountCounts = {};
+            window.appState.sharedEditRequests = {};
+            window.appState.sharedEditRequestCounts = {};
+            window.appState.decryptedSharedAccounts = {};
+            window.appState.groupUnlocked = {};
+            window.appState.currentGroupId = null;
             if (typeof clearRevealedSecrets === 'function') clearRevealedSecrets();
             updateEmailVerificationBanner(null);
             showAuthScreen();
@@ -824,6 +834,7 @@ async function signOut() {
         writeAuthLocalSetting(AUTH_SESSION_META_KEY, null);
         // Reset state
         stopAccountsRealtime?.();
+        stopGroupsRealtime?.();
         window.appState.isLoggedIn = false;
         window.appState.masterUnlocked = false;
         window.appState.masterPassword = null;
@@ -831,6 +842,15 @@ async function signOut() {
         window.appState.accounts = [];
         window.appState.trashAccounts = [];
         window.appState.customCategories = [];
+        window.appState.groups = [];
+        window.appState.groupInvites = [];
+        window.appState.sharedAccounts = {};
+        window.appState.sharedAccountCounts = {};
+        window.appState.sharedEditRequests = {};
+        window.appState.sharedEditRequestCounts = {};
+        window.appState.decryptedSharedAccounts = {};
+        window.appState.groupUnlocked = {};
+        window.appState.currentGroupId = null;
         if (typeof clearRevealedSecrets === 'function') clearRevealedSecrets();
         updateEmailVerificationBanner(null);
         showAuthScreen();
@@ -915,6 +935,7 @@ async function setupAuthListener() {
 
 function resetAppSessionState() {
     stopAccountsRealtime?.();
+    stopGroupsRealtime?.();
     if (!window.appState) return;
     window.appState.isLoggedIn = false;
     window.appState.masterUnlocked = false;
@@ -923,6 +944,15 @@ function resetAppSessionState() {
     window.appState.accounts = [];
     window.appState.trashAccounts = [];
     window.appState.customCategories = [];
+    window.appState.groups = [];
+    window.appState.groupInvites = [];
+    window.appState.sharedAccounts = {};
+    window.appState.sharedAccountCounts = {};
+    window.appState.sharedEditRequests = {};
+    window.appState.sharedEditRequestCounts = {};
+    window.appState.decryptedSharedAccounts = {};
+    window.appState.groupUnlocked = {};
+    window.appState.currentGroupId = null;
     if (typeof clearRevealedSecrets === 'function') clearRevealedSecrets();
 }
 
@@ -958,6 +988,9 @@ async function handleAuthenticatedUser(user) {
     window.appState.masterUnlocked = false;
     window.appState.masterPassword = null;
     window.appState.activeDecryptedAccount = null;
+    window.appState.groupUnlocked = {};
+    window.appState.decryptedSharedAccounts = {};
+    window.appState.currentGroupId = null;
     if (typeof clearRevealedSecrets === 'function') clearRevealedSecrets();
     window.appState.user = {
         uid: user.uid,
@@ -976,6 +1009,7 @@ async function handleAuthenticatedUser(user) {
             await loadCloudUserSettings?.();
             await loadUserCategories?.();
             loadAccountsRealtime();
+            loadGroupsRealtime?.();
             await startBackgroundNotificationCheck?.();
         }
     } catch (error) {

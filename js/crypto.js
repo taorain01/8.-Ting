@@ -122,6 +122,14 @@ async function verifyMasterPasswordHash(masterPassword, storedHash, salt) {
     return timingSafeEqual(candidateHash, storedHash);
 }
 
+async function hashSharedPassword(sharedPassword, salt) {
+    return hashMasterPassword(sharedPassword, salt);
+}
+
+async function verifySharedPassword(sharedPassword, storedHash, salt) {
+    return verifyMasterPasswordHash(sharedPassword, storedHash, salt);
+}
+
 window.TingCrypto = {
     generateSalt,
     generateIv,
@@ -131,6 +139,8 @@ window.TingCrypto = {
     hashMasterPassword,
     verifyMasterPassword: verifyMasterPasswordHash,
     verifyMasterPasswordHash,
+    hashSharedPassword,
+    verifySharedPassword,
 };
 
 window.generateSalt = generateSalt;
@@ -140,6 +150,8 @@ window.encryptAccountData = encryptAccountData;
 window.decryptAccountData = decryptAccountData;
 window.hashMasterPassword = hashMasterPassword;
 window.verifyMasterPasswordHash = verifyMasterPasswordHash;
+window.hashSharedPassword = hashSharedPassword;
+window.verifySharedPassword = verifySharedPassword;
 
 
 // ===== TOTP (2FA) — tạo mã 6 số trực tiếp từ secret key =====

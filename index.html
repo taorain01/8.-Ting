@@ -57,6 +57,23 @@
     </style>
 </head>
 <body>
+    <!-- ===== NÚT ĐIỀU KHIỂN CỬA SỔ (Electron) — nổi góc phải, tích hợp topbar ===== -->
+    <div id="ting-titlebar" class="ting-titlebar" hidden>
+        <button class="ttb-btn" id="ttb-min" title="Thu nhỏ" aria-label="Thu nhỏ">
+            <svg viewBox="0 0 12 12" width="12" height="12"><rect x="1.5" y="5.6" width="9" height="1" fill="currentColor"/></svg>
+        </button>
+        <button class="ttb-btn" id="ttb-max" title="Phóng to" aria-label="Phóng to">
+            <svg class="ttb-ico-max" viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.1"><rect x="1.5" y="1.5" width="9" height="9"/></svg>
+            <svg class="ttb-ico-restore" viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.1" hidden>
+                <rect x="1.5" y="3.5" width="7" height="7"/>
+                <path d="M3.5 3.5V1.5h7v7H8.5"/>
+            </svg>
+        </button>
+        <button class="ttb-btn ttb-close" id="ttb-close" title="Đóng" aria-label="Đóng">
+            <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.1"><path d="M1.5 1.5l9 9M10.5 1.5l-9 9"/></svg>
+        </button>
+    </div>
+
     <!-- ===== SPLASH SCREEN — hiện ngay khi HTML paint ===== -->
     <div id="ting-splash">
         <img class="splash-logo" src="assets/icons/icon-512.png" alt="" width="80" height="80">
@@ -165,6 +182,11 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/><circle cx="12" cy="16" r="1"/></svg>
                         <span>Cá nhân</span>
                         <span class="d-nav-badge" id="nav-badge-personal"></span>
+                    </button>
+                    <button class="d-nav-item" data-page="groups" onclick="navigateTo('groups')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+                        <span>Nhóm</span>
+                        <span class="d-nav-badge" id="nav-badge-groups"></span>
                     </button>
                     <button class="d-nav-item" data-page="categories" onclick="navigateTo('categories')">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>
@@ -305,6 +327,42 @@
     <script defer src="js/crypto.js"></script>
     <script defer src="js/db.js"></script>
     <script defer src="js/auth.js"></script>
+    <script defer src="js/groups.js"></script>
     <script defer src="js/desktop-app.js"></script>
+
+    <!-- ===== ĐIỀU KHIỂN TITLE BAR TÙY CHỈNH (Electron) ===== -->
+    <script>
+    (function () {
+        var api = window.electronAPI;
+        if (!api || !api.isElectron) return; // Web: giữ nguyên, không hiện titlebar
+
+        document.body.classList.add('is-electron');
+        var bar = document.getElementById('ting-titlebar');
+        if (bar) bar.hidden = false;
+
+        var btnMin = document.getElementById('ttb-min');
+        var btnMax = document.getElementById('ttb-max');
+        var btnClose = document.getElementById('ttb-close');
+        var icoMax = btnMax && btnMax.querySelector('.ttb-ico-max');
+        var icoRestore = btnMax && btnMax.querySelector('.ttb-ico-restore');
+
+        function setMaximized(isMax) {
+            if (!icoMax || !icoRestore) return;
+            icoMax.hidden = isMax;
+            icoRestore.hidden = !isMax;
+            if (btnMax) btnMax.title = isMax ? 'Khôi phục' : 'Phóng to';
+        }
+
+        if (btnMin) btnMin.addEventListener('click', function () { api.minimizeWindow(); });
+        if (btnMax) btnMax.addEventListener('click', function () { api.toggleMaximizeWindow(); });
+        if (btnClose) btnClose.addEventListener('click', function () { api.closeWindow(); });
+
+        // Đồng bộ icon phóng to / khôi phục theo trạng thái cửa sổ
+        if (api.onMaximizeChanged) api.onMaximizeChanged(setMaximized);
+        if (api.isWindowMaximized) {
+            api.isWindowMaximized().then(setMaximized).catch(function () {});
+        }
+    })();
+    </script>
 </body>
 </html>

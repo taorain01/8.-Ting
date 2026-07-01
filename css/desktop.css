@@ -421,7 +421,7 @@ kbd { padding:2px 6px; border-radius:4px; background:var(--bg-tertiary); font-si
     border:1px solid var(--border); font-size:13px; font-weight:700;
     vertical-align:baseline; transition:all var(--duration-normal);
 }
-.smart-note-token code { font-family:inherit; font-weight:800; overflow-wrap:anywhere; }
+.smart-note-token code { font-family:inherit; font-weight:800; overflow-wrap:anywhere; white-space:pre-wrap; text-align:left; }
 .note-copy-token { background:var(--bg-card); color:var(--text-primary); }
 .note-copy-token:hover { border-color:var(--accent); color:var(--accent); background:var(--accent-bg); }
 .note-link-token { color:#2563EB; background:#EFF6FF; border-color:#BFDBFE; text-decoration:none; }
@@ -803,3 +803,50 @@ kbd { padding:2px 6px; border-radius:4px; background:var(--bg-tertiary); font-si
     background:rgba(37,99,235,0.18);
     border-color:rgba(147,197,253,0.25);
 }
+
+
+/* === ĐIỀU KHIỂN CỬA SỔ TÍCH HỢP (Electron frameless) === */
+/* Cụm 3 nút nổi ở góc phải trên, đè lên topbar — KHÔNG tạo thanh riêng */
+.ting-titlebar {
+    position:fixed; top:0; right:0; z-index:10001;
+    display:flex; align-items:stretch; height:40px;
+    -webkit-app-region:no-drag;
+}
+.ting-titlebar[hidden] { display:none; }
+.ttb-btn {
+    width:46px; height:100%; border:none; background:transparent; color:#6B7280;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; transition:background 0.15s ease, color 0.15s ease;
+    -webkit-app-region:no-drag; position:relative; z-index:1;
+}
+.ttb-btn svg { display:block; }
+.ttb-btn svg[hidden] { display:none; }
+.ttb-btn:hover { background:rgba(0,0,0,0.06); color:#111827; }
+.ttb-close:hover { background:#E81123; color:#fff; }
+[data-theme="dark"] .ttb-btn { color:rgba(255,255,255,0.65); }
+[data-theme="dark"] .ttb-btn:hover { background:rgba(255,255,255,0.12); color:#fff; }
+
+/* Vùng kéo cửa sổ — CHỈ đặt ở nơi KHÔNG có cụm nút đè lên (tránh xung đột drag/no-drag
+   qua các stacking context khác nhau). Cụm nút nổi ở góc phải nên phần .d-topbar-right
+   và padding phải của topbar KHÔNG được là vùng kéo. */
+body.is-electron .d-sidebar-header,
+body.is-electron .d-topbar-left,
+body.is-electron .d-topbar-center { -webkit-app-region:drag; }
+
+/* Các phần tử tương tác nằm trong vùng kéo phải cho phép click (no-drag) */
+body.is-electron .d-topbar-left button,
+body.is-electron .d-topbar-left a,
+body.is-electron .d-topbar-center button,
+body.is-electron .d-topbar-center input,
+body.is-electron .d-topbar-center a,
+body.is-electron .d-topbar-center .d-search-wrap,
+body.is-electron .d-topbar-center .quick-platform-filter,
+body.is-electron .d-sidebar-header a { -webkit-app-region:no-drag; }
+
+/* Chừa chỗ cho cụm nút ở góc phải topbar để không đè lên user/thông báo */
+body.is-electron .d-topbar { padding-right:150px; }
+
+/* Vùng kéo cho màn hình đăng nhập (chưa có sidebar/topbar) */
+body.is-electron .d-auth-left { -webkit-app-region:drag; }
+body.is-electron .d-auth-left a,
+body.is-electron .d-auth-left button { -webkit-app-region:no-drag; }

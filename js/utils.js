@@ -495,28 +495,77 @@ function renderInlineNoteSegments(line) {
     return html;
 }
 
+function findNoteBlockClose(line, tag) {
+    const closePattern = tag === 'copy' ? /\[\/copy\]|\[copy\]/i : /\[\/code\]|\[code\]/i;
+    const match = closePattern.exec(line);
+    return match ? { index: match.index, length: match[0].length } : null;
+}
+
+function collectNoteBlock(lines, startIndex, tag, firstContent) {
+    const parts = [];
+    const sameLineClose = findNoteBlockClose(firstContent, tag);
+    if (sameLineClose) {
+        parts.push(firstContent.slice(0, sameLineClose.index));
+        return { text: parts.join('\n').trim(), nextIndex: startIndex };
+    }
+
+    parts.push(firstContent);
+    for (let index = startIndex + 1; index < lines.length; index += 1) {
+        const close = findNoteBlockClose(lines[index], tag);
+        if (close) {
+            parts.push(lines[index].slice(0, close.index));
+            return { text: parts.join('\n').trim(), nextIndex: index };
+        }
+        parts.push(lines[index]);
+    }
+
+    return { text: parts.join('\n').trim(), nextIndex: lines.length - 1 };
+}
+
 function renderSmartNote(note) {
     const source = String(note || '').trim();
     if (!source) return '';
 
     const lines = source.split(/\r?\n/);
-    const rows = lines.map(line => {
+    const rows = [];
+
+    for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index];
         const trimmed = line.trim();
-        if (!trimmed) return '<div class="smart-note-line">&nbsp;</div>';
+        if (!trimmed) {
+            rows.push('<div class="smart-note-line">&nbsp;</div>');
+            continue;
+        }
 
         const comboMatch = trimmed.match(/^\[(?:open\+copy|copy\+open|link\+copy|copy\+link|combo)\]\s*(.+)$/i);
         if (comboMatch) {
             const action = parseCombinedNoteAction(comboMatch[1]);
-            if (action) return `<div class="smart-note-line">${renderCombinedNoteToken(action)}</div>`;
+            if (action) {
+                rows.push(`<div class="smart-note-line">${renderCombinedNoteToken(action)}</div>`);
+                continue;
+            }
         }
 
-        const copyMatch = trimmed.match(/^(?:\[(?:copy|code)\]|copy\s*:|code\s*:|copy\s*-\s*)(.+)$/i);
-        if (copyMatch) return `<div class="smart-note-line">${renderCopyNoteToken(copyMatch[1].trim(), 'Copy')}</div>`;
+        const blockMatch = trimmed.match(/^\[(copy|code)\]\s*([\s\S]*)$/i);
+        if (blockMatch) {
+            const tag = blockMatch[1].toLowerCase();
+            const block = collectNoteBlock(lines, index, tag, blockMatch[2] || '');
+            rows.push(`<div class="smart-note-line">${renderCopyNoteToken(block.text, tag === 'code' ? 'Code' : 'Copy')}</div>`);
+            index = block.nextIndex;
+            continue;
+        }
 
-        return `<div class="smart-note-line">${renderInlineNoteSegments(line)}</div>`;
-    }).join('');
+        const copyMatch = trimmed.match(/^(?:copy\s*:|code\s*:|copy\s*-\s*)(.+)$/i);
+        if (copyMatch) {
+            const label = /^code\s*:/i.test(trimmed) ? 'Code' : 'Copy';
+            rows.push(`<div class="smart-note-line">${renderCopyNoteToken(copyMatch[1].trim(), label)}</div>`);
+            continue;
+        }
 
-    return `<div class="smart-note">${rows}</div>`;
+        rows.push(`<div class="smart-note-line">${renderInlineNoteSegments(line)}</div>`);
+    }
+
+    return `<div class="smart-note">${rows.join('')}</div>`;
 }
 
 

@@ -90,6 +90,10 @@ function isMutedAccountInQuickFilter(acc) {
     return acc?.status === 'expired' || isFreePlanAccount(acc);
 }
 
+function isDashboardSuggestionAccount(acc) {
+    return acc?.status !== 'expired';
+}
+
 function accountMatchesPlatformQuickFilter(acc, platform) {
     if (!platform) return true;
     return (getResolvedPlatform(acc) || '') === platform;
@@ -98,6 +102,7 @@ function accountMatchesPlatformQuickFilter(acc, platform) {
 function getQuickPlatformStats(accounts = []) {
     const map = new Map();
     accounts.forEach(acc => {
+        if (!isDashboardSuggestionAccount(acc)) return;
         const platform = getResolvedPlatform(acc) || acc?.platform || '';
         if (!platform) return;
         if (!map.has(platform)) map.set(platform, { platform, count: 0, mutedCount: 0 });
@@ -114,6 +119,7 @@ function getQuickPlatformStats(accounts = []) {
 function getQuickTagStats(accounts = []) {
     const map = new Map();
     accounts.forEach(acc => {
+        if (!isDashboardSuggestionAccount(acc)) return;
         (acc?.tags || []).forEach(tag => {
             if (!tag) return;
             const key = typeof normalizeTagKey === 'function' ? normalizeTagKey(tag) : String(tag).toLowerCase();
@@ -127,8 +133,9 @@ function getQuickTagStats(accounts = []) {
 function renderQuickAccountIconFilter(accounts = window.appState?.accounts || []) {
     const el = document.getElementById('quick-platform-filter');
     if (!el) return '';
-    const stats = getQuickPlatformStats(accounts).slice(0, 24);
-    const tagStats = getQuickTagStats(accounts);
+    const eligibleAccounts = (accounts || []).filter(isDashboardSuggestionAccount);
+    const stats = getQuickPlatformStats(eligibleAccounts).slice(0, 24);
+    const tagStats = getQuickTagStats(eligibleAccounts);
     if (!stats.length && !tagStats.length) {
         el.innerHTML = '';
         el.classList.remove('open');
@@ -165,7 +172,7 @@ function renderQuickAccountIconFilter(accounts = window.appState?.accounts || []
     <div class="quick-platform-panel" role="menu">
     <button type="button" class="quick-platform-chip ${active || activeTag ? '' : 'active'}" onclick="setGlobalQuickFilter('', '')" title="Tat ca tai khoan" role="menuitem">
         <span class="quick-platform-chip-all">All</span>
-        <span class="quick-platform-count">${accounts.length}</span>
+        <span class="quick-platform-count">${eligibleAccounts.length}</span>
     </button>`;
     stats.forEach(stat => {
         const label = getPlatformLabel(stat.platform, []);
@@ -285,6 +292,7 @@ function renderDashboardPlatformGrid(accounts = []) {
 function renderDashboard() {
     const accounts = window.appState.accounts;
     const sortedAccounts = sortAccountsByPriority(accounts);
+    const suggestionAccounts = sortedAccounts.filter(isDashboardSuggestionAccount);
     const platformFilter = window.appState.currentPlatformFilter || '';
     const total = accounts.length;
     const expiring = accounts.filter(a => a.status === 'expiring').length;
@@ -296,20 +304,20 @@ function renderDashboard() {
         5
     );
     const pinnedAccounts = takeUniqueDashboardAccounts(
-        sortedAccounts.filter(a => isAccountPinned(a)),
+        suggestionAccounts.filter(a => isAccountPinned(a)),
         shownKeys,
         5
     );
     const favoriteAccounts = takeUniqueDashboardAccounts(
-        sortedAccounts.filter(a => isAccountFavorite(a)),
+        suggestionAccounts.filter(a => isAccountFavorite(a)),
         shownKeys,
         5
     );
-    const recent = takeUniqueDashboardAccounts(sortedAccounts, shownKeys, 5);
+    const recent = takeUniqueDashboardAccounts(suggestionAccounts, shownKeys, 5);
 
     const active = total - expiring - expired;
     let html = `
-        ${platformFilter ? '' : renderDashboardPlatformGrid(accounts)}
+        ${platformFilter ? '' : renderDashboardPlatformGrid(suggestionAccounts)}
         <div class="summary-row-compact anim-stagger">
             <div class="summary-chip total anim-fade-in-up">
                 <div class="summary-chip-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
@@ -334,7 +342,7 @@ function renderDashboard() {
         </div>`;
 
     if (platformFilter) {
-        const matches = sortAccountsByPriority(accounts.filter(acc => accountMatchesPlatformQuickFilter(acc, platformFilter)));
+        const matches = sortAccountsByPriority(accounts.filter(acc => isDashboardSuggestionAccount(acc) && accountMatchesPlatformQuickFilter(acc, platformFilter)));
         html += renderQuickFilterResultHead(platformFilter, matches);
         html += matches.length
             ? `<div class="account-list anim-stagger">${matches.map(acc => renderAccountCard(acc, acc.type === 'personal')).join('')}</div>`
@@ -343,7 +351,7 @@ function renderDashboard() {
         return;
     }
 
-    const justAdded = typeof getJustAddedAccount === 'function' ? getJustAddedAccount(accounts) : null;
+    const justAdded = typeof getJustAddedAccount === 'function' ? getJustAddedAccount(suggestionAccounts) : null;
     if (justAdded) {
         shownKeys.add(justAdded.id);
         html += `<div class="section-header just-added-header"><span class="section-title">✨ Vừa thêm</span><button type="button" class="just-added-dismiss" onclick="dismissJustAddedAccount()" aria-label="Ẩn">×</button></div>`;
@@ -1212,6 +1220,7 @@ function renderDetail(accId) {
         ${acc.status !== 'expired' ? `<button class="renew-btn renew-btn-expire" onclick="markAccountExpired('${acc.id}')">⏱ Hết hạn ngay</button>` : ''}
     </div>` : ''}
     <div style="display:flex;gap:12px;margin-top:24px">
+        <button class="btn btn-outline btn-sm" style="flex:1" onclick="openShareAccountModal('${acc.id}')">Chia sẻ</button>
         <button class="btn btn-outline btn-sm" style="flex:1" onclick="editAccount('${acc.id}')">Sửa</button>
         <button class="btn btn-danger-outline btn-sm" style="flex:1" onclick="deleteAccount('${acc.id}')">Xoá</button>
     </div>`;
@@ -1239,6 +1248,303 @@ function renderTwoFaExtra(acc, secret, isTotp) {
         </div>`;
     }
     return `<div class="detail-row totp-web-row"><span class="detail-label"></span><button type="button" class="btn btn-sm btn-outline" onclick="openWeb2FA('${safeSecret}')">?? T?o m? 2FA tr�n web</button></div>`;
+}
+
+// ===== GROUPS =====
+function getGroupRoleLabel(group) {
+    return group?.role === 'owner' ? 'Chủ nhóm' : 'Thành viên';
+}
+
+function getGroupLockLabel(groupId) {
+    return isGroupUnlocked?.(groupId) ? 'Mở' : 'Đã khoá';
+}
+
+function renderGroupCard(group) {
+    const count = window.appState.sharedAccountCounts?.[group.id] ?? group.sharedAccountCount ?? 0;
+    const unlocked = Boolean(isGroupUnlocked?.(group.id));
+    return `<button class="group-card anim-fade-in-up" onclick="openGroupDetail('${escapeJsAttr(group.id)}')">
+        <div class="group-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
+        <div class="group-card-main">
+            <div class="group-card-title">${escapeHtml(group.name || 'Nhóm')}</div>
+            <div class="group-card-meta">${escapeHtml(getGroupRoleLabel(group))} · ${(group.memberEmails || []).length} thành viên · ${count} TK</div>
+        </div>
+        <span class="group-lock-badge ${unlocked ? 'unlocked' : ''}">${escapeHtml(getGroupLockLabel(group.id))}</span>
+    </button>`;
+}
+
+function renderGroupList() {
+    const groups = window.appState.groups || [];
+    const query = String(window.appState.searchQuery || '').trim().toLowerCase();
+    const filtered = query
+        ? groups.filter(group => (group.name || '').toLowerCase().includes(query)
+            || (group.ownerEmail || '').toLowerCase().includes(query)
+            || (group.memberEmails || []).some(email => email.includes(query)))
+        : groups;
+    document.getElementById('page-content').innerHTML = `
+        <div class="group-page-head anim-fade-in-up">
+            <div>
+                <div class="section-title">Nhóm</div>
+                <div class="group-page-desc">${filtered.length} nhóm</div>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="openCreateGroupModal()">Tạo</button>
+        </div>
+        ${filtered.length
+            ? `<div class="group-grid">${filtered.map(renderGroupCard).join('')}</div>`
+            : `<div class="empty-state anim-fade-in-up"><div class="empty-state-icon">👥</div><div class="empty-state-title">Chưa có nhóm</div><div class="empty-state-desc">Tạo nhóm để chia sẻ tài khoản dùng chung.</div></div>`}
+    `;
+}
+
+function renderGroupMembers(group) {
+    const isOwner = group.role === 'owner';
+    const ownerEmail = normalizeGroupEmail?.(group.ownerEmail) || group.ownerEmail || '';
+    return `<div class="group-panel anim-fade-in-up">
+        <div class="group-panel-head"><div class="section-title">Thành viên</div><span class="section-badge">${(group.memberEmails || []).length}</span></div>
+        <div class="group-member-list">
+            ${(group.memberEmails || []).map(email => {
+                const isGroupOwnerEmail = normalizeGroupEmail?.(email) === ownerEmail;
+                return `<div class="group-member-row">
+                    <span class="group-member-email">${escapeHtml(email)}</span>
+                    <span class="group-member-role">${isGroupOwnerEmail ? 'Chủ nhóm' : 'Thành viên'}</span>
+                    ${isOwner && !isGroupOwnerEmail ? `<button class="copy-btn" onclick="handleRemoveGroupMember('${escapeJsAttr(group.id)}','${escapeJsAttr(email)}')" title="Xoá"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>` : ''}
+                </div>`;
+            }).join('')}
+        </div>
+        ${isOwner ? `<div class="group-member-add"><input type="email" id="group-member-email" class="input" placeholder="email@domain.com"><button class="btn btn-primary btn-sm" onclick="handleAddGroupMember('${escapeJsAttr(group.id)}')">Thêm</button></div>` : ''}
+    </div>`;
+}
+
+function renderGroupCopyIconSvg() {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+}
+
+function renderSharedAccountMeta(account) {
+    const platformRef = getResolvedPlatform(account) || account.platform || account;
+    const logoStyle = typeof getPlatformLogoStyle === 'function'
+        ? getPlatformLogoStyle(platformRef, account.name || account.serviceName || '')
+        : `background:${stringToColor(account.name || account.serviceName || 'TK')}20;color:${stringToColor(account.name || account.serviceName || 'TK')}`;
+    const logoMark = typeof renderPlatformLogoMark === 'function'
+        ? renderPlatformLogoMark(platformRef, getPlatformEmoji(platformRef))
+        : getPlatformEmoji(platformRef);
+    const expiryText = account.expiryType === 'lifetime' ? 'Vĩnh viễn' : formatDateVN(account.expiryDate);
+    return { logoStyle, logoMark, expiryText };
+}
+
+function renderSharedSecretRows(group, account, decrypted) {
+    const canRemove = group.role === 'owner' || account.sharedByUid === window.appState.user?.uid;
+    return `<div class="shared-secret-rows">
+        <div class="detail-row"><span class="detail-label">Tài khoản</span><span class="detail-value secret-value">${escapeHtml(decrypted.username || '')} <button class="copy-btn" onclick="copySharedField('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','username')">${renderGroupCopyIconSvg()}</button></span></div>
+        <div class="detail-row"><span class="detail-label">Mật khẩu</span><span class="detail-value secret-value">${escapeHtml(decrypted.password || '')} <button class="copy-btn" onclick="copySharedField('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','password')">${renderGroupCopyIconSvg()}</button></span></div>
+        ${decrypted.twoFaCode ? `<div class="detail-row"><span class="detail-label">2FA</span><span class="detail-value secret-value">${escapeHtml(decrypted.twoFaCode)} <button class="copy-btn" onclick="copySharedField('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','2fa')">${renderGroupCopyIconSvg()}</button></span></div>` : ''}
+        ${decrypted.note ? `<div class="detail-row detail-note-row"><span class="detail-label">Ghi chú</span><div class="detail-note-value">${renderSmartNote(decrypted.note)}</div></div>` : ''}
+        ${canRemove ? `<button class="btn btn-sm btn-danger-outline shared-remove-btn" onclick="handleRemoveSharedAccount('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}')">Gỡ khỏi nhóm</button>` : ''}
+    </div>`;
+}
+
+function renderSharedAccountCard(group, account) {
+    const meta = renderSharedAccountMeta(account);
+    const unlocked = Boolean(isGroupUnlocked?.(group.id));
+    const key = `${group.id}:${account.id}`;
+    const decrypted = window.appState.decryptedSharedAccounts?.[key];
+    if (unlocked && !decrypted) {
+        window.appState.decryptingSharedAccounts = window.appState.decryptingSharedAccounts || {};
+        if (!window.appState.decryptingSharedAccounts[key]) {
+            window.appState.decryptingSharedAccounts[key] = true;
+            decryptSharedAccountForDisplay(group.id, account.id).finally(() => {
+                delete window.appState.decryptingSharedAccounts[key];
+            });
+        }
+    }
+    return `<div class="shared-account-card anim-fade-in-up">
+        <div class="shared-account-top">
+            <div class="account-logo" style="${meta.logoStyle}">${meta.logoMark}</div>
+            <div class="shared-account-info">
+                <div class="account-name">${escapeHtml(account.name || account.serviceName || 'Tài khoản')}</div>
+                <div class="account-user">${escapeHtml(account.displayUsername || '')}</div>
+                <div class="shared-account-meta">${escapeHtml(meta.expiryText || '')}${account.sharedByEmail ? ` · ${escapeHtml(account.sharedByEmail)}` : ''}</div>
+            </div>
+        </div>
+        ${unlocked
+            ? (decrypted ? renderSharedSecretRows(group, account, decrypted) : '<div class="shared-locked-note">Đang giải mã...</div>')
+            : `<div class="shared-locked-note"><span>Nội dung nhạy cảm đang ẩn</span><button class="btn btn-sm btn-outline" onclick="openUnlockGroupModal('${escapeJsAttr(group.id)}')">Nhập mật khẩu chung để xem</button></div>`}
+    </div>`;
+}
+
+function renderGroupSharedAccounts(group) {
+    const accounts = window.appState.sharedAccounts?.[group.id] || [];
+    const unlocked = Boolean(isGroupUnlocked?.(group.id));
+    return `<div class="group-panel group-shared-panel anim-fade-in-up">
+        <div class="group-panel-head">
+            <div class="section-title">Tài khoản chia sẻ</div>
+            <div class="group-panel-actions">
+                <span class="group-lock-badge ${unlocked ? 'unlocked' : ''}">${escapeHtml(getGroupLockLabel(group.id))}</span>
+                ${unlocked ? '' : `<button class="btn btn-sm btn-outline" onclick="openUnlockGroupModal('${escapeJsAttr(group.id)}')">Mở khoá</button>`}
+            </div>
+        </div>
+        ${accounts.length
+            ? `<div class="shared-account-list">${accounts.map(account => renderSharedAccountCard(group, account)).join('')}</div>`
+            : `<div class="empty-state compact"><div class="empty-state-title">Chưa có tài khoản chia sẻ</div></div>`}
+    </div>`;
+}
+
+function renderGroupDetail(groupId) {
+    const group = getGroupById?.(groupId);
+    if (!group) {
+        renderGroupList();
+        return;
+    }
+    const isOwner = group.role === 'owner';
+    document.getElementById('page-content').innerHTML = `
+        <button class="back-btn" onclick="navigateTo('groups')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15,18 9,12 15,6"/></svg> Nhóm</button>
+        <div class="group-detail-head anim-fade-in-up">
+            <div class="group-detail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
+            <div class="group-detail-main"><div class="group-detail-title">${escapeHtml(group.name || 'Nhóm')}</div><div class="group-card-meta">${escapeHtml(getGroupRoleLabel(group))} · ${(group.memberEmails || []).length} thành viên</div></div>
+        </div>
+        ${isOwner ? `<div class="group-detail-actions-inline"><button class="btn btn-sm btn-outline" onclick="handleRenameGroup('${escapeJsAttr(group.id)}')">Đổi tên</button><button class="btn btn-sm btn-danger-outline" onclick="handleDeleteGroup('${escapeJsAttr(group.id)}')">Xoá</button></div>` : ''}
+        <div class="group-detail-grid">
+            ${renderGroupMembers(group)}
+            ${renderGroupSharedAccounts(group)}
+        </div>
+    `;
+}
+
+// ===== GROUPS OVERRIDES: invites + shared edit approvals =====
+function renderGroupCard(group) {
+    const count = window.appState.sharedAccountCounts?.[group.id] ?? group.sharedAccountCount ?? 0;
+    const editCount = window.appState.sharedEditRequestCounts?.[group.id] ?? group.editRequestCount ?? 0;
+    const unlocked = Boolean(isGroupUnlocked?.(group.id));
+    return `<button class="group-card anim-fade-in-up" onclick="openGroupDetail('${escapeJsAttr(group.id)}')">
+        <div class="group-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
+        <div class="group-card-main">
+            <div class="group-card-title">${escapeHtml(group.name || 'Nhom')}</div>
+            <div class="group-card-meta">${escapeHtml(getGroupRoleLabel(group))} - ${(group.memberEmails || []).length} thanh vien - ${count} TK${editCount ? ` - ${editCount} cho duyet` : ''}</div>
+        </div>
+        <span class="group-lock-badge ${unlocked ? 'unlocked' : ''}">${escapeHtml(getGroupLockLabel(group.id))}</span>
+    </button>`;
+}
+
+function renderGroupInviteCard(group) {
+    return `<div class="group-card group-invite-card anim-fade-in-up">
+        <div class="group-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 12h-6"/><path d="m19 9 3 3-3 3"/><path d="M14 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="7.5" cy="7" r="4"/></svg></div>
+        <div class="group-card-main"><div class="group-card-title">${escapeHtml(group.name || 'Nhom')}</div><div class="group-card-meta">Moi boi ${escapeHtml(group.ownerEmail || '')}</div></div>
+        <div class="group-invite-actions"><button type="button" class="btn btn-sm btn-primary" onclick="openAcceptGroupInviteModal('${escapeJsAttr(group.id)}')">Nhap MK</button><button type="button" class="btn btn-sm btn-outline" onclick="handleCancelGroupInvite('${escapeJsAttr(group.id)}')">Bo qua</button></div>
+    </div>`;
+}
+
+function renderGroupInviteSection(invites) {
+    if (!invites.length) return '';
+    return `<div class="group-invite-section anim-fade-in-up"><div class="section-header"><span class="section-title">Loi moi vao team</span><span class="section-badge">${invites.length}</span></div><div class="group-grid group-invite-grid">${invites.map(renderGroupInviteCard).join('')}</div></div>`;
+}
+
+function renderGroupList() {
+    const groups = window.appState.groups || [];
+    const invites = window.appState.groupInvites || [];
+    const query = String(window.appState.searchQuery || '').trim().toLowerCase();
+    const filtered = query
+        ? groups.filter(group => (group.name || '').toLowerCase().includes(query)
+            || (group.ownerEmail || '').toLowerCase().includes(query)
+            || (group.memberEmails || []).some(email => email.includes(query)))
+        : groups;
+    const filteredInvites = query
+        ? invites.filter(group => (group.name || '').toLowerCase().includes(query)
+            || (group.ownerEmail || '').toLowerCase().includes(query))
+        : invites;
+    document.getElementById('page-content').innerHTML = `
+        <div class="group-page-head anim-fade-in-up">
+            <div><div class="section-title">Nhom</div><div class="group-page-desc">${filtered.length} nhom${filteredInvites.length ? ` - ${filteredInvites.length} loi moi` : ''}</div></div>
+            <button class="btn btn-primary btn-sm" onclick="openCreateGroupModal()">Tao</button>
+        </div>
+        ${renderGroupInviteSection(filteredInvites)}
+        ${filtered.length ? `<div class="group-grid">${filtered.map(renderGroupCard).join('')}</div>` : `<div class="empty-state anim-fade-in-up"><div class="empty-state-title">Chua co nhom</div><div class="empty-state-desc">Tao nhom de chia se tai khoan dung chung.</div></div>`}
+    `;
+}
+
+function renderGroupMembers(group) {
+    const isOwner = group.role === 'owner';
+    const ownerEmail = normalizeGroupEmail?.(group.ownerEmail) || group.ownerEmail || '';
+    const pending = group.pendingMemberEmails || [];
+    return `<div class="group-panel group-members-panel anim-fade-in-up">
+        <div class="group-panel-head"><div class="section-title">Thanh vien</div><span class="section-badge">${(group.memberEmails || []).length}${pending.length ? `+${pending.length}` : ''}</span></div>
+        <div class="group-member-list">
+            ${(group.memberEmails || []).map(email => {
+                const isGroupOwnerEmail = normalizeGroupEmail?.(email) === ownerEmail;
+                return `<div class="group-member-row"><span class="group-member-email" title="${escapeHtml(email)}">${escapeHtml(email)}</span><span class="group-member-role">${isGroupOwnerEmail ? 'Chu nhom' : 'Thanh vien'}</span>${isOwner && !isGroupOwnerEmail ? `<button class="copy-btn" onclick="handleRemoveGroupMember('${escapeJsAttr(group.id)}','${escapeJsAttr(email)}')" title="Xoa"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>` : ''}</div>`;
+            }).join('')}
+            ${isOwner && pending.length ? pending.map(email => `<div class="group-member-row pending"><span class="group-member-email" title="${escapeHtml(email)}">${escapeHtml(email)}</span><span class="group-member-role">Dang moi</span><button class="copy-btn" onclick="handleCancelGroupInvite('${escapeJsAttr(group.id)}','${escapeJsAttr(email)}')" title="Huy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>`).join('') : ''}
+        </div>
+        ${isOwner ? `<div class="group-member-add"><input type="email" id="group-member-email" class="input" placeholder="email@domain.com"><button class="btn btn-primary btn-sm" onclick="handleAddGroupMember('${escapeJsAttr(group.id)}')">Moi</button></div>` : ''}
+    </div>`;
+}
+
+function renderSharedSecretRows(group, account, decrypted) {
+    const canRemove = group.role === 'owner' || account.sharedByUid === window.appState.user?.uid;
+    const pendingCount = (getSharedEditRequestsForAccount?.(group.id, account.id) || []).filter(request => request.status === 'pending').length;
+    return `<div class="shared-secret-rows">
+        <div class="detail-row"><span class="detail-label">Tai khoan</span><span class="detail-value secret-value">${escapeHtml(decrypted.username || '')} <button class="copy-btn" onclick="copySharedField('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','username')">${renderGroupCopyIconSvg()}</button></span></div>
+        <div class="detail-row"><span class="detail-label">Mat khau</span><span class="detail-value secret-value">${escapeHtml(decrypted.password || '')} <button class="copy-btn" onclick="copySharedField('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','password')">${renderGroupCopyIconSvg()}</button></span></div>
+        ${decrypted.twoFaCode ? `<div class="detail-row"><span class="detail-label">2FA</span><span class="detail-value secret-value">${escapeHtml(decrypted.twoFaCode)} <button class="copy-btn" onclick="copySharedField('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','2fa')">${renderGroupCopyIconSvg()}</button></span></div>` : ''}
+        ${decrypted.note ? `<div class="detail-row detail-note-row"><span class="detail-label">Ghi chu</span><div class="detail-note-value">${renderSmartNote(decrypted.note)}</div></div>` : ''}
+        <div class="shared-account-actions"><button class="btn btn-sm btn-outline" onclick="openSharedAccountEditModal('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}')">Sua${pendingCount ? ` (${pendingCount})` : ''}</button>${canRemove ? `<button class="btn btn-sm btn-danger-outline shared-remove-btn" onclick="handleRemoveSharedAccount('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}')">Go</button>` : ''}</div>
+    </div>`;
+}
+
+function renderSharedEditRequestCard(group, request) {
+    const user = window.appState.user || {};
+    const currentEmail = typeof normalizeGroupEmail === 'function' ? normalizeGroupEmail(user.email) : String(user.email || '').toLowerCase();
+    const reviewerEmail = typeof normalizeGroupEmail === 'function' ? normalizeGroupEmail(request.reviewerEmail) : String(request.reviewerEmail || '').toLowerCase();
+    const canReview = request.reviewerUid === user.uid || reviewerEmail === currentEmail;
+    const proposedName = request.proposedSafeData?.name || request.accountName || 'Tai khoan';
+    return `<div class="shared-edit-request-card"><div class="shared-edit-request-main"><strong>${escapeHtml(proposedName)}</strong><span>${escapeHtml(request.requestedByEmail || '')}</span></div><div class="shared-edit-request-actions">${canReview ? `<button class="btn btn-sm btn-primary" onclick="handleAcceptSharedEditRequest('${escapeJsAttr(group.id)}','${escapeJsAttr(request.id)}')">Accept</button><button class="btn btn-sm btn-outline" onclick="handleRejectSharedEditRequest('${escapeJsAttr(group.id)}','${escapeJsAttr(request.id)}')">Reject</button>` : '<span class="group-lock-badge">Cho duyet</span>'}</div></div>`;
+}
+
+function renderSharedEditRequests(group) {
+    const user = window.appState.user || {};
+    const currentEmail = typeof normalizeGroupEmail === 'function' ? normalizeGroupEmail(user.email) : String(user.email || '').toLowerCase();
+    const pending = (window.appState.sharedEditRequests?.[group.id] || []).filter(request => {
+        if (request.status !== 'pending') return false;
+        const reviewerEmail = typeof normalizeGroupEmail === 'function' ? normalizeGroupEmail(request.reviewerEmail) : String(request.reviewerEmail || '').toLowerCase();
+        return request.reviewerUid === user.uid || request.requestedByUid === user.uid || reviewerEmail === currentEmail || group.role === 'owner';
+    });
+    if (!pending.length) return '';
+    return `<div class="shared-edit-requests"><div class="section-header"><span class="section-title">Yeu cau sua dang cho</span><span class="section-badge">${pending.length}</span></div>${pending.map(request => renderSharedEditRequestCard(group, request)).join('')}</div>`;
+}
+
+function renderSharedAccountCard(group, account) {
+    const meta = renderSharedAccountMeta(account);
+    const unlocked = Boolean(isGroupUnlocked?.(group.id));
+    const key = `${group.id}:${account.id}`;
+    const decrypted = window.appState.decryptedSharedAccounts?.[key];
+    const pendingCount = (getSharedEditRequestsForAccount?.(group.id, account.id) || []).filter(request => request.status === 'pending').length;
+    if (unlocked && !decrypted) {
+        window.appState.decryptingSharedAccounts = window.appState.decryptingSharedAccounts || {};
+        if (!window.appState.decryptingSharedAccounts[key]) {
+            window.appState.decryptingSharedAccounts[key] = true;
+            decryptSharedAccountForDisplay(group.id, account.id).finally(() => {
+                delete window.appState.decryptingSharedAccounts[key];
+            });
+        }
+    }
+    return `<div class="shared-account-card anim-fade-in-up"><div class="shared-account-top"><div class="account-logo" style="${meta.logoStyle}">${meta.logoMark}</div><div class="shared-account-info"><div class="account-name">${escapeHtml(account.name || account.serviceName || 'Tai khoan')}${pendingCount ? ` <span class="sync-pending-badge">${pendingCount} cho duyet</span>` : ''}</div><div class="account-user">${escapeHtml(account.displayUsername || '')}</div><div class="shared-account-meta">${escapeHtml(meta.expiryText || '')}${account.sharedByEmail ? ` - ${escapeHtml(account.sharedByEmail)}` : ''}</div></div></div>${unlocked ? (decrypted ? renderSharedSecretRows(group, account, decrypted) : '<div class="shared-locked-note">Dang giai ma...</div>') : `<div class="shared-locked-note"><span>Noi dung nhay cam dang an</span><button class="btn btn-sm btn-outline" onclick="openUnlockGroupModal('${escapeJsAttr(group.id)}')">Nhap mat khau nhom</button></div>`}</div>`;
+}
+
+function renderGroupSharedAccounts(group) {
+    const accounts = window.appState.sharedAccounts?.[group.id] || [];
+    const unlocked = Boolean(isGroupUnlocked?.(group.id));
+    return `<div class="group-panel group-shared-panel anim-fade-in-up"><div class="group-panel-head"><div class="section-title">Tai khoan chia se</div><div class="group-panel-actions"><span class="group-lock-badge ${unlocked ? 'unlocked' : ''}">${escapeHtml(getGroupLockLabel(group.id))}</span>${unlocked ? '' : `<button class="btn btn-sm btn-outline" onclick="openUnlockGroupModal('${escapeJsAttr(group.id)}')">Mo khoa</button>`}</div></div>${renderSharedEditRequests(group)}${accounts.length ? `<div class="shared-account-list">${accounts.map(account => renderSharedAccountCard(group, account)).join('')}</div>` : `<div class="empty-state compact"><div class="empty-state-title">Chua co tai khoan chia se</div></div>`}</div>`;
+}
+
+function renderGroupDetail(groupId) {
+    const group = getGroupById?.(groupId);
+    if (!group) {
+        renderGroupList();
+        return;
+    }
+    const isOwner = group.role === 'owner';
+    document.getElementById('page-content').innerHTML = `
+        <button class="back-btn" onclick="navigateTo('groups')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15,18 9,12 15,6"/></svg> Nhom</button>
+        <div class="group-detail-head anim-fade-in-up"><div class="group-detail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div><div class="group-detail-main"><div class="group-detail-title">${escapeHtml(group.name || 'Nhom')}</div><div class="group-card-meta">${escapeHtml(getGroupRoleLabel(group))} - ${(group.memberEmails || []).length} thanh vien</div></div></div>
+        ${isOwner ? `<div class="group-detail-actions-inline"><button class="btn btn-sm btn-outline" onclick="handleRenameGroup('${escapeJsAttr(group.id)}')">Doi ten</button><button class="btn btn-sm btn-danger-outline" onclick="handleDeleteGroup('${escapeJsAttr(group.id)}')">Xoa</button></div>` : ''}
+        <div class="group-detail-grid">${renderGroupMembers(group)}${renderGroupSharedAccounts(group)}</div>
+    `;
 }
 
 function renderNotifyDaysOptions(days) {
@@ -1635,6 +1941,9 @@ function renderAddForm(type, editData = null) {
     const expiryValue = editData?.expiryDate || defaultExpiryValue;
     const isLifetime = editData?.expiryType === 'lifetime';
     const rawValue = editData?.rawInput || [editData?.username, editData?.password, editData?.twoFaCode].filter(Boolean).join('|');
+    const saveButton = isEdit
+        ? `<button class="btn btn-primary" style="margin-top:24px" onclick="saveEditedAccount('${escapeJsString(editData.id)}')">Lưu thay đổi</button>`
+        : `<button class="btn btn-primary" style="margin-top:24px" onclick="saveNewAccount('${type}')">Lưu tài khoản</button>`;
     const categoryContent = `
         ${renderCategoryPicker(selectedCategoryIds)}
         <div class="inline-category-create">
@@ -1720,5 +2029,5 @@ https://example.com" style="min-height:110px">${escapeHtml(editData?.note || '')
 
     <div class="form-section-title add-advanced-title">Tùy chọn nâng cao</div>
     ${renderCollapsibleSection('category', '📁', `Danh mục (${defaultCategoryIds.length})`, categoryContent)}
-    <button class="btn btn-primary" style="margin-top:24px" onclick="saveNewAccount('${type}')">💾 Lưu tài khoản</button>`;
+    ${saveButton}`;
 }

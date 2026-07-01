@@ -2,6 +2,11 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isVerified() {
+      return request.auth != null
+             && request.auth.token.email_verified == true;
+    }
+
     function isVerifiedOwner(userId) {
       return request.auth != null
              && request.auth.uid == userId
@@ -10,6 +15,146 @@ service cloud.firestore {
 
     match /users/{userId}/{document=**} {
       allow read, write: if isVerifiedOwner(userId);
+    }
+
+    match /groups/{groupId} {
+      function isGroupOwner() {
+        return isVerified() && request.auth.uid == resource.data.ownerUid;
+      }
+      function isGroupMember() {
+        return isVerified() && request.auth.token.email in resource.data.memberEmails;
+      }
+      function isPendingInvitee() {
+        return isVerified()
+               && request.auth.token.email in resource.data.pendingMemberEmails;
+      }
+      function onlyGroupInviteFieldsChanged() {
+        return request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['memberEmails', 'pendingMemberEmails', 'updatedAt']);
+      }
+      function acceptsOwnInvite() {
+        return isPendingInvitee()
+               && onlyGroupInviteFieldsChanged()
+               && request.auth.token.email in request.resource.data.memberEmails
+               && !(request.auth.token.email in request.resource.data.pendingMemberEmails)
+               && request.resource.data.memberEmails.hasAll(resource.data.memberEmails)
+               && request.resource.data.memberEmails.size() == resource.data.memberEmails.size() + 1
+               && resource.data.pendingMemberEmails.hasAll(request.resource.data.pendingMemberEmails)
+               && request.resource.data.pendingMemberEmails.size() == resource.data.pendingMemberEmails.size() - 1;
+      }
+      function declinesOwnInvite() {
+        return isPendingInvitee()
+               && request.resource.data.diff(resource.data).affectedKeys()
+                  .hasOnly(['pendingMemberEmails', 'updatedAt'])
+               && !(request.auth.token.email in request.resource.data.pendingMemberEmails)
+               && request.resource.data.memberEmails == resource.data.memberEmails
+               && resource.data.pendingMemberEmails.hasAll(request.resource.data.pendingMemberEmails)
+               && request.resource.data.pendingMemberEmails.size() == resource.data.pendingMemberEmails.size() - 1;
+      }
+
+      allow read: if isGroupOwner() || isGroupMember() || isPendingInvitee();
+      allow create: if isVerified()
+                    && request.resource.data.ownerUid == request.auth.uid
+                    && request.auth.token.email in request.resource.data.memberEmails;
+      allow update: if isGroupOwner() || acceptsOwnInvite() || declinesOwnInvite();
+      allow delete: if isGroupOwner();
+
+      match /sharedAccounts/{accountId} {
+        function parentGroup() {
+          return get(/databases/$(database)/documents/groups/$(groupId)).data;
+        }
+        function inParentGroup() {
+          return isVerified() && (
+            request.auth.uid == parentGroup().ownerUid ||
+            request.auth.token.email in parentGroup().memberEmails
+          );
+        }
+        function isParentOwner() {
+          return isVerified() && request.auth.uid == parentGroup().ownerUid;
+        }
+        function isOriginalSharer() {
+          return isVerified() && request.auth.uid == resource.data.sharedByUid;
+        }
+        allow read: if inParentGroup();
+        allow create: if inParentGroup()
+                      && request.resource.data.sharedByUid == request.auth.uid;
+        allow update, delete: if inParentGroup()
+                              && (isParentOwner() || isOriginalSharer());
+      }
+
+      match /sharedEditRequests/{requestId} {
+        function parentGroup() {
+          return get(/databases/$(database)/documents/groups/$(groupId)).data;
+        }
+        function inParentGroup() {
+          return isVerified() && (
+            request.auth.uid == parentGroup().ownerUid ||
+            request.auth.token.email in parentGroup().memberEmails
+          );
+        }
+        function targetSharedAccount() {
+          return get(/databases/$(database)/documents/groups/$(groupId)/sharedAccounts/$(request.resource.data.accountId)).data;
+        }
+        function validEditRequestShape() {
+          return request.resource.data.keys().hasOnly([
+                   'accountId',
+                   'accountName',
+                   'requestedByUid',
+                   'requestedByEmail',
+                   'reviewerUid',
+                   'reviewerEmail',
+                   'status',
+                   'proposedSafeData',
+                   'proposedEncryptedData',
+                   'proposedSalt',
+                   'proposedIv',
+                   'createdAt',
+                   'updatedAt'
+                 ])
+                 && request.resource.data.accountId is string
+                 && request.resource.data.proposedSafeData is map
+                 && request.resource.data.proposedEncryptedData is string
+                 && request.resource.data.proposedSalt is string
+                 && request.resource.data.proposedIv is string
+                 && !request.resource.data.proposedSafeData.keys().hasAny([
+                   'id',
+                   'username',
+                   'password',
+                   'twoFaCode',
+                   'note',
+                   'rawInput',
+                   'encryptedData',
+                   'salt',
+                   'iv',
+                   'createdAt',
+                   'updatedAt',
+                   'deletedAt',
+                   'pendingSync',
+                   'sharedByUid',
+                   'sharedByEmail',
+                   'sourceAccountId'
+                 ]);
+        }
+        function canCreateRequest() {
+          return inParentGroup()
+                 && validEditRequestShape()
+                 && request.resource.data.status == 'pending'
+                 && request.resource.data.requestedByUid == request.auth.uid
+                 && request.resource.data.reviewerUid == targetSharedAccount().sharedByUid;
+        }
+        function canReviewRequest() {
+          return inParentGroup()
+                 && resource.data.status == 'pending'
+                 && request.auth.uid == resource.data.reviewerUid
+                 && request.resource.data.status in ['accepted', 'rejected']
+                 && request.resource.data.diff(resource.data).affectedKeys()
+                    .hasOnly(['status', 'reviewedByUid', 'reviewedByEmail', 'reviewedAt', 'updatedAt']);
+        }
+        allow read: if inParentGroup();
+        allow create: if canCreateRequest();
+        allow update: if canReviewRequest();
+        allow delete: if false;
+      }
     }
   }
 }
