@@ -2417,7 +2417,7 @@ function findPlatformMatchInToken(value, source = 'text') {
 
     let best = null;
     catalog.forEach((platformId, key) => {
-        if ((key.length < 3 && key !== 'x') || !token.includes(key)) return;
+        if (key.length < 3 || !token.includes(key)) return;
         if (!best || key.length > best.matchedKey.length) {
             best = { id: platformId, token, matchedKey: key, source, confidence: getPastePlatformConfidence(source, 'substring', key.length) };
         }

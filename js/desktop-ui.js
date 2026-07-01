@@ -820,6 +820,8 @@ function renderDashboard() {
 
     if (total > 0) h += renderDashboardInsights(suggestionAccs);
 
+    if (total > 0) h += renderUpcoming30Section(suggestionAccs);
+
     const justAdded = getJustAddedAccount(suggestionAccs);
     if (justAdded) {
         shownKeys.add(justAdded.id);
@@ -857,11 +859,9 @@ function renderDashboard() {
 }
 
 function renderDashboardInsights(accounts) {
-    const upcoming = accounts
-        .filter(a => a.expiryType !== 'lifetime' && a.expiryDate)
-        .map(a => ({ ...a, daysLeft: daysUntil(a.expiryDate) }))
-        .filter(a => a.daysLeft >= 0 && a.daysLeft <= 30)
-        .sort((a, b) => a.daysLeft - b.daysLeft)
+    const recentlyAdded = [...accounts]
+        .filter(a => a.createdAt)
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
         .slice(0, 6);
 
     // Build platform stats for icon grid
@@ -904,15 +904,50 @@ function renderDashboardInsights(accounts) {
             <div class="platform-icon-grid">${platformGridHtml}</div>
         </div>
         <div class="dashboard-timeline-panel">
-            <div class="section-header"><span class="section-title">30 ngày tới</span><span class="section-badge">${upcoming.length} TK</span></div>
-            ${upcoming.length ? `<div class="expiry-timeline">${upcoming.map(acc => `
+            <div class="section-header"><span class="section-title">Vừa thêm gần đây</span><span class="section-badge">${recentlyAdded.length} TK</span></div>
+            ${recentlyAdded.length ? `<div class="expiry-timeline">${recentlyAdded.map(acc => `
                 <button class="timeline-item" onclick="showDetail('${escapeJsAttr(acc.id)}')">
-                    <span class="timeline-dot ${acc.daysLeft <= 3 ? 'danger' : acc.daysLeft <= 7 ? 'warning' : ''}"></span>
-                    <span class="timeline-main"><strong>${escapeHtml(acc.name)}</strong><small>${formatDateVN(acc.expiryDate)}</small></span>
-                    <span class="timeline-days">${acc.daysLeft === 0 ? 'Hôm nay' : `${acc.daysLeft} ngày`}</span>
-                </button>`).join('')}</div>` : '<div class="dashboard-empty-mini">Không có tài khoản hết hạn trong 30 ngày tới</div>'}
+                    <span class="timeline-dot"></span>
+                    <span class="timeline-main"><strong>${escapeHtml(acc.name)}</strong><small>${escapeHtml(formatAddedDate(acc.createdAt))}</small></span>
+                    <span class="timeline-days">${escapeHtml(formatAddedAgo(acc.createdAt))}</span>
+                </button>`).join('')}</div>` : '<div class="dashboard-empty-mini">Chưa có tài khoản nào được thêm gần đây</div>'}
         </div>
     </div>`;
+}
+
+// Định dạng ngày thêm (Date | string) -> dd/mm/yyyy
+function formatAddedDate(value) {
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toLocaleDateString('vi-VN');
+}
+
+// Nhãn "x ngày trước" cho ngày thêm
+function formatAddedAgo(value) {
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    const days = Math.floor((Date.now() - date.getTime()) / 86400000);
+    if (days <= 0) return 'Hôm nay';
+    if (days === 1) return 'Hôm qua';
+    return `${days} ngày trước`;
+}
+
+// Section "Tài khoản 30 ngày tới" (danh sách sắp hết hạn trong 30 ngày)
+function renderUpcoming30Section(accounts) {
+    const upcoming = accounts
+        .filter(a => a.expiryType !== 'lifetime' && a.expiryDate)
+        .map(a => ({ ...a, daysLeft: daysUntil(a.expiryDate) }))
+        .filter(a => a.daysLeft >= 0 && a.daysLeft <= 30)
+        .sort((a, b) => a.daysLeft - b.daysLeft)
+        .slice(0, 8);
+    if (!upcoming.length) return '';
+    return `<div class="section-header" style="margin-top:20px"><span class="section-title">Tài khoản 30 ngày tới</span><span class="section-badge">${upcoming.length} TK</span></div>
+        <div class="dashboard-timeline-panel" style="margin-top:8px"><div class="expiry-timeline">${upcoming.map(acc => `
+            <button class="timeline-item" onclick="showDetail('${escapeJsAttr(acc.id)}')">
+                <span class="timeline-dot ${acc.daysLeft <= 3 ? 'danger' : acc.daysLeft <= 7 ? 'warning' : ''}"></span>
+                <span class="timeline-main"><strong>${escapeHtml(acc.name)}</strong><small>${formatDateVN(acc.expiryDate)}</small></span>
+                <span class="timeline-days">${acc.daysLeft === 0 ? 'Hôm nay' : `${acc.daysLeft} ngày`}</span>
+            </button>`).join('')}</div></div>`;
 }
 
 function drawDashboardChart(accounts) {
