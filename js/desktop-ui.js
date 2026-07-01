@@ -1,7 +1,23 @@
 /* Ting! — Desktop UI Renderer */
 
 // ===== TOAST =====
+const TOAST_DEDUPE_WINDOW_MS = 2000;
+const recentToasts = new Map();
+
+function shouldSuppressDuplicateToast(msg, type) {
+    const key = `${type}::${msg}`;
+    const now = Date.now();
+    // Dọn các mục cũ để Map không phình
+    for (const [k, ts] of recentToasts) {
+        if (now - ts > TOAST_DEDUPE_WINDOW_MS) recentToasts.delete(k);
+    }
+    if (recentToasts.has(key)) return true;
+    recentToasts.set(key, now);
+    return false;
+}
+
 function showToast(msg, type='success') {
+    if (shouldSuppressDuplicateToast(msg, type)) return;
     const c = document.getElementById('toast-container');
     const t = document.createElement('div');
     t.className = `toast toast-${type}`;
@@ -2111,7 +2127,7 @@ function renderSettings() {
             <div class="settings-item"><div class="settings-item-icon" style="background:var(--success-bg)">📅</div><div class="settings-item-content"><div class="settings-item-title">Gia hạn mặc định</div><div class="settings-item-desc">30 ngày</div></div></div>
         </div></div>
         <div class="settings-group"><div class="settings-group-title">Phiên bản</div><div class="settings-card">
-            <div class="settings-item"><div class="settings-item-icon" style="background:#E0F2FE">⬆️</div><div class="settings-item-content"><div class="settings-item-title">Ting! v${escapeHtml(window.appState.appVersion || '1.0.0')}</div>${renderUpdateStatus()}</div><button class="btn btn-sm btn-outline settings-inline-btn" onclick="checkForUpdates()" ${isElectron && !updateChecking ? '' : 'disabled'}>${updateChecking ? 'Đang kiểm tra' : 'Kiểm tra'}</button></div>
+            <div class="settings-item"><div class="settings-item-icon" style="background:#E0F2FE">⬆️</div><div class="settings-item-content"><div class="settings-item-title">Ting! v${escapeHtml(window.appState.appVersion || '1.2.0')}</div>${renderUpdateStatus()}</div><button class="btn btn-sm btn-outline settings-inline-btn" onclick="checkForUpdates()" ${isElectron && !updateChecking ? '' : 'disabled'}>${updateChecking ? 'Đang kiểm tra' : 'Kiểm tra'}</button></div>
             ${updateReady ? `<div class="settings-item"><div class="settings-item-icon" style="background:var(--success-bg)">✅</div><div class="settings-item-content"><div class="settings-item-title">Bản cập nhật đã sẵn sàng</div><div class="settings-item-desc">Khởi động lại để cài đặt</div></div><button class="btn btn-sm btn-primary settings-inline-btn" onclick="installDownloadedUpdate()">Cài đặt</button></div>` : ''}
             <div class="settings-log-wrap">${renderUpdateLog()}</div>
         </div></div>

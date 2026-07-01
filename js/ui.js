@@ -255,7 +255,7 @@ function renderSettings() {
         </div>
     </div>
 
-    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v1.0 • Made with 💜</p>`;
+    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v1.2 • Made with 💜</p>`;
 }
 
 // ===== RENDER: CHI TIẾT TÀI KHOẢN =====

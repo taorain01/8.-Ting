@@ -2,7 +2,22 @@
    Render các trang: Dashboard, TK Mua, Cá nhân, Cài đặt, Chi tiết */
 
 // ===== TOAST =====
+const TOAST_DEDUPE_WINDOW_MS = 2000;
+const recentToasts = new Map();
+
+function shouldSuppressDuplicateToast(message, type) {
+    const key = `${type}::${message}`;
+    const now = Date.now();
+    for (const [k, ts] of recentToasts) {
+        if (now - ts > TOAST_DEDUPE_WINDOW_MS) recentToasts.delete(k);
+    }
+    if (recentToasts.has(key)) return true;
+    recentToasts.set(key, now);
+    return false;
+}
+
 function showToast(message, type = 'success') {
+    if (shouldSuppressDuplicateToast(message, type)) return;
     const container = document.getElementById('toast-container');
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
@@ -458,7 +473,7 @@ function renderSettings() {
         </div>
     </div>
 
-    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v1.0 • Made with 💜</p>`;
+    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v1.2 • Made with 💜</p>`;
 }
 
 // ===== MOBILE DESKTOP-PARITY RENDERERS =====
@@ -1612,7 +1627,7 @@ function renderSettings() {
             <div class="settings-item" onclick="signOut()"><div class="settings-item-icon" style="background:var(--danger-bg)">🚪</div><div class="settings-item-content"><div class="settings-item-title" style="color:var(--danger)">Đăng xuất</div></div></div>
         </div>
     </div>
-    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v1.0</p>`;
+    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v1.2</p>`;
 }
 
 function renderNotificationPanel(items = (typeof getNotificationList === 'function' ? getNotificationList(window.appState.accounts) : [])) {

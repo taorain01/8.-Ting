@@ -269,7 +269,11 @@ function loadGroupsRealtime() {
         }, (error) => {
             console.error('Load group invites error:', error);
             window.appState.groupInvites = [];
-            if (typeof showToast === 'function') showToast(error.message || 'Khong tai duoc loi moi nhom', 'error');
+            if (typeof isDBPermissionError === 'function' && isDBPermissionError(error) && typeof showDBPermissionToast === 'function') {
+                showDBPermissionToast();
+            } else if (typeof showToast === 'function') {
+                showToast(error.message || 'Khong tai duoc loi moi nhom', 'error');
+            }
             notifyGroupsChanged();
         });
 
