@@ -1041,7 +1041,7 @@ function renderCategoryDetail(categoryId) {
         ? `<div class="account-list anim-stagger">${buildAccountDisplayItems(accounts).map(item => item.accounts ? renderAccountGroup(item) : renderAccountCard(item)).join('')}</div>`
         : `<div class="empty-state anim-fade-in-up"><div class="empty-state-icon">📁</div><div class="empty-state-title">Không có tài khoản trong danh mục</div><div class="empty-state-desc">Gắn tài khoản vào danh mục khi thêm mới hoặc trong trang chi tiết.</div></div>`;
     document.getElementById('page-content').innerHTML = `
-        <button class="back-btn" onclick="navigateTo('categories')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15,18 9,12 15,6"/></svg> Danh mục</button>
+        <button class="back-btn" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15,18 9,12 15,6"/></svg> Danh mục</button>
         <div class="category-detail-head anim-fade-in-up">
             ${renderCategoryIcon(category, 'large')}
             <div>
@@ -1409,7 +1409,7 @@ function renderGroupDetail(groupId) {
     }
     const isOwner = group.role === 'owner';
     document.getElementById('page-content').innerHTML = `
-        <button class="back-btn" onclick="navigateTo('groups')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15,18 9,12 15,6"/></svg> Nhóm</button>
+        <button class="back-btn" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15,18 9,12 15,6"/></svg> Nhóm</button>
         <div class="group-detail-head anim-fade-in-up">
             <div class="group-detail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
             <div class="group-detail-main"><div class="group-detail-title">${escapeHtml(group.name || 'Nhóm')}</div><div class="group-card-meta">${escapeHtml(getGroupRoleLabel(group))} · ${(group.memberEmails || []).length} thành viên</div></div>
@@ -1555,7 +1555,7 @@ function renderGroupDetail(groupId) {
     }
     const isOwner = group.role === 'owner';
     document.getElementById('page-content').innerHTML = `
-        <button class="back-btn" onclick="navigateTo('groups')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15,18 9,12 15,6"/></svg> Nhom</button>
+        <button class="back-btn" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15,18 9,12 15,6"/></svg> Nhom</button>
         <div class="group-detail-head anim-fade-in-up"><div class="group-detail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div><div class="group-detail-main"><div class="group-detail-title">${escapeHtml(group.name || 'Nhom')}</div><div class="group-card-meta">${escapeHtml(getGroupRoleLabel(group))} - ${(group.memberEmails || []).length} thanh vien</div></div></div>
         ${isOwner ? `<div class="group-detail-actions-inline"><button class="btn btn-sm btn-outline" onclick="handleRenameGroup('${escapeJsAttr(group.id)}')">Doi ten</button><button class="btn btn-sm btn-danger-outline" onclick="handleDeleteGroup('${escapeJsAttr(group.id)}')">Xoa</button></div>` : ''}
         <div class="group-detail-grid">${renderGroupMembers(group)}${renderGroupSharedAccounts(group)}</div>

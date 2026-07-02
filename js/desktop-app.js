@@ -142,10 +142,28 @@ function enterDemoMode() {
 // ===== NAVIGATION =====
 const pageTitles = { dashboard:'Tổng quan', bought:'TK Mua', personal:'Cá nhân', groups:'Nhóm', 'group-detail':'Chi tiết nhóm', categories:'Danh mục', trash:'Thùng rác', settings:'Cài đặt', detail:'Chi tiết' };
 
-function navigateTo(page) {
+function recordNavHistory() {
+    const page = window.appState.currentPage;
+    if (!page) return;
+    const entry = {
+        page,
+        accountId: page === 'detail' ? (window.appState.currentDetailId || null) : null,
+        groupId: page === 'group-detail' ? (window.appState.currentGroupId || null) : null,
+    };
+    if (!Array.isArray(window.appState.navStack)) window.appState.navStack = [];
+    const stack = window.appState.navStack;
+    const top = stack[stack.length - 1];
+    if (top && top.page === entry.page && top.accountId === entry.accountId && top.groupId === entry.groupId) return;
+    stack.push(entry);
+    if (stack.length > 50) stack.shift();
+}
+
+function navigateTo(page, isBack = false) {
+    if (!isBack) recordNavHistory();
     window.appState.previousPage = window.appState.currentPage;
     window.appState.currentPage = page;
     if (page !== 'detail') window.appState.activeDecryptedAccount = null;
+    if (page !== 'detail') window.appState.currentDetailId = null;
     if (page !== window.appState.previousPage) window.appState.expandedGroups = {};
     window.appState.currentFilter = 'all';
     window.appState.currentTagFilter = '';
@@ -178,7 +196,14 @@ function navigateTo(page) {
     renderQuickAccountIconFilter?.();
     document.getElementById('page-content').scrollTop = 0;
 }
-function goBack() { navigateTo(window.appState.previousPage || 'dashboard'); }
+function goBack() {
+    const stack = Array.isArray(window.appState.navStack) ? window.appState.navStack : [];
+    const entry = stack.pop();
+    if (!entry || !entry.page) { navigateTo('dashboard', true); return; }
+    if (entry.page === 'detail' && entry.accountId) { showDetail(entry.accountId, true); return; }
+    if (entry.page === 'group-detail' && entry.groupId) { openGroupDetail(entry.groupId, true); return; }
+    navigateTo(entry.page, true);
+}
 
 // ===== HEADER / SIDEBAR =====
 function updateHeader() {
@@ -1336,14 +1361,16 @@ function lockMasterPassword(reason = 'Đã tự khoá Master Password') {
     showToast(reason, 'success');
 }
 
-async function showDetail(id) {
+async function showDetail(id, isBack = false) {
     const acc = window.appState.accounts.find(a => a.id === id);
     if (!acc) return;
     const decrypted = await getSensitiveAccountData(acc, 'Để xem chi tiết tài khoản');
     if (!decrypted) return;
 
+    if (!isBack) recordNavHistory();
     window.appState.previousPage = window.appState.currentPage;
     window.appState.currentPage = 'detail';
+    window.appState.currentDetailId = id;
     document.getElementById('page-title').textContent = 'Chi tiết';
     clearRevealedSecrets();
     window.appState.activeDecryptedAccount = { id, data: decrypted };
@@ -1401,12 +1428,13 @@ async function submitCreateGroup() {
     }
 }
 
-function openGroupDetail(groupId) {
+function openGroupDetail(groupId, isBack = false) {
     const group = getGroupById?.(groupId);
     if (!group) {
         showToast('Không tìm thấy nhóm', 'error');
         return;
     }
+    if (!isBack) recordNavHistory();
     window.appState.previousPage = window.appState.currentPage;
     window.appState.currentPage = 'group-detail';
     window.appState.currentGroupId = groupId;

@@ -953,6 +953,9 @@ function resetAppSessionState() {
     window.appState.decryptedSharedAccounts = {};
     window.appState.groupUnlocked = {};
     window.appState.currentGroupId = null;
+    window.appState.navStack = [];
+    window.appState.currentDetailId = null;
+    window.appState.previousPage = null;
     if (typeof clearRevealedSecrets === 'function') clearRevealedSecrets();
 }
 

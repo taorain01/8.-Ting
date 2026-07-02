@@ -96,8 +96,29 @@ function navigateTo(page) {
     window.scrollTo(0, 0);
 }
 
+function recordNavHistory() {
+    const page = window.appState.currentPage;
+    if (!page) return;
+    const entry = {
+        page,
+        accountId: page === 'detail' ? (window.appState.currentDetailId || null) : null,
+        groupId: page === 'group-detail' ? (window.appState.currentGroupId || null) : null,
+    };
+    if (!Array.isArray(window.appState.navStack)) window.appState.navStack = [];
+    const stack = window.appState.navStack;
+    const top = stack[stack.length - 1];
+    if (top && top.page === entry.page && top.accountId === entry.accountId && top.groupId === entry.groupId) return;
+    stack.push(entry);
+    if (stack.length > 50) stack.shift();
+}
+
 function goBack() {
-    navigateTo(window.appState.previousPage || 'dashboard');
+    const stack = Array.isArray(window.appState.navStack) ? window.appState.navStack : [];
+    const entry = stack.pop();
+    if (!entry || !entry.page) { navigateTo('dashboard', true); return; }
+    if (entry.page === 'detail' && entry.accountId) { showDetail(entry.accountId, true); return; }
+    if (entry.page === 'group-detail' && entry.groupId) { openGroupDetail(entry.groupId, true); return; }
+    navigateTo(entry.page, true);
 }
 
 // ===== HEADER =====
@@ -816,10 +837,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 1200);
 });
 
-function navigateTo(page) {
+function navigateTo(page, isBack = false) {
+    if (!isBack) recordNavHistory();
     window.appState.previousPage = window.appState.currentPage;
     window.appState.currentPage = page;
     if (page !== 'detail') window.appState.activeDecryptedAccount = null;
+    if (page !== 'detail') window.appState.currentDetailId = null;
     if (page !== window.appState.previousPage) window.appState.expandedGroups = {};
     window.appState.currentFilter = 'all';
     window.appState.currentTagFilter = '';
@@ -1045,16 +1068,11 @@ function closeSearchBarFromBackButton() {
 
 function navigateBackFromHardwareButton() {
     const page = window.appState.currentPage || 'dashboard';
-    if (page === 'dashboard') return false;
-
-    const previousPage = window.appState.previousPage;
-    let targetPage = 'dashboard';
-    if (page === 'detail') targetPage = previousPage && previousPage !== 'detail' ? previousPage : 'dashboard';
-    else if (page === 'group-detail') targetPage = 'groups';
-    else if (page === 'categories' || page === 'trash') targetPage = 'settings';
-    else if (page.startsWith('category:')) targetPage = 'categories';
-
-    navigateTo(targetPage);
+    const stack = Array.isArray(window.appState.navStack) ? window.appState.navStack : [];
+    // Ở Tổng quan và không còn lịch sử -> để hệ thống xử lý thoát app
+    if (page === 'dashboard' && stack.length === 0) return false;
+    if (stack.length === 0) { navigateTo('dashboard', true); return true; }
+    goBack();
     return true;
 }
 
@@ -1619,13 +1637,15 @@ async function getSensitiveAccountData(acc, reason = 'Để giải mã tài kho�
     }
 }
 
-async function showDetail(accId) {
+async function showDetail(accId, isBack = false) {
     const acc = window.appState.accounts.find(a => a.id === accId);
     if (!acc) return;
     const decrypted = await getSensitiveAccountData(acc, 'Để xem chi tiết tài khoản');
     if (!decrypted) return;
+    if (!isBack) recordNavHistory();
     window.appState.previousPage = window.appState.currentPage;
     window.appState.currentPage = 'detail';
+    window.appState.currentDetailId = accId;
     document.getElementById('fab-add').style.display = 'none';
     clearRevealedSecrets();
     window.appState.activeDecryptedAccount = { id: accId, data: decrypted };
@@ -1686,12 +1706,13 @@ async function submitCreateGroup() {
     }
 }
 
-function openGroupDetail(groupId) {
+function openGroupDetail(groupId, isBack = false) {
     const group = getGroupById?.(groupId);
     if (!group) {
         showToast('Không tìm thấy nhóm', 'error');
         return;
     }
+    if (!isBack) recordNavHistory();
     window.appState.previousPage = window.appState.currentPage;
     window.appState.currentPage = 'group-detail';
     window.appState.currentGroupId = groupId;

@@ -1132,7 +1132,7 @@ function renderCategoryDetail(categoryId) {
         : `<div class="d-empty-state anim-fade-in-up"><div class="d-empty-state-icon">📁</div><div class="d-empty-state-title">Không có tài khoản trong danh mục</div><div class="d-empty-state-desc">Gắn tài khoản vào danh mục này khi thêm mới hoặc trong trang chi tiết tài khoản.</div></div>`;
 
     document.getElementById('page-content').innerHTML = `
-        <button class="back-btn" onclick="navigateTo('categories')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polyline points="15,18 9,12 15,6"/></svg> Danh mục</button>
+        <button class="back-btn" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polyline points="15,18 9,12 15,6"/></svg> Danh mục</button>
         <div class="category-detail-head anim-fade-in-up">
             ${renderCategoryIcon(category, 'large')}
             <div>
@@ -1551,7 +1551,7 @@ function renderGroupDetail(groupId) {
     const isOwner = group.role === 'owner';
     document.getElementById('page-title').textContent = group.name || 'Chi tiết nhóm';
     document.getElementById('page-content').innerHTML = `
-        <button class="back-btn" onclick="navigateTo('groups')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polyline points="15,18 9,12 15,6"/></svg> Nhóm</button>
+        <button class="back-btn" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polyline points="15,18 9,12 15,6"/></svg> Nhóm</button>
         <div class="group-detail-head anim-fade-in-up">
             <div class="group-detail-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
@@ -1782,7 +1782,7 @@ function renderGroupDetail(groupId) {
     const isOwner = group.role === 'owner';
     document.getElementById('page-title').textContent = group.name || 'Chi tiet nhom';
     document.getElementById('page-content').innerHTML = `
-        <button class="back-btn" onclick="navigateTo('groups')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polyline points="15,18 9,12 15,6"/></svg> Nhom</button>
+        <button class="back-btn" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polyline points="15,18 9,12 15,6"/></svg> Nhom</button>
         <div class="group-detail-head anim-fade-in-up">
             <div class="group-detail-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
