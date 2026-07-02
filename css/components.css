@@ -2786,8 +2786,13 @@
     display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
     padding: 4px 10px; border-radius: var(--radius-full);
     background: var(--bg-secondary); color: var(--text-secondary);
+    border: 1px solid var(--border-light, var(--border));
+    font: inherit;
     font-size: 12px;
+    cursor: pointer;
+    appearance: none;
 }
+.seller-link-chip:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
 .seller-link-chip-text {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px;
 }

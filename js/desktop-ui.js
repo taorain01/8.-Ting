@@ -2427,19 +2427,47 @@ function renderSellerPlatformPicker(selected = 'other', sellerLink = '') {
 function renderSellerLinkHint(url) {
     if (!url) return '';
     const safe = escapeHtml(url);
-    return `<span class="seller-link-chip" title="${safe}">
+    return `<button type="button" class="seller-link-chip" title="${safe}" onclick="event.preventDefault();openExternalLink('${escapeJsAttr(url)}')">
         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7L12 19"/></svg>
         <span class="seller-link-chip-text">${safe}</span>
-    </span>`;
+    </button>`;
 }
 
-function selectSellerPlatform(platform) {
+function updateSellerLinkHint(url) {
+    const hint = document.getElementById('seller-link-hint');
+    if (!hint) return;
+    if (url && typeof renderSellerLinkHint === 'function') {
+        hint.innerHTML = renderSellerLinkHint(url);
+        hint.hidden = false;
+    } else {
+        hint.innerHTML = '';
+        hint.hidden = true;
+    }
+}
+
+function syncSellerLinkFromForm() {
+    const nameInput = document.getElementById('add-seller-name');
+    const platformInput = document.getElementById('add-seller-platform');
+    const linkInput = document.getElementById('add-seller-link');
+    if (!nameInput || !linkInput) return '';
+    const sellerName = nameInput.value.trim();
+    const sellerPlatform = platformInput?.value || 'other';
+    const link = sellerName && typeof normalizeSellerLink === 'function'
+        ? normalizeSellerLink(sellerName, sellerPlatform)
+        : '';
+    linkInput.value = link;
+    updateSellerLinkHint(link);
+    return link;
+}
+
+function selectSellerPlatform(platform, options = {}) {
     const value = platform || 'other';
     const input = document.getElementById('add-seller-platform');
     if (input) input.value = value;
     document.querySelectorAll('[data-seller-platform]').forEach(button => {
         button.classList.toggle('active', button.dataset.sellerPlatform === value);
     });
+    if (options.syncLink !== false && typeof syncSellerLinkFromForm === 'function') syncSellerLinkFromForm();
 }
 
 function renderSellerDetailRow(acc) {
@@ -2568,6 +2596,7 @@ window.selectQuickPlatform = function(name) {
     const input = document.getElementById('add-name');
     if (input) {
         input.value = name;
+        window.appState.addFormAutoPlatform = null;
         if (typeof detectPlatform === 'function') window.appState.addFormPlatform = detectPlatform(name);
         if (typeof autoDetectPlatform === 'function') autoDetectPlatform();
     }
@@ -2672,7 +2701,7 @@ https://example.com" style="min-height:110px">${escapeHtml(editData?.note || '')
 
     <div class="form-section-title">Ngu&#7891;n g&#7889;c / Ng&#432;&#7901;i b&#225;n <span class="optional-label">(T&#249;y ch&#7885;n)</span></div>
     <div class="input-group" style="margin-bottom:8px">
-        <input type="text" id="add-seller-name" class="input" placeholder=" " style="padding-left:16px" value="${escapeHtml(editData?.sellerName || '')}">
+        <input type="text" id="add-seller-name" class="input" placeholder=" " style="padding-left:16px" value="${escapeHtml(editData?.sellerName || '')}" oninput="this.dataset.sellerAuto='false';syncSellerLinkFromForm()">
         <label for="add-seller-name" class="input-label" style="left:16px">T&#234;n ng&#432;&#7901;i b&#225;n</label>
     </div>
     ${renderSellerPlatformPicker(editData?.sellerPlatform || 'other', editData?.sellerLink || '')}

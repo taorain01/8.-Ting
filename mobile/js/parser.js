@@ -264,6 +264,137 @@ function detectPlatform(serviceName) {
 /**
  * Lấy emoji/icon cho platform (fallback)
  */
+// Seller link helpers
+function extractFirstUrl(text) {
+    const raw = String(text || '');
+    const match = raw.match(/\bhttps?:\/\/[^\s"'<>|]+/i)
+        || raw.match(/\b(?:www\.|t\.me\/|telegram\.me\/|zalo\.me\/|chat\.zalo\.me\/|oa\.zalo\.me\/|zaloapp\.com\/|fb\.com\/|facebook\.com\/|m\.facebook\.com\/|m\.me\/|messenger\.com\/|discord\.gg\/|discord\.com\/invite\/|discordapp\.com\/invite\/)[^\s"'<>|]+/i);
+    return match ? match[0].replace(/[.,)\]}>'"]+$/, '') : '';
+}
+
+function getSellerPlatformRules() {
+    return [
+        { platform: 'zalo', hosts: ['zalo.me', 'chat.zalo.me', 'zaloapp.com', 'oa.zalo.me'] },
+        { platform: 'telegram', hosts: ['t.me', 'telegram.me', 'telegram.org'] },
+        { platform: 'facebook', hosts: ['facebook.com', 'fb.com', 'fb.watch', 'm.facebook.com', 'm.me', 'messenger.com'] },
+        { platform: 'discord', hosts: ['discord.gg', 'discord.com', 'discordapp.com', 'discord.new'] },
+    ];
+}
+
+function normalizeSellerUrl(url) {
+    const raw = String(url || '').trim();
+    if (!raw) return '';
+    const candidate = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    try {
+        const parsed = new URL(candidate);
+        if (!/^https?:$/i.test(parsed.protocol) || !parsed.hostname) return '';
+        const normalized = parsed.href.replace(/[.,)\]}>'"]+$/, '');
+        if (parsed.pathname === '/' && !parsed.search && !parsed.hash && !/[/?#]$/.test(raw)) {
+            return normalized.replace(/\/$/, '');
+        }
+        return normalized;
+    } catch (_) {
+        return '';
+    }
+}
+
+function inferSellerPlatformFromUrl(url) {
+    const normalized = normalizeSellerUrl(url);
+    if (!normalized) return 'other';
+    try {
+        const host = new URL(normalized).hostname.replace(/^www\./i, '').toLowerCase();
+        const matched = getSellerPlatformRules().find(rule => rule.hosts.some(h => host === h || host.endsWith(`.${h}`)));
+        return matched ? matched.platform : 'other';
+    } catch (_) {
+        return 'other';
+    }
+}
+
+function cleanSellerPathToken(value) {
+    let token = String(value || '').trim();
+    if (!token || /\s/.test(token)) return '';
+    token = token
+        .replace(/^@+/, '')
+        .replace(/^\/+|\/+$/g, '')
+        .replace(/[<>"'`]/g, '')
+        .replace(/[.,)\]}]+$/, '');
+    return token && !/^[?#]+$/.test(token) ? token : '';
+}
+
+function normalizeSellerLink(value, platform = 'other') {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    const directUrl = extractFirstUrl(raw);
+    if (directUrl) return normalizeSellerUrl(directUrl);
+
+    const selected = String(platform || 'other').toLowerCase();
+    if (!selected || selected === 'other' || selected === 'web') return '';
+
+    const token = cleanSellerPathToken(raw);
+    if (!token) return '';
+    const encoded = encodeURIComponent(token).replace(/%2B/g, '+');
+
+    if (selected === 'telegram') return `https://t.me/${encoded}`;
+    if (selected === 'facebook') return `https://facebook.com/${encoded}`;
+    if (selected === 'zalo') return `https://zalo.me/${encoded}`;
+    if (selected === 'discord') return `https://discord.gg/${encoded}`;
+    return '';
+}
+
+function resolveSellerLinkInput(name, platform = 'other', fallbackLink = '') {
+    const sellerName = String(name || '').trim();
+    if (!sellerName) return '';
+    const selected = String(platform || 'other').toLowerCase();
+    const fromName = normalizeSellerLink(sellerName, selected);
+    if (fromName) return fromName;
+
+    const fallback = normalizeSellerLink(fallbackLink, 'other');
+    if (!fallback) return '';
+    const fallbackPlatform = inferSellerPlatformFromUrl(fallback);
+    if (selected && selected !== 'other' && selected !== 'web' && fallbackPlatform !== selected) return '';
+    return fallback;
+}
+
+function detectSellerFromText(text) {
+    const url = normalizeSellerLink(text, 'other');
+    if (!url) return null;
+
+    let host = '';
+    let pathname = '';
+    try {
+        const parsed = new URL(url);
+        host = parsed.hostname.replace(/^www\./i, '').toLowerCase();
+        pathname = parsed.pathname || '';
+    } catch (_) {
+        return null;
+    }
+    if (!host) return null;
+
+    const platform = inferSellerPlatformFromUrl(url);
+    const segments = pathname.split('/').filter(Boolean).map(seg => {
+        try { return decodeURIComponent(seg); } catch (_) { return seg; }
+    });
+    let name = '';
+    if (platform === 'telegram') {
+        const handle = segments[0] || '';
+        name = handle ? (handle.startsWith('@') ? handle : `@${handle}`) : 'Telegram';
+    } else if (platform === 'zalo') {
+        name = segments[segments.length - 1] || 'NhĂ³m Zalo';
+    } else if (platform === 'discord') {
+        name = segments[segments.length - 1] || 'Discord';
+    } else if (platform === 'facebook') {
+        name = segments[0] || 'Facebook';
+    } else {
+        name = host;
+    }
+
+    return { platform, url, name: name || host, host };
+}
+
+/**
+ * Platform emoji fallback.
+ */
 function getPlatformEmoji(platform) {
     const map = {
         youtube:'▶️', canva:'🎨', capcut:'✂️', netflix:'🎬', spotify:'🎵',

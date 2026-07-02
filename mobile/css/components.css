@@ -2266,7 +2266,11 @@
     border:1px solid var(--border-light);
     font-size:12px;
     font-weight:700;
+    font-family:inherit;
+    cursor:pointer;
+    appearance:none;
 }
+.seller-link-chip:hover { color:var(--accent); border-color:var(--accent); background:var(--accent-bg); }
 .seller-link-chip-text {
     min-width:0;
     max-width:72vw;

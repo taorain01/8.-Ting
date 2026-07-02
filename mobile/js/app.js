@@ -2546,7 +2546,10 @@ function syncDetectedServicesFromPaste(rawText) {
 
     const bestPlatform = detection.platforms[0];
     const nameInput = document.getElementById('add-name');
-    if (bestPlatform) {
+    const currentPlatform = window.appState.addFormPlatform || null;
+    const autoPlatform = window.appState.addFormAutoPlatform || null;
+    const canApplyAutoPlatform = !currentPlatform || currentPlatform === autoPlatform;
+    if (bestPlatform && canApplyAutoPlatform) {
         window.appState.addFormPlatform = bestPlatform.id;
         window.appState.addFormAutoPlatform = bestPlatform.id;
         if (nameInput && (!nameInput.value.trim() || nameInput.dataset.autoFilled === 'true')) {
@@ -2608,9 +2611,11 @@ function syncSellerFromPaste(rawText) {
         nameInput.value = seller.name;
         nameInput.dataset.sellerAuto = 'true';
     }
+    if (typeof selectSellerPlatform === 'function') selectSellerPlatform(seller.platform, { syncLink: false });
     if (linkInput) linkInput.value = seller.url;
-    if (typeof selectSellerPlatform === 'function') selectSellerPlatform(seller.platform);
-    if (hint && typeof renderSellerLinkHint === 'function') {
+    if (typeof updateSellerLinkHint === 'function') {
+        updateSellerLinkHint(seller.url);
+    } else if (hint && typeof renderSellerLinkHint === 'function') {
         hint.innerHTML = renderSellerLinkHint(seller.url);
         hint.hidden = false;
     }
@@ -3520,6 +3525,11 @@ function buildAccountSaveInput(input = {}) {
     const protectedByMasterPassword = input.protectedByMasterPassword !== undefined
         ? Boolean(input.protectedByMasterPassword)
         : type === 'personal' || Boolean(window.appState.settings?.protectBoughtAccounts);
+    const sellerName = String(input.sellerName || '').trim();
+    const sellerPlatform = input.sellerPlatform || 'other';
+    const sellerLink = typeof resolveSellerLinkInput === 'function'
+        ? resolveSellerLinkInput(sellerName, sellerPlatform, input.sellerLink)
+        : (sellerName ? String(input.sellerLink || '').trim() : '');
 
     return {
         ok: true,
@@ -3529,9 +3539,9 @@ function buildAccountSaveInput(input = {}) {
             name,
             type,
             platform,
-            sellerName: String(input.sellerName || '').trim(),
-            sellerPlatform: input.sellerPlatform || 'other',
-            sellerLink: String(input.sellerLink || '').trim(),
+            sellerName,
+            sellerPlatform,
+            sellerLink,
             purchasePrice: (typeof parsePriceValue === 'function' ? parsePriceValue(input.purchasePrice) : (input.purchasePrice || null)) ?? null,
             displayUsername: maskUsername(sensitiveData.username),
             purchaseDate,
@@ -3629,7 +3639,10 @@ async function saveNewAccount(type) {
     const note = autoTagNoteLinks(document.getElementById('add-note').value.trim());
     const sellerName = document.getElementById('add-seller-name')?.value.trim() || '';
     const sellerPlatform = document.getElementById('add-seller-platform')?.value || 'other';
-    const sellerLink = document.getElementById('add-seller-link')?.value.trim() || '';
+    const rawSellerLink = document.getElementById('add-seller-link')?.value.trim() || '';
+    const sellerLink = typeof resolveSellerLinkInput === 'function'
+        ? resolveSellerLinkInput(sellerName, sellerPlatform, rawSellerLink)
+        : (sellerName ? rawSellerLink : '');
     const purchasePrice = typeof parsePriceValue === 'function' ? parsePriceValue(document.getElementById('add-price')?.value) : null;
     const tags = typeof normalizeTags === 'function' ? normalizeTags([...getAddTags(), ...smartName.tags]) : [...getAddTags(), ...smartName.tags];
     const categoryIds = getSelectedCategoryIdsFromForm();
@@ -3645,7 +3658,7 @@ async function saveNewAccount(type) {
     const baseData = {
         name,
         type,
-        platform: smartName.platform || getCurrentAddPlatform() || detectPlatform(name),
+        platform: getCurrentAddPlatform() || smartName.platform || detectPlatform(name),
         sellerName,
         sellerPlatform: sellerPlatform || 'other',
         sellerLink,
