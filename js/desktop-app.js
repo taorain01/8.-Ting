@@ -1724,7 +1724,7 @@ function collectSharedAccountEditInput(groupId, accountId) {
     const parsed = parseAccountInput(raw) || {};
     const rawName = document.getElementById('add-name')?.value?.trim() || '';
     const smartName = parseSmartName(rawName);
-    const name = smartName.tags?.length ? smartName.name : rawName;
+    const name = smartName.name || rawName;
     if (!name) return { ok: false, message: 'Nhap ten dich vu' };
     const isLifetime = document.getElementById('add-lifetime')?.checked === true;
     const purchaseDate = document.getElementById('add-purchase')?.value || account?.purchaseDate || todayStr();
@@ -2481,6 +2481,20 @@ function findSmartTagSpan(words, tagWords, usedIndexes) {
     return null;
 }
 
+function canonicalizePlatformName(name, platform) {
+    const raw = String(name || '').trim();
+    if (!raw || !platform) return raw;
+    const canonical = typeof getPlatformPickerLabel === 'function' ? getPlatformPickerLabel(platform, '') : '';
+    if (!canonical) return raw;
+    // Chỉ chuẩn hoá khi tên còn lại là 1 từ và chính là nền tảng đã nhận diện (tránh phá tên tùy chỉnh nhiều từ)
+    if (raw.split(/\s+/).filter(Boolean).length !== 1) return raw;
+    const norm = typeof normalizePasteValue === 'function' ? normalizePasteValue(raw) : raw.toLowerCase();
+    const normCanonical = typeof normalizePasteValue === 'function' ? normalizePasteValue(canonical) : canonical.toLowerCase();
+    if (norm === normCanonical) return canonical;
+    if (typeof detectPlatform === 'function' && detectPlatform(raw) === platform) return canonical;
+    return raw;
+}
+
 function parseSmartName(input) {
     const raw = String(input || '').trim();
     if (!raw) return { name: '', tags: [], platform: null };
@@ -2505,8 +2519,9 @@ function parseSmartName(input) {
     const tags = tagMatches
         .sort((a, b) => a.index - b.index)
         .map(item => item.label);
+    const finalName = canonicalizePlatformName(name || getPlatformPickerLabel(platform, raw), platform);
     return {
-        name: name || getPlatformPickerLabel(platform, raw),
+        name: finalName,
         tags: typeof normalizeTags === 'function' ? normalizeTags(tags) : tags,
         platform,
     };
@@ -3287,7 +3302,7 @@ function buildAccountSaveInput(input = {}) {
     const raw = String(input.rawInput || input.raw || '');
     const parsed = input.parsed || parseAccountInput(raw) || {};
     const smartName = parseSmartName(input.name || '');
-    const name = String(smartName.tags.length ? smartName.name : input.name || '').trim();
+    const name = String(smartName.name || input.name || '').trim();
     const type = input.type === 'personal' ? 'personal' : 'bought';
     const authMethod = typeof getAuthMethod === 'function' ? getAuthMethod(input.authMethod || 'email') : (input.authMethod || 'email');
     const linkedAccountId = authMethod === 'email' ? null : (input.linkedAccountId || null);
@@ -3427,7 +3442,7 @@ async function saveNewAccount(type) {
     }
     const rawName = document.getElementById('add-name').value.trim();
     const smartName = parseSmartName(rawName);
-    const name = smartName.tags.length ? smartName.name : rawName;
+    const name = smartName.name || rawName;
     if (!name) { showToast('Nhập tên dịch vụ', 'error'); return; }
     const isL = document.getElementById('add-lifetime').checked;
     const pDate = document.getElementById('add-purchase').value || todayStr();
