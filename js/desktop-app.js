@@ -54,7 +54,7 @@ window.appState = {
         notifyOverdueDays: 3,
         shortcuts: { openApp: 'Control+Shift+T', quickAdd: 'Control+Shift+S' },
     },
-    appVersion: '1.3.0',
+    appVersion: '1.3.1',
     updateStatus: null,
     updateLog: [],
 };
@@ -2307,10 +2307,12 @@ function openAddModal() {
     window.appState.addFormDetectedServices = { platforms: [], tags: [] };
     window.appState.addFormAuthMethod = 'email';
     window.appState.addFormLinkedId = null;
+    resetAddFormGuideState?.();
     openModal(type === 'personal' ? 'Thêm TK cá nhân' : 'Thêm TK mua', renderAddForm(type));
     initAddTagPicker();
     updateAddExpiryHint();
     updateAddAuthMethodUI();
+    window.setTimeout(() => guideAddFormTo?.('platform-section', { focus: false, block: 'start' }), 30);
 }
 
 const PASTE_PLATFORM_ALIASES = {
@@ -3010,6 +3012,7 @@ function selectDetectedPlatform(platformId) {
     window.appState.addFormAutoPlatform = null;
     showPlatformPlanPanel(platformId);
     refreshServiceDetectionChips();
+    guideAddFormFromPlatform?.(platformId);
 }
 
 function selectPlatformFromPicker(platform, name) {
@@ -3020,6 +3023,7 @@ function selectPlatformFromPicker(platform, name) {
         updatePlatformPickerState();
         updateAddTagSuggestions();
         renderSelectedAddTags();
+        guideAddFormFromPlatform?.('other');
         return;
     }
     if (input) {
@@ -3027,6 +3031,7 @@ function selectPlatformFromPicker(platform, name) {
         input.dataset.autoFilled = 'true';
     }
     showPlatformPlanPanel(platform);
+    guideAddFormFromPlatform?.(platform);
 }
 
 function toggleAddSection(sectionId) {

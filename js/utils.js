@@ -684,6 +684,179 @@ function getAddHistoryPreview(value, max = 42) {
     return text.length > max ? `${text.slice(0, max - 3)}...` : text;
 }
 
+const ADD_PLATFORM_USAGE_STORAGE_KEY = 'ting.addFormPlatformUsage.v1';
+
+function getAddPlatformUsageStore() {
+    if (typeof localStorage === 'undefined') return {};
+    try {
+        const parsed = JSON.parse(localStorage.getItem(ADD_PLATFORM_USAGE_STORAGE_KEY) || '{}');
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+        return Object.entries(parsed).reduce((store, [platform, usage]) => {
+            const count = Number(usage?.count) || 0;
+            const lastSelectedAt = Number(usage?.lastSelectedAt) || 0;
+            if (platform && (count > 0 || lastSelectedAt > 0)) {
+                store[platform] = {
+                    count: Math.max(0, count),
+                    lastSelectedAt: Math.max(0, lastSelectedAt),
+                };
+            }
+            return store;
+        }, {});
+    } catch {
+        return {};
+    }
+}
+
+function saveAddPlatformUsageStore(store) {
+    if (typeof localStorage === 'undefined') return;
+    try {
+        localStorage.setItem(ADD_PLATFORM_USAGE_STORAGE_KEY, JSON.stringify(store || {}));
+    } catch {
+        // Storage can be blocked or full; sorting simply falls back next time.
+    }
+}
+
+function recordAddPlatformSelection(platformId, timestamp = Date.now()) {
+    const platform = String(platformId || '').trim();
+    if (!platform) return;
+    const store = getAddPlatformUsageStore();
+    const current = store[platform] || { count: 0, lastSelectedAt: 0 };
+    store[platform] = {
+        count: (Number(current.count) || 0) + 1,
+        lastSelectedAt: Number(timestamp) || Date.now(),
+    };
+    saveAddPlatformUsageStore(store);
+}
+
+function sortAddPlatformsByUsage(platforms = []) {
+    const store = getAddPlatformUsageStore();
+    return [...(platforms || [])]
+        .map((platform, index) => ({ platform, index, usage: store[platform?.id] || {} }))
+        .sort((a, b) => {
+            const bLast = Number(b.usage.lastSelectedAt) || 0;
+            const aLast = Number(a.usage.lastSelectedAt) || 0;
+            if (bLast !== aLast) return bLast - aLast;
+            const bCount = Number(b.usage.count) || 0;
+            const aCount = Number(a.usage.count) || 0;
+            if (bCount !== aCount) return bCount - aCount;
+            return a.index - b.index;
+        })
+        .map(item => item.platform);
+}
+
+function getAddFormGuideState() {
+    if (!window.appState) return {};
+    if (!window.appState.addFormGuide) resetAddFormGuideState();
+    return window.appState.addFormGuide;
+}
+
+function resetAddFormGuideState() {
+    if (!window.appState) return;
+    window.appState.addFormGuide = {
+        pasteGuided: false,
+        dateTouched: false,
+        dateSkipped: false,
+        dateGuided: false,
+        noteGuided: false,
+        sellerGuided: false,
+    };
+}
+
+function isAddFormGuideTargetAvailable(element) {
+    if (!element || element.disabled || element.hidden || element.closest('[hidden]')) return false;
+    if (typeof getComputedStyle !== 'function') return true;
+    const style = getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden';
+}
+
+function guideAddFormTo(target, options = {}) {
+    const element = typeof target === 'string'
+        ? document.getElementById(target.replace(/^#/, ''))
+        : target;
+    if (!isAddFormGuideTargetAvailable(element)) return false;
+    const focus = options.focus !== false && typeof element.focus === 'function';
+    const block = options.block || 'center';
+    const delay = Number.isFinite(options.delay) ? options.delay : 80;
+
+    const scrollTarget = () => {
+        element.scrollIntoView({ behavior: options.behavior || 'smooth', block, inline: 'nearest' });
+    };
+    if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(scrollTarget);
+    } else {
+        scrollTarget();
+    }
+    if (focus) {
+        window.setTimeout(() => {
+            element.focus({ preventScroll: true });
+            const value = typeof element.value === 'string' ? element.value : '';
+            if (options.caretEnd !== false && typeof element.setSelectionRange === 'function') {
+                element.setSelectionRange(value.length, value.length);
+            }
+        }, delay);
+    }
+    return true;
+}
+
+function guideAddFormToFirstAvailable(targets = [], options = {}) {
+    return targets.some(target => guideAddFormTo(target, options));
+}
+
+function markAddFormDateTouched() {
+    const guide = getAddFormGuideState();
+    guide.dateTouched = true;
+}
+
+function markAddFormDateSkippedIfNeeded() {
+    const guide = getAddFormGuideState();
+    if (!guide.dateTouched) guide.dateSkipped = true;
+}
+
+function guideAddFormFromPlatform(platformId) {
+    if (platformId && platformId !== 'other') recordAddPlatformSelection(platformId);
+    const guide = getAddFormGuideState();
+    if (platformId === 'other') {
+        guideAddFormTo('add-name');
+        return;
+    }
+    guide.pasteGuided = true;
+    if (!guideAddFormTo('paste-input')) {
+        guideAddFormTo('add-smart-date');
+    }
+}
+
+function handleQuickPasteGuidance() {
+    window.setTimeout(() => {
+        const paste = document.getElementById('paste-input');
+        const guide = getAddFormGuideState();
+        if (!paste?.value.trim() || guide.dateSkipped || guide.dateGuided) return;
+        guide.dateGuided = true;
+        guideAddFormTo('add-smart-date');
+    }, 0);
+}
+
+function guideAddFormFromDate() {
+    const guide = getAddFormGuideState();
+    markAddFormDateTouched();
+    if (guide.noteGuided) return;
+    guide.noteGuided = true;
+    guideAddFormTo('add-note');
+}
+
+function guideAddFormFromNote() {
+    const textarea = document.getElementById('add-note');
+    const guide = getAddFormGuideState();
+    if (guide.sellerGuided || !textarea?.value.trim()) return;
+    guide.sellerGuided = true;
+    guideAddFormTo('add-seller-name');
+}
+
+function guideAddFormFromSeller() {
+    const seller = document.getElementById('add-seller-name');
+    if (!seller?.value.trim()) return;
+    guideAddFormTo('add-price');
+}
+
 function buildAddFormHistorySuggestions(editingId = '') {
     const accounts = [...(window.appState?.accounts || [])]
         .filter(acc => acc && acc.id !== editingId)
@@ -903,6 +1076,19 @@ function formatPriceField(input) {
 }
 
 if (typeof window !== 'undefined') {
+    window.getAddPlatformUsageStore = getAddPlatformUsageStore;
+    window.recordAddPlatformSelection = recordAddPlatformSelection;
+    window.sortAddPlatformsByUsage = sortAddPlatformsByUsage;
+    window.resetAddFormGuideState = resetAddFormGuideState;
+    window.guideAddFormTo = guideAddFormTo;
+    window.guideAddFormToFirstAvailable = guideAddFormToFirstAvailable;
+    window.markAddFormDateTouched = markAddFormDateTouched;
+    window.markAddFormDateSkippedIfNeeded = markAddFormDateSkippedIfNeeded;
+    window.guideAddFormFromPlatform = guideAddFormFromPlatform;
+    window.handleQuickPasteGuidance = handleQuickPasteGuidance;
+    window.guideAddFormFromDate = guideAddFormFromDate;
+    window.guideAddFormFromNote = guideAddFormFromNote;
+    window.guideAddFormFromSeller = guideAddFormFromSeller;
     window.buildAddFormHistorySuggestions = buildAddFormHistorySuggestions;
     window.renderAddFormHistorySuggestions = renderAddFormHistorySuggestions;
     window.applyAddHistoryNote = applyAddHistoryNote;

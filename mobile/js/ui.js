@@ -1979,7 +1979,9 @@ function renderAddForm(type, editData = null) {
     const selectedCategoryIds = isEdit
         ? (Array.isArray(editData.categoryIds) ? editData.categoryIds : [])
         : defaultCategoryIds;
-    const platforms = getAddFormPlatformOptions();
+    const platforms = typeof sortAddPlatformsByUsage === 'function'
+        ? sortAddPlatformsByUsage(getAddFormPlatformOptions())
+        : getAddFormPlatformOptions();
     const today = todayStr();
     const defaultExpiry = new Date();
     defaultExpiry.setDate(defaultExpiry.getDate() + 30);
@@ -2011,15 +2013,11 @@ function renderAddForm(type, editData = null) {
         ? renderAddFormHistorySuggestions(editData?.id || '')
         : { note: '', seller: '', price: '', bundle: '' };
     return `
-    ${renderAuthMethodInlineSelector(authMethod)}
-    <div id="add-auth-linked-wrap" class="add-auth-linked-wrap" ${authMethod === 'email' ? 'hidden' : ''}>
-        <div id="linked-account-picker-wrap">${renderLinkedAccountPicker(authMethod)}</div>
-        <div class="auth-method-note"><span>ⓘ</span><span>Dịch vụ SSO dùng mật khẩu từ TK gốc. Ting! sẽ lưu link tới TK gốc thay vì lưu mật khẩu riêng.</span></div>
-    </div>
+    ${renderPlatformSection(platforms)}
 
     <div id="add-credential-block" class="add-credential-block" ${authMethod === 'email' ? '' : 'hidden'}>
         <div class="form-section-title">Dán thông tin tài khoản</div>
-        <textarea class="textarea-paste" id="paste-input" placeholder="user@email.com|password123|2FA_CODE" oninput="previewParse()">${escapeHtml(rawValue)}</textarea>
+        <textarea class="textarea-paste" id="paste-input" placeholder="user@email.com|password123|2FA_CODE" oninput="previewParse()" onpaste="handleQuickPasteGuidance()" onblur="handleQuickPasteGuidance()">${escapeHtml(rawValue)}</textarea>
         <div id="parse-preview"></div>
         <div id="service-detect-suggestions"></div>
     </div>
@@ -2034,26 +2032,30 @@ function renderAddForm(type, editData = null) {
         <div id="selected-tags" class="selected-tags service-selected-tags" hidden></div>
     </div>
 
-    ${renderPlatformSection(platforms)}
+    ${renderAuthMethodInlineSelector(authMethod)}
+    <div id="add-auth-linked-wrap" class="add-auth-linked-wrap" ${authMethod === 'email' ? 'hidden' : ''}>
+        <div id="linked-account-picker-wrap">${renderLinkedAccountPicker(authMethod)}</div>
+        <div class="auth-method-note"><span>ⓘ</span><span>Dịch vụ SSO dùng mật khẩu từ TK gốc. Ting! sẽ lưu link tới TK gốc thay vì lưu mật khẩu riêng.</span></div>
+    </div>
 
     <div class="form-section-title">Thời hạn ${renderHintButton('Nhập linh hoạt: 30 = +30 ngày, 28/04 30 = mua 28/04 +30 ngày, 28/04 > 28/05 = khoảng ngày.')}</div>
-    <input type="text" id="add-smart-date" class="input smart-date-input" value="${escapeHtml(smartDateValue)}" placeholder="30 ngày, 28/04 30, 28/04 > 28/05" oninput="applySmartDateInput(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();applySmartDateInput(this.value)}">
+    <input type="text" id="add-smart-date" class="input smart-date-input" value="${escapeHtml(smartDateValue)}" placeholder="30 ngày, 28/04 30, 28/04 > 28/05" oninput="markAddFormDateTouched();applySmartDateInput(this.value)" onblur="guideAddFormFromDate()" onkeydown="if(event.key==='Enter'){event.preventDefault();applySmartDateInput(this.value);guideAddFormFromDate()}">
     <input type="hidden" id="add-purchase" value="${escapeHtml(purchaseValue)}">
     <input type="hidden" id="add-expiry" value="${escapeHtml(expiryValue)}">
     <div id="add-expiry-hint" class="quick-date-hint smart-date-preview"></div>
     <div class="smart-date-options">
         <label class="quick-lifetime"><input type="checkbox" id="add-date-custom" onchange="toggleSmartDateDetails(this)"> Tùy chỉnh chi tiết</label>
-        <label class="quick-lifetime"><input type="checkbox" id="add-lifetime" onchange="handleAddLifetimeToggle(this)"> Vĩnh viễn</label>
+        <label class="quick-lifetime"><input type="checkbox" id="add-lifetime" onchange="handleAddLifetimeToggle(this);guideAddFormFromDate()"> Vĩnh viễn</label>
     </div>
     <div id="smart-date-details" class="smart-date-details" ${isEdit ? '' : 'hidden'}>
         <div class="quick-date-grid">
             <div class="quick-date-field">
                 <label>Ngày mua</label>
-                <input type="date" id="add-purchase-detail" class="input" value="${escapeHtml(purchaseValue)}" onchange="setAddPurchaseDate(this.value)">
+                <input type="date" id="add-purchase-detail" class="input" value="${escapeHtml(purchaseValue)}" onchange="setAddPurchaseDate(this.value);guideAddFormFromDate()">
             </div>
             <div class="quick-date-field">
                 <label>Ngày hết hạn</label>
-                <input type="date" id="add-expiry-detail" class="input" value="${defaultExpiryValue}" onchange="setExpiryDate(inputValueToDate(this.value), 'tùy chỉnh')">
+                <input type="date" id="add-expiry-detail" class="input" value="${defaultExpiryValue}" onchange="setExpiryDate(inputValueToDate(this.value), 'tùy chỉnh');guideAddFormFromDate()">
             </div>
         </div>
     </div>
@@ -2068,13 +2070,13 @@ function renderAddForm(type, editData = null) {
         <textarea class="textarea-paste" id="add-note" placeholder="Ghi chú thông minh...
 [copy][/copy]
 [code][/code]
-https://example.com" style="min-height:110px">${escapeHtml(editData?.note || '')}</textarea>
+https://example.com" style="min-height:110px" onfocus="markAddFormDateSkippedIfNeeded()" onblur="guideAddFormFromNote()">${escapeHtml(editData?.note || '')}</textarea>
     </div>
     ${history.note}
 
     <div class="form-section-title">Ngu&#7891;n g&#7889;c / Ng&#432;&#7901;i b&#225;n <span class="optional-label">(T&#249;y ch&#7885;n)</span></div>
     <div class="input-group" style="margin-bottom:8px">
-        <input type="text" id="add-seller-name" class="input" placeholder=" " style="padding-left:16px" value="${escapeHtml(editData?.sellerName || '')}" oninput="this.dataset.sellerAuto='false';syncSellerLinkFromForm()">
+        <input type="text" id="add-seller-name" class="input" placeholder=" " style="padding-left:16px" value="${escapeHtml(editData?.sellerName || '')}" oninput="this.dataset.sellerAuto='false';syncSellerLinkFromForm()" onblur="guideAddFormFromSeller()" onkeydown="if(event.key==='Enter'){event.preventDefault();guideAddFormFromSeller()}">
         <label for="add-seller-name" class="input-label" style="left:16px">T&#234;n ng&#432;&#7901;i b&#225;n</label>
     </div>
     ${renderSellerPlatformPicker(editData?.sellerPlatform || 'other', editData?.sellerLink || '')}
