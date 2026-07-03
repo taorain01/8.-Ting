@@ -81,12 +81,13 @@ public class TingUpdaterPlugin extends Plugin {
             call.reject("Thiếu mã băm SHA-256 để xác minh bản cập nhật.");
             return;
         }
-        if (expectedSizeValue == null) {
-            call.reject("Thiếu kích thước file để xác minh bản cập nhật.");
-            return;
-        }
 
-        final long expectedSize = expectedSizeValue;
+        // Kích thước file là kiểm tra PHỤ (SHA-256 mới là bảo đảm toàn vẹn thật sự).
+        // Nếu manifest/bản gọi không cung cấp expectedSize (hoặc bản cũ gửi thiếu),
+        // vẫn tiếp tục tải và chỉ dựa vào SHA-256; expectedSize <= 0 nghĩa là "bỏ qua".
+        final long expectedSize = (expectedSizeValue != null && expectedSizeValue > 0)
+            ? expectedSizeValue
+            : -1L;
 
         // Tải trên luồng nền để không chặn UI.
         new Thread(new Runnable() {
@@ -108,7 +109,7 @@ public class TingUpdaterPlugin extends Plugin {
                     // getContentLength() trả int, đủ cho kích thước APK và tương thích minSdk 23.
                     long totalBytes = connection.getContentLength();
                     if (totalBytes <= 0) {
-                        totalBytes = expectedSize;
+                        totalBytes = expectedSize > 0 ? expectedSize : -1L;
                     }
 
                     MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -140,10 +141,11 @@ public class TingUpdaterPlugin extends Plugin {
                     output = null;
 
                     // Xác minh kích thước + SHA-256 trước khi cho phép cài đặt.
+                    // SHA-256 luôn bắt buộc; kích thước chỉ kiểm tra khi manifest có cung cấp.
                     long actualSize = apkFile.length();
                     String actualSha256 = toHex(digest.digest());
 
-                    boolean sizeMatches = actualSize == expectedSize;
+                    boolean sizeMatches = expectedSize <= 0 || actualSize == expectedSize;
                     boolean shaMatches = actualSha256.equalsIgnoreCase(expectedSha256);
 
                     if (!sizeMatches || !shaMatches) {

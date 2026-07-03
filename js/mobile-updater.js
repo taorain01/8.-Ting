@@ -56,10 +56,10 @@
 
   /**
    * Phiên bản đang cài trên Android (khớp `versionName`/`versionCode` trong
-   * cấu hình Capacitor: versionName "1.3.6", versionCode 10306).
+   * cấu hình Capacitor: versionName "1.3.7", versionCode 10307).
    */
-  const INSTALLED_VERSION_NAME = '1.3.6';
-  const INSTALLED_VERSION_CODE = 10306;
+  const INSTALLED_VERSION_NAME = '1.3.7';
+  const INSTALLED_VERSION_CODE = 10307;
 
   /** Khóa localStorage cho nhật ký cập nhật và mốc Background_Check. */
   const STORAGE_KEY_UPDATE_LOG = 'ting.update.log';
@@ -556,12 +556,13 @@
         return { status: 'error', message: MSG_UNTRUSTED_URL, info: info || null };
       }
 
-      // 4) Bắt buộc có thông tin toàn vẹn để native xác minh (9.4).
-      if (typeof expectedSha256 !== 'string' || expectedSha256 === ''
-          || typeof expectedSize !== 'number' || !Number.isFinite(expectedSize)) {
+      // 4) Bắt buộc có SHA-256 để native xác minh toàn vẹn (9.4). Kích thước là
+      //    kiểm tra PHỤ: chỉ gửi khi manifest cung cấp số hợp lệ, thiếu vẫn tải được.
+      if (typeof expectedSha256 !== 'string' || expectedSha256 === '') {
         writeUpdateLogEntry({ version, status: 'error', message: MSG_MISSING_INTEGRITY_INFO });
         return { status: 'error', message: MSG_MISSING_INTEGRITY_INFO, info: info || null };
       }
+      const hasValidSize = typeof expectedSize === 'number' && Number.isFinite(expectedSize) && expectedSize > 0;
 
       // 5) Phân giải plugin native.
       const plugin = resolveNativePlugin();
@@ -595,7 +596,7 @@
             downloadResult = await plugin.downloadApk({
               url: apkUrl,
               expectedSha256: expectedSha256,
-              expectedSize: expectedSize,
+              expectedSize: hasValidSize ? expectedSize : 0,
             });
             lastError = null;
             integrityFailure = false;
