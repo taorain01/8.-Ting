@@ -1812,6 +1812,359 @@ function renderGroupDetail(groupId) {
     `;
 }
 
+function getGroupSharedAccounts(group) {
+    const accounts = window.appState.sharedAccounts?.[group?.id] || [];
+    return typeof sortSharedAccountsForGroup === 'function' ? sortSharedAccountsForGroup(accounts) : accounts;
+}
+
+function getGroupPlatformSummary(group) {
+    const counts = new Map();
+    getGroupSharedAccounts(group).forEach(account => {
+        const platform = getResolvedPlatform(account) || account.platform || normalizeServiceName(account.name || account.serviceName || '');
+        if (!platform) return;
+        const current = counts.get(platform) || { platform, count: 0, account };
+        current.count += 1;
+        counts.set(platform, current);
+    });
+    const sorted = [...counts.values()].sort((a, b) => b.count - a.count || getPlatformLabel(a.platform, [a.account]).localeCompare(getPlatformLabel(b.platform, [b.account])));
+    return { items: sorted.slice(0, 5), extra: Math.max(0, sorted.length - 5), totalPlatforms: sorted.length };
+}
+
+function renderGroupPlatformStack(group) {
+    const summary = getGroupPlatformSummary(group);
+    if (!summary.items.length) return '<div class="group-platform-empty">Chưa share TK</div>';
+    return `<div class="group-platform-stack" title="${escapeHtml(summary.totalPlatforms)} nền tảng">
+        ${summary.items.map(item => {
+            const label = getPlatformLabel(item.platform, [item.account]);
+            const logoStyle = typeof getPlatformLogoStyle === 'function'
+                ? getPlatformLogoStyle(item.platform, label)
+                : `background:${stringToColor(label)}15;color:${stringToColor(label)}`;
+            const logoMark = typeof renderPlatformLogoMark === 'function'
+                ? renderPlatformLogoMark(item.platform, getPlatformEmoji(item.platform))
+                : getPlatformEmoji(item.platform);
+            return `<span class="group-platform-icon" style="${logoStyle}" title="${escapeHtml(label)}">${logoMark}<span>${item.count}</span></span>`;
+        }).join('')}
+        ${summary.extra ? `<span class="group-platform-more">+${summary.extra}</span>` : ''}
+    </div>`;
+}
+
+function renderGroupCard(group) {
+    const accounts = getGroupSharedAccounts(group);
+    const count = accounts.length || window.appState.sharedAccountCounts?.[group.id] || group.sharedAccountCount || 0;
+    const editCount = window.appState.sharedEditRequestCounts?.[group.id] ?? group.editRequestCount ?? 0;
+    const unlocked = Boolean(isGroupUnlocked?.(group.id));
+    return `<button class="group-card group-list-card anim-fade-in-up" onclick="openGroupDetail('${escapeJsAttr(group.id)}')">
+        <div class="group-card-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+        </div>
+        <div class="group-card-main">
+            <div class="group-card-title">${escapeHtml(group.name || 'Nhóm')}</div>
+            <div class="group-card-meta">${escapeHtml(getGroupRoleLabel(group))} · ${(group.memberEmails || []).length} thành viên · ${count} tài khoản${editCount ? ` · ${editCount} chờ duyệt` : ''}</div>
+        </div>
+        <div class="group-card-platforms">${renderGroupPlatformStack(group)}</div>
+        <span class="group-lock-badge ${unlocked ? 'unlocked' : ''}">${escapeHtml(getGroupLockLabel(group.id))}</span>
+    </button>`;
+}
+
+function renderGroupInviteCard(group) {
+    return `<div class="group-card group-list-card group-invite-card anim-fade-in-up">
+        <div class="group-card-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 12h-6"/><path d="m19 9 3 3-3 3"/><path d="M14 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="7.5" cy="7" r="4"/></svg>
+        </div>
+        <div class="group-card-main">
+            <div class="group-card-title">${escapeHtml(group.name || 'Nhóm')}</div>
+            <div class="group-card-meta">Mời bởi ${escapeHtml(group.ownerEmail || '')} · ${(group.memberEmails || []).length} thành viên</div>
+        </div>
+        <div class="group-invite-actions">
+            <button type="button" class="btn btn-sm btn-primary" onclick="openAcceptGroupInviteModal('${escapeJsAttr(group.id)}')">Nhập mật khẩu</button>
+            <button type="button" class="btn btn-sm btn-outline" onclick="handleCancelGroupInvite('${escapeJsAttr(group.id)}')">Bỏ qua</button>
+        </div>
+    </div>`;
+}
+
+function renderGroupInviteSection(invites) {
+    if (!invites.length) return '';
+    return `<div class="group-invite-section anim-fade-in-up">
+        <div class="section-header"><span class="section-title">Lời mời vào nhóm</span><span class="section-badge">${invites.length}</span></div>
+        <div class="group-list">${invites.map(renderGroupInviteCard).join('')}</div>
+    </div>`;
+}
+
+function renderGroupList() {
+    const groups = window.appState.groups || [];
+    const invites = window.appState.groupInvites || [];
+    const query = String(window.appState.searchQuery || '').trim().toLowerCase();
+    const filtered = query
+        ? groups.filter(group => (group.name || '').toLowerCase().includes(query)
+            || (group.ownerEmail || '').toLowerCase().includes(query)
+            || (group.memberEmails || []).some(email => email.includes(query)))
+        : groups;
+    const filteredInvites = query
+        ? invites.filter(group => (group.name || '').toLowerCase().includes(query)
+            || (group.ownerEmail || '').toLowerCase().includes(query))
+        : invites;
+    document.getElementById('page-content').innerHTML = `
+        <div class="group-page-head anim-fade-in-up">
+            <div>
+                <div class="section-title">Nhóm</div>
+                <div class="group-page-desc">${filtered.length} nhóm${filteredInvites.length ? ` · ${filteredInvites.length} lời mời` : ''}</div>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="openCreateGroupModal()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M12 5v14M5 12h14"/></svg>
+                Tạo nhóm
+            </button>
+        </div>
+        ${renderGroupInviteSection(filteredInvites)}
+        ${filtered.length
+            ? `<div class="group-list">${filtered.map(renderGroupCard).join('')}</div>`
+            : `<div class="d-empty-state anim-fade-in-up"><div class="d-empty-state-title">Chưa có nhóm</div><div class="d-empty-state-desc">Tạo nhóm để chia sẻ tài khoản dùng chung.</div></div>`}
+    `;
+}
+
+function renderGroupTabs(group) {
+    const active = window.appState.currentGroupTab || 'board';
+    const tabs = [
+        { id: 'board', label: group.name || 'Nhóm' },
+        { id: 'accounts', label: 'Tài khoản' },
+        { id: 'members', label: 'Thành viên' },
+    ];
+    return `<div class="group-tabs" role="tablist">
+        ${tabs.map(tab => `<button type="button" class="group-tab ${active === tab.id ? 'active' : ''}" onclick="setGroupDetailTab('${escapeJsAttr(tab.id)}')" title="${escapeHtml(tab.label)}">${escapeHtml(tab.label)}</button>`).join('')}
+    </div>`;
+}
+
+function renderGroupCategoryIcon(category) {
+    const label = String(category?.icon || '').trim();
+    if (!label || label === 'folder') {
+        return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2Z"/></svg>';
+    }
+    return escapeHtml(label.slice(0, 2).toUpperCase());
+}
+
+function renderEditIconSvg() {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4Z"/></svg>';
+}
+
+function renderGroupAccountCategorySelect(group, account) {
+    const canManage = typeof canManageSharedAccountForUi === 'function' ? canManageSharedAccountForUi(group, account) : false;
+    if (!canManage) return '';
+    const categories = getGroupAccountCategories?.(group) || [];
+    return `<select class="group-account-category-select" onchange="handleSetSharedAccountCategory('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}',this.value)">
+        <option value="" ${account.groupCategoryId ? '' : 'selected'}>Chưa phân loại</option>
+        ${categories.map(category => `<option value="${escapeHtml(category.id)}" ${account.groupCategoryId === category.id ? 'selected' : ''}>${escapeHtml(category.name)}</option>`).join('')}
+    </select>`;
+}
+
+function renderGroupBoardAccount(group, account, categoryId, index, total) {
+    const meta = renderSharedAccountMeta(account);
+    const canManage = typeof canManageSharedAccountForUi === 'function' ? canManageSharedAccountForUi(group, account) : false;
+    return `<div class="group-board-account">
+        <div class="account-logo" style="${meta.logoStyle}">${meta.logoMark}</div>
+        <div class="group-board-account-main">
+            <div class="account-name">${escapeHtml(account.name || account.serviceName || 'Tài khoản')}</div>
+            <div class="shared-account-meta">${escapeHtml(account.displayUsername || '')}${account.groupNote ? ` · ${escapeHtml(account.groupNote)}` : ''}</div>
+        </div>
+        ${renderGroupAccountCategorySelect(group, account)}
+        ${canManage ? `<div class="group-board-account-actions">
+            <button type="button" class="copy-btn" onclick="handleMoveSharedAccount('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','up','${escapeJsAttr(categoryId || '')}')" title="Đưa lên" ${index <= 0 ? 'disabled' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18,15 12,9 6,15"/></svg></button>
+            <button type="button" class="copy-btn" onclick="handleMoveSharedAccount('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','down','${escapeJsAttr(categoryId || '')}')" title="Đưa xuống" ${index >= total - 1 ? 'disabled' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6,9 12,15 18,9"/></svg></button>
+            <button type="button" class="copy-btn" onclick="openSharedAccountGroupNoteModal('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}')" title="Ghi chú"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v12H7l-3 3z"/></svg></button>
+        </div>` : ''}
+    </div>`;
+}
+
+function renderGroupCategorySection(group, category, accounts, index, total, canDesign) {
+    const isUncategorized = !category.id;
+    const color = category.color || '#6C5CE7';
+    return `<section class="group-category-section anim-fade-in-up">
+        <div class="group-category-head">
+            <div class="group-category-icon" style="--category-color:${escapeHtml(color)}">${renderGroupCategoryIcon(category)}</div>
+            <div class="group-category-title-wrap">
+                <div class="group-category-title">${escapeHtml(category.name)}</div>
+                ${category.note ? `<div class="group-category-note">${escapeHtml(category.note)}</div>` : ''}
+            </div>
+            <span class="section-badge">${accounts.length}</span>
+            ${canDesign && !isUncategorized ? `<div class="group-category-actions">
+                <button type="button" class="copy-btn" onclick="handleMoveGroupCategory('${escapeJsAttr(group.id)}','${escapeJsAttr(category.id)}','up')" title="Đưa lên" ${index <= 0 ? 'disabled' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18,15 12,9 6,15"/></svg></button>
+                <button type="button" class="copy-btn" onclick="handleMoveGroupCategory('${escapeJsAttr(group.id)}','${escapeJsAttr(category.id)}','down')" title="Đưa xuống" ${index >= total - 1 ? 'disabled' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6,9 12,15 18,9"/></svg></button>
+                <button type="button" class="copy-btn" onclick="openGroupCategoryModal('${escapeJsAttr(group.id)}','${escapeJsAttr(category.id)}')" title="Sửa danh mục">${renderEditIconSvg()}</button>
+                <button type="button" class="copy-btn" onclick="handleDeleteGroupCategory('${escapeJsAttr(group.id)}','${escapeJsAttr(category.id)}')" title="Xoá danh mục"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+            </div>` : ''}
+        </div>
+        <div class="group-board-account-list">
+            ${accounts.length
+                ? accounts.map((account, accountIndex) => renderGroupBoardAccount(group, account, category.id, accountIndex, accounts.length)).join('')
+                : `<div class="group-board-empty">Trống</div>`}
+        </div>
+    </section>`;
+}
+
+function renderGroupBoard(group) {
+    const accounts = getGroupSharedAccounts(group);
+    const categories = getGroupAccountCategories?.(group) || [];
+    const canDesign = group.role === 'owner';
+    const sections = categories.map(category => ({
+        ...category,
+        accounts: accounts.filter(account => account.groupCategoryId === category.id),
+    }));
+    const uncategorized = accounts.filter(account => !account.groupCategoryId || !categories.some(category => category.id === account.groupCategoryId));
+    sections.push({ id: '', name: 'Chưa phân loại', note: '', icon: 'folder', color: '#6B7280', order: 9999, accounts: uncategorized });
+    return `<div class="group-board">
+        <div class="group-board-head">
+            <div>
+                <div class="section-title">${escapeHtml(group.name || 'Nhóm')}</div>
+                <div class="group-page-desc">${categories.length} danh mục · ${accounts.length} tài khoản</div>
+            </div>
+            ${canDesign ? `<button class="btn btn-primary btn-sm" onclick="openGroupCategoryModal('${escapeJsAttr(group.id)}')">Thêm danh mục</button>` : ''}
+        </div>
+        <div class="group-category-list">
+            ${sections.map((section, index) => renderGroupCategorySection(group, section, section.accounts, index, categories.length, canDesign)).join('')}
+        </div>
+    </div>`;
+}
+
+function renderSharedSecretRows(group, account, decrypted) {
+    const canRemove = typeof canManageSharedAccountForUi === 'function' ? canManageSharedAccountForUi(group, account) : false;
+    const canEditSecret = group.role === 'owner' || account.sharedByUid === window.appState.user?.uid;
+    const pendingCount = (getSharedEditRequestsForAccount?.(group.id, account.id) || []).filter(request => request.status === 'pending').length;
+    const twoFaSecret = decrypted.twoFaCode || '';
+    return `<div class="shared-secret-rows">
+        <div class="detail-row"><span class="detail-label">Tài khoản</span><span class="detail-value secret-value">${escapeHtml(decrypted.username || '')} <button class="copy-btn" onclick="copySharedField('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','username')" title="Copy tài khoản">${renderCopyIconSvg()}</button></span></div>
+        <div class="detail-row"><span class="detail-label">Mật khẩu</span><span class="detail-value secret-value">${escapeHtml(decrypted.password || '')} <button class="copy-btn" onclick="copySharedField('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','password')" title="Copy mật khẩu">${renderCopyIconSvg()}</button></span></div>
+        ${twoFaSecret ? `<div class="detail-row"><span class="detail-label">2FA</span><span class="detail-value secret-value">${escapeHtml(twoFaSecret)} <button class="copy-btn" onclick="copySharedField('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','2fa')" title="Copy 2FA">${renderCopyIconSvg()}</button></span></div>${renderSharedTwoFaExtra(group, account, twoFaSecret)}` : ''}
+        ${decrypted.note ? `<div class="detail-row detail-note-row"><span class="detail-label">Ghi chú</span><div class="detail-note-value">${renderSmartNote(decrypted.note)}</div></div>` : ''}
+        ${account.groupNote ? `<div class="detail-row detail-note-row"><span class="detail-label">Ghi chú nhóm</span><div class="detail-note-value">${renderSmartNote(account.groupNote)}</div></div>` : ''}
+        <div class="shared-account-actions">
+            ${canEditSecret ? `<button class="btn btn-sm btn-outline" onclick="openSharedAccountEditModal('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}')">Sửa${pendingCount ? ` (${pendingCount})` : ''}</button>` : ''}
+            ${canRemove ? `<button class="btn btn-sm btn-outline" onclick="openSharedAccountGroupNoteModal('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}')">Ghi chú nhóm</button><button class="btn btn-sm btn-danger-outline shared-remove-btn" onclick="handleRemoveSharedAccount('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}')">Gỡ khỏi nhóm</button>` : ''}
+        </div>
+    </div>`;
+}
+
+function renderSharedAccountCard(group, account) {
+    const meta = renderSharedAccountMeta(account);
+    const unlocked = Boolean(isGroupUnlocked?.(group.id));
+    const key = `${group.id}:${account.id}`;
+    const decrypted = window.appState.decryptedSharedAccounts?.[key];
+    const categories = getGroupAccountCategories?.(group) || [];
+    const category = categories.find(item => item.id === account.groupCategoryId);
+    const pendingCount = (getSharedEditRequestsForAccount?.(group.id, account.id) || []).filter(request => request.status === 'pending').length;
+    if (unlocked && !decrypted) {
+        window.appState.decryptingSharedAccounts = window.appState.decryptingSharedAccounts || {};
+        if (!window.appState.decryptingSharedAccounts[key]) {
+            window.appState.decryptingSharedAccounts[key] = true;
+            decryptSharedAccountForDisplay(group.id, account.id).finally(() => {
+                delete window.appState.decryptingSharedAccounts[key];
+            });
+        }
+    }
+    return `<div class="d-account-card group-account-card shared-account-card anim-fade-in-up">
+        <div class="d-account-card-top shared-account-top">
+            <div class="account-logo" style="${meta.logoStyle}">${meta.logoMark}</div>
+            <div class="shared-account-info">
+                <div class="account-name">${escapeHtml(account.name || account.serviceName || 'Tài khoản')}${pendingCount ? ` <span class="sync-pending-badge">${pendingCount} chờ duyệt</span>` : ''}</div>
+                <div class="account-user">${escapeHtml(account.displayUsername || '')}</div>
+                <div class="shared-account-meta">${escapeHtml(meta.expiryText || '')}${category ? ` · ${escapeHtml(category.name)}` : ''}${account.sharedByEmail ? ` · ${escapeHtml(account.sharedByEmail)}` : ''}</div>
+            </div>
+            ${account.pendingSync ? '<span class="sync-pending-badge">Chờ đồng bộ</span>' : ''}
+            <span class="account-badge ${getStatusBadgeClass(account.status)}">${getStatusText(account.status)}</span>
+        </div>
+        <div class="group-account-card-tools" onclick="event.stopPropagation()">
+            ${renderGroupAccountCategorySelect(group, account)}
+        </div>
+        ${unlocked
+            ? (decrypted ? renderSharedSecretRows(group, account, decrypted) : '<div class="shared-locked-note">Đang giải mã...</div>')
+            : `<div class="shared-locked-note"><span>Nội dung nhạy cảm đang ẩn</span><button class="btn btn-sm btn-outline" onclick="openUnlockGroupModal('${escapeJsAttr(group.id)}')">Nhập mật khẩu nhóm</button></div>`}
+    </div>`;
+}
+
+function renderGroupAccountsTab(group) {
+    const accounts = getGroupSharedAccounts(group);
+    const unlocked = Boolean(isGroupUnlocked?.(group.id));
+    return `<div class="group-panel group-shared-panel group-tab-panel anim-fade-in-up">
+        <div class="group-panel-head">
+            <div class="section-title">Tài khoản</div>
+            <div class="group-panel-actions">
+                <span class="section-badge">${accounts.length}</span>
+                <span class="group-lock-badge ${unlocked ? 'unlocked' : ''}">${escapeHtml(getGroupLockLabel(group.id))}</span>
+                ${unlocked ? '' : `<button class="btn btn-sm btn-outline" onclick="openUnlockGroupModal('${escapeJsAttr(group.id)}')">Mở khoá</button>`}
+            </div>
+        </div>
+        ${renderSharedEditRequests(group)}
+        ${accounts.length
+            ? `<div class="d-account-stack shared-account-list">${accounts.map(account => renderSharedAccountCard(group, account)).join('')}</div>`
+            : `<div class="d-empty-state compact"><div class="d-empty-state-title">Chưa có tài khoản chia sẻ</div></div>`}
+    </div>`;
+}
+
+function renderGroupMembers(group) {
+    const isOwner = group.role === 'owner';
+    const ownerEmail = normalizeGroupEmail?.(group.ownerEmail) || group.ownerEmail || '';
+    const managers = new Set(getGroupAccountManagerEmails?.(group) || []);
+    const pending = group.pendingMemberEmails || [];
+    return `<div class="group-panel group-members-panel group-tab-panel anim-fade-in-up">
+        <div class="group-panel-head">
+            <div class="section-title">Thành viên</div>
+            <span class="section-badge">${(group.memberEmails || []).length}${pending.length ? `+${pending.length}` : ''}</span>
+        </div>
+        <div class="group-member-list">
+            ${(group.memberEmails || []).map(email => {
+                const normalized = normalizeGroupEmail?.(email) || email;
+                const isGroupOwnerEmail = normalized === ownerEmail;
+                const isManager = managers.has(normalized);
+                return `<div class="group-member-row">
+                    <span class="group-member-email" title="${escapeHtml(email)}">${escapeHtml(email)}</span>
+                    <span class="group-member-role">${isGroupOwnerEmail ? 'Chủ nhóm' : isManager ? 'Quản lý TK' : 'Thành viên'}</span>
+                    ${isOwner && !isGroupOwnerEmail ? `<label class="group-manager-toggle" title="Quyền quản lý tài khoản"><input type="checkbox" ${isManager ? 'checked' : ''} onchange="handleToggleGroupAccountManager('${escapeJsAttr(group.id)}','${escapeJsAttr(email)}',this.checked)"><span>Quản lý</span></label><button class="copy-btn" onclick="handleRemoveGroupMember('${escapeJsAttr(group.id)}','${escapeJsAttr(email)}')" title="Xoá thành viên"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>` : ''}
+                </div>`;
+            }).join('')}
+            ${isOwner && pending.length ? pending.map(email => `<div class="group-member-row pending">
+                <span class="group-member-email" title="${escapeHtml(email)}">${escapeHtml(email)}</span>
+                <span class="group-member-role">Đang mời</span>
+                <button class="copy-btn" onclick="handleCancelGroupInvite('${escapeJsAttr(group.id)}','${escapeJsAttr(email)}')" title="Huỷ lời mời"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+            </div>`).join('') : ''}
+        </div>
+        ${isOwner ? `<div class="group-member-add">
+            <input type="email" id="group-member-email" class="input" placeholder="email@domain.com" onkeydown="if(event.key==='Enter'){event.preventDefault();handleAddGroupMember('${escapeJsAttr(group.id)}')}">
+            <button class="btn btn-primary btn-sm" onclick="handleAddGroupMember('${escapeJsAttr(group.id)}')">Mời</button>
+        </div>` : ''}
+    </div>`;
+}
+
+function renderGroupDetail(groupId) {
+    const group = getGroupById?.(groupId);
+    if (!group) {
+        renderGroupList();
+        return;
+    }
+    const isOwner = group.role === 'owner';
+    const activeTab = window.appState.currentGroupTab || 'board';
+    const accountCount = getGroupSharedAccounts(group).length;
+    document.getElementById('page-title').textContent = group.name || 'Chi tiết nhóm';
+    const tabContent = activeTab === 'members'
+        ? renderGroupMembers(group)
+        : activeTab === 'accounts'
+            ? renderGroupAccountsTab(group)
+            : renderGroupBoard(group);
+    document.getElementById('page-content').innerHTML = `
+        <button class="back-btn" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polyline points="15,18 9,12 15,6"/></svg> Nhóm</button>
+        <div class="group-detail-head anim-fade-in-up">
+            <div class="group-detail-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+            </div>
+            <div class="group-detail-main">
+                <div class="group-detail-title">${escapeHtml(group.name || 'Nhóm')}</div>
+                <div class="group-card-meta">${escapeHtml(getGroupRoleLabel(group))} · ${(group.memberEmails || []).length} thành viên · ${accountCount} tài khoản</div>
+            </div>
+            <div class="group-detail-actions">
+                ${isOwner ? `<button class="btn btn-sm btn-outline" onclick="handleRenameGroup('${escapeJsAttr(group.id)}')">Đổi tên</button><button class="btn btn-sm btn-danger-outline" onclick="handleDeleteGroup('${escapeJsAttr(group.id)}')">Xoá</button>` : ''}
+            </div>
+        </div>
+        ${renderGroupTabs(group)}
+        ${tabContent}
+    `;
+}
+
 function getTrashDeletedDate(acc) {
     const raw = acc?.deletedAt;
     if (!raw) return null;
@@ -2149,7 +2502,10 @@ function getUpdateStatusMessage(status) {
         const percentText = Number.isFinite(percent) ? ` ${Math.round(percent)}%` : '';
         return `${UPDATE_STATUS_LABELS.downloading}${percentText}`;
     }
-    return status.message || UPDATE_STATUS_LABELS[kind] || kind || 'Đang chờ';
+    if (status.message) return status.message;
+    if (kind === 'available') return UPDATE_STATUS_LABELS['update-available'];
+    if (kind === 'not-available') return UPDATE_STATUS_LABELS['up-to-date'];
+    return UPDATE_STATUS_LABELS[kind] || kind || 'Đang chờ';
 }
 
 function renderUpdateStatus() {
@@ -2262,7 +2618,7 @@ function renderMinSupportedWarning(platform, status) {
 // hiệu hoá "Kiểm tra" theo Platform_Detector, định tuyến hành động theo nền tảng, và
 // khoá hành động khi đang tải (Requirements 1.1-1.6, 3.4/3.5/3.7, 4.4/4.6/4.8, 10.1-10.4).
 function renderUpdateSection() {
-    const version = escapeHtml(window.appState.appVersion || '1.3.1');
+    const version = escapeHtml(window.appState.appVersion || '1.3.2');
     const platform = getUpdatePlatform();
     const cap = getUpdateCapability(platform);
     const status = window.appState.updateStatus;
@@ -2270,7 +2626,7 @@ function renderUpdateSection() {
     const checking = kind === 'checking';
     const downloading = kind === 'downloading';
     const ready = kind === 'downloaded';
-    const available = kind === 'update-available';
+    const available = kind === 'update-available' || kind === 'available';
     const busy = checking || downloading;
 
     // Nút "Kiểm tra": bật theo updateCapability, vô hiệu khi đang kiểm tra/tải (1.2-1.6, 10.2).
@@ -2299,6 +2655,16 @@ function renderUpdateSection() {
         const latest = escapeHtml(status?.info?.latestVersion || '');
         const notes = status?.info?.releaseNotes
             ? `<div class="settings-item-desc">${escapeHtml(status.info.releaseNotes)}</div>`
+            : '';
+        rows += `<div class="settings-item"><div class="settings-item-icon" style="background:var(--accent-bg)">🆕</div><div class="settings-item-content"><div class="settings-item-title">Phiên bản mới${latest ? ' ' + latest : ''}</div>${notes}</div><button class="btn btn-sm btn-primary settings-inline-btn" onclick="startUpdateDownload()">Cập nhật</button></div>`;
+    }
+
+    // Desktop có bản mới nhưng chưa tải xong: cho phép tải installer ngay cả khi
+    // trạng thái đến từ fallback GitHub REST là "available".
+    if (platform === 'electron' && available && !downloading && !ready) {
+        const latest = escapeHtml(status?.info?.latestVersion || status?.info?.version || '');
+        const notes = status?.info?.releaseName
+            ? `<div class="settings-item-desc">${escapeHtml(status.info.releaseName)}</div>`
             : '';
         rows += `<div class="settings-item"><div class="settings-item-icon" style="background:var(--accent-bg)">🆕</div><div class="settings-item-content"><div class="settings-item-title">Phiên bản mới${latest ? ' ' + latest : ''}</div>${notes}</div><button class="btn btn-sm btn-primary settings-inline-btn" onclick="startUpdateDownload()">Cập nhật</button></div>`;
     }

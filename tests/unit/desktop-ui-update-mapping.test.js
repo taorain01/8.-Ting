@@ -267,6 +267,20 @@ describe('renderUpdateSection: hiển thị Installed_Version + định tuyến 
     expect(html).toContain('installDownloadedUpdate()');
   });
 
+  it('electron có bản mới từ fallback GitHub (available): hiển thị nút "Cập nhật"', () => {
+    const { exports } = loadDesktopUi(makeWindow({
+      electronAPI: { isElectron: true },
+      appState: {
+        appVersion: '1.3.0',
+        updateStatus: { status: 'available', info: { latestVersion: '1.3.2', releaseName: 'Ting! 1.3.2' } },
+        updateLog: [],
+      },
+    }));
+    const html = exports.renderUpdateSection();
+    expect(html).toContain('Phiên bản mới 1.3.2');
+    expect(html).toContain('startUpdateDownload()');
+  });
+
   it('electron đang tải: nút "Kiểm tra" bị vô hiệu (khoá hành động khi đang tải) (4.6)', () => {
     const { exports } = loadDesktopUi(makeWindow({
       electronAPI: { isElectron: true },

@@ -32,6 +32,7 @@ copyFile(path.join(root, 'firebase-config.js'), path.join(www, 'firebase-config.
 copyDir(path.join(root, 'mobile', 'css'), path.join(www, 'css'));
 copyDir(path.join(root, 'mobile', 'js'), path.join(www, 'js'));
 copyDir(path.join(root, 'assets'), path.join(www, 'assets'));
+copyDir(path.join(root, 'js', 'shared'), path.join(www, 'js', 'shared'));
 
 const sharedScripts = [
   'utils.js',
@@ -43,6 +44,8 @@ const sharedScripts = [
   'db.js',
   'auth.js',
   'groups.js',
+  'mobile-updater.js',
+  'background-check.js',
 ];
 
 for (const file of sharedScripts) {

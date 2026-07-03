@@ -13,7 +13,8 @@ if (!fs.existsSync(installerPath)) {
 
 for (const entry of fs.readdirSync(outputDir, { withFileTypes: true })) {
   if (entry.name === installerName) continue;
+  if (entry.name === 'latest.yml') continue;
   fs.rmSync(path.join(outputDir, entry.name), { recursive: true, force: true });
 }
 
-console.log(`Kept single installer: ${path.relative(root, installerPath)}`);
+console.log(`Kept installer and latest.yml: ${path.relative(root, installerPath)}`);

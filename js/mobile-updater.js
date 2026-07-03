@@ -56,10 +56,10 @@
 
   /**
    * Phiên bản đang cài trên Android (khớp `versionName`/`versionCode` trong
-   * cấu hình Capacitor: versionName "1.3.1", versionCode 10301).
+   * cấu hình Capacitor: versionName "1.3.2", versionCode 10302).
    */
-  const INSTALLED_VERSION_NAME = '1.3.1';
-  const INSTALLED_VERSION_CODE = 10301;
+  const INSTALLED_VERSION_NAME = '1.3.2';
+  const INSTALLED_VERSION_CODE = 10302;
 
   /** Khóa localStorage cho nhật ký cập nhật và mốc Background_Check. */
   const STORAGE_KEY_UPDATE_LOG = 'ting.update.log';
@@ -159,8 +159,9 @@
     const versionCompare = deps.versionCompare || shared.VersionCompare;
     const updateCore = deps.updateCore || shared.UpdateCore;
 
-    const fetchFn = deps.fetch
-      || (root && typeof root.fetch === 'function' ? root.fetch.bind(root) : null);
+    const fetchFn = Object.prototype.hasOwnProperty.call(deps, 'fetch')
+      ? deps.fetch
+      : (root && typeof root.fetch === 'function' ? root.fetch.bind(root) : null);
     const storage = deps.localStorage
       || (root && root.localStorage) || null;
     const nav = deps.navigator || (root && root.navigator) || null;

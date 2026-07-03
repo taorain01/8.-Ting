@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openNotificationSettings: () => ipcRenderer.invoke('notification:open-settings'),
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
+  downloadUpdate: () => ipcRenderer.invoke('updates:download'),
   getUpdateLog: () => ipcRenderer.invoke('updates:get-log'),
   getBackgroundCheckState: () => ipcRenderer.invoke('updates:get-bg-state'),
   setBackgroundCheckState: patch => ipcRenderer.invoke('updates:set-bg-state', patch),
@@ -38,12 +39,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('quick-add:save-request', handler);
     return () => ipcRenderer.removeListener('quick-add:save-request', handler);
   },
+  onQuickAddContextRequest: callback => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('quick-add:context-request', handler);
+    return () => ipcRenderer.removeListener('quick-add:context-request', handler);
+  },
   onNavigationIntent: callback => {
     const handler = (_event, intent) => callback(intent);
     ipcRenderer.on('navigation-intent', handler);
     return () => ipcRenderer.removeListener('navigation-intent', handler);
   },
   sendQuickAddResult: result => ipcRenderer.send('quick-add:save-result', result),
+  sendQuickAddContextResult: result => ipcRenderer.send('quick-add:context-result', result),
 
   // ===== ĐIỀU KHIỂN CỬA SỔ (title bar tùy chỉnh) =====
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),

@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Menu, Notification, Tray, globalShortcut, ipcMain, powerMonitor, shell } = require('electron');
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
@@ -43,6 +44,9 @@ let autoUpdaterSetupDone = false;
 // trình tải diễn ra tại một thời điểm (Yêu cầu 3.4). Được đặt `true` khi bắt
 // đầu `downloadUpdate()` và trả về `false` khi tải xong hoặc lỗi.
 let updateDownloadInFlight = false;
+let fallbackDownloadInfo = null;
+let fallbackDownloadedInstallerPath = '';
+let fallbackDownloadedVersion = '';
 
 const IS_DEV = !app.isPackaged;
 const APP_ROOT = path.resolve(__dirname, '..', '..');
@@ -148,6 +152,7 @@ let isQuitting = false;
 let idleTimer = null;
 let lastAutoLockAt = 0;
 const quickAddResolvers = new Map();
+const quickAddContextResolvers = new Map();
 
 // ===== KHỞI TẠO SETTINGS STORE NGAY LẬP TỨC =====
 // Dùng JSON store trực tiếp, không dynamic import electron-store (chậm do ESM)
@@ -417,6 +422,14 @@ function resolveQuickAddRequest(requestId, result) {
   const resolver = quickAddResolvers.get(requestId);
   if (!resolver) return false;
   quickAddResolvers.delete(requestId);
+  resolver(result);
+  return true;
+}
+
+function resolveQuickAddContextRequest(requestId, result) {
+  const resolver = quickAddContextResolvers.get(requestId);
+  if (!resolver) return false;
+  quickAddContextResolvers.delete(requestId);
   resolver(result);
   return true;
 }
@@ -857,6 +870,348 @@ function fetchJson(url) {
   });
 }
 
+function getGithubDownloadHeaders() {
+  const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
+  return {
+    'Accept': 'application/octet-stream',
+    'User-Agent': 'Ting-Updater',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
+function getHttpModule(url) {
+  return String(url || '').startsWith('http:') ? http : https;
+}
+
+function stripYamlValue(value) {
+  return String(value || '').trim().replace(/^['"]|['"]$/g, '');
+}
+
+function safeAssetFileName(name, fallback = 'download.bin') {
+  const base = path.basename(String(name || fallback));
+  return base.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_') || fallback;
+}
+
+function findReleaseAsset(release, predicate) {
+  const assets = Array.isArray(release?.assets) ? release.assets : [];
+  return assets.find(asset => {
+    try {
+      return predicate(asset);
+    } catch (_error) {
+      return false;
+    }
+  }) || null;
+}
+
+function getAssetDownloadUrl(asset) {
+  return asset?.browser_download_url || asset?.url || '';
+}
+
+function scoreInstallerAsset(asset, latestVersion) {
+  const name = String(asset?.name || '').toLowerCase();
+  let score = 0;
+  if (name.endsWith('.exe')) score += 10;
+  if (latestVersion && name.includes(String(latestVersion).toLowerCase())) score += 6;
+  if (name.includes('setup') || name.includes('installer')) score += 4;
+  if (name.includes('blockmap') || name.includes('latest')) score -= 20;
+  return score;
+}
+
+function createGithubFallbackDownloadInfo(release, latestVersion, currentVersion) {
+  const assets = Array.isArray(release?.assets) ? release.assets : [];
+  const latestYmlAsset = findReleaseAsset(release, asset => String(asset?.name || '').toLowerCase() === 'latest.yml');
+  const installerAsset = assets
+    .filter(asset => String(asset?.name || '').toLowerCase().endsWith('.exe'))
+    .sort((a, b) => scoreInstallerAsset(b, latestVersion) - scoreInstallerAsset(a, latestVersion))[0] || null;
+
+  if (!latestYmlAsset || !installerAsset) return null;
+
+  return {
+    currentVersion,
+    latestVersion,
+    releaseUrl: release?.html_url || GITHUB_RELEASES_URL,
+    releaseName: release?.name || release?.tag_name || latestVersion,
+    latestYmlName: latestYmlAsset.name || 'latest.yml',
+    latestYmlUrl: getAssetDownloadUrl(latestYmlAsset),
+    installerName: installerAsset.name || `ting-setup-${latestVersion}.exe`,
+    installerUrl: getAssetDownloadUrl(installerAsset),
+    installerSize: Number(installerAsset.size) || 0,
+    source: 'github',
+  };
+}
+
+function fetchTextUrl(url, options = {}, redirectCount = 0) {
+  return new Promise((resolve, reject) => {
+    if (!url) {
+      reject(new Error('Thiếu URL tải latest.yml'));
+      return;
+    }
+
+    const request = getHttpModule(url).get(url, { headers: options.headers || {} }, (response) => {
+      const status = response.statusCode || 0;
+      if (status >= 300 && status < 400 && response.headers.location) {
+        response.resume();
+        if (redirectCount >= 5) {
+          reject(new Error('Quá nhiều redirect khi tải latest.yml'));
+          return;
+        }
+        const nextUrl = new URL(response.headers.location, url).toString();
+        resolve(fetchTextUrl(nextUrl, options, redirectCount + 1));
+        return;
+      }
+      if (status < 200 || status >= 300) {
+        response.resume();
+        reject(new Error(`Tải latest.yml thất bại (HTTP ${status})`));
+        return;
+      }
+
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', chunk => {
+        body += chunk;
+        if (body.length > 2 * 1024 * 1024) {
+          request.destroy(new Error('latest.yml quá lớn'));
+        }
+      });
+      response.on('end', () => resolve(body));
+    });
+    request.setTimeout(options.timeoutMs || 30000, () => {
+      request.destroy(new Error('Timeout khi tải latest.yml'));
+    });
+    request.on('error', reject);
+  });
+}
+
+function downloadFile(url, targetPath, options = {}, redirectCount = 0) {
+  return new Promise((resolve, reject) => {
+    if (!url) {
+      reject(new Error('Thiếu URL tải installer'));
+      return;
+    }
+
+    const request = getHttpModule(url).get(url, { headers: options.headers || {} }, (response) => {
+      const status = response.statusCode || 0;
+      if (status >= 300 && status < 400 && response.headers.location) {
+        response.resume();
+        if (redirectCount >= 5) {
+          reject(new Error('Quá nhiều redirect khi tải installer'));
+          return;
+        }
+        const nextUrl = new URL(response.headers.location, url).toString();
+        resolve(downloadFile(nextUrl, targetPath, options, redirectCount + 1));
+        return;
+      }
+      if (status < 200 || status >= 300) {
+        response.resume();
+        reject(new Error(`Tải installer thất bại (HTTP ${status})`));
+        return;
+      }
+
+      const total = Number(response.headers['content-length']) || options.totalBytes || 0;
+      let transferred = 0;
+      let settled = false;
+      const fail = error => {
+        if (settled) return;
+        settled = true;
+        try { fs.rmSync(targetPath, { force: true }); } catch (_cleanupError) {}
+        reject(error);
+      };
+      const file = fs.createWriteStream(targetPath);
+
+      response.on('data', chunk => {
+        transferred += chunk.length;
+        if (typeof options.onProgress === 'function') {
+          const percent = total > 0 ? Math.min(100, (transferred / total) * 100) : 0;
+          options.onProgress({ percent, transferred, total });
+        }
+      });
+      response.on('error', fail);
+      file.on('error', fail);
+      file.on('finish', () => {
+        file.close(() => {
+          if (settled) return;
+          settled = true;
+          resolve({ transferred, total });
+        });
+      });
+      response.pipe(file);
+    });
+    request.setTimeout(options.timeoutMs || 120000, () => {
+      request.destroy(new Error('Timeout khi tải installer'));
+    });
+    request.on('error', error => {
+      try { fs.rmSync(targetPath, { force: true }); } catch (_cleanupError) {}
+      reject(error);
+    });
+  });
+}
+
+function parseLatestYmlSha512(latestYml, installerName) {
+  const targetName = path.basename(String(installerName || '')).toLowerCase();
+  const candidates = [];
+  const topLevel = {};
+  let current = null;
+
+  for (const line of String(latestYml || '').split(/\r?\n/)) {
+    const match = line.match(/^(\s*)(?:-\s*)?(url|path|sha512)\s*:\s*(.+)\s*$/);
+    if (!match) continue;
+    const indent = match[1].length;
+    const key = match[2];
+    const value = stripYamlValue(match[3]);
+    const startsItem = line.trim().startsWith('- ');
+
+    if (startsItem) {
+      current = {};
+      candidates.push(current);
+    }
+
+    if (indent > 0) {
+      if (!current) {
+        current = {};
+        candidates.push(current);
+      }
+      current[key] = value;
+    } else {
+      topLevel[key] = value;
+      current = null;
+    }
+  }
+
+  const matching = candidates.find(item => {
+    const candidateName = path.basename(String(item.url || item.path || '')).toLowerCase();
+    return candidateName && targetName && candidateName === targetName;
+  }) || candidates.find(item => {
+    const candidateName = path.basename(String(item.url || item.path || '')).toLowerCase();
+    return candidateName && targetName && (candidateName.includes(targetName) || targetName.includes(candidateName));
+  });
+
+  if (matching?.sha512) return matching.sha512;
+  if (topLevel.sha512) return topLevel.sha512;
+  return candidates.find(item => item.sha512)?.sha512 || '';
+}
+
+function sha512FileBase64(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha512');
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', chunk => hash.update(chunk));
+    stream.on('error', reject);
+    stream.on('end', () => resolve(hash.digest('base64')));
+  });
+}
+
+async function downloadGithubFallbackInstaller(meta) {
+  if (!meta?.latestYmlUrl || !meta?.installerUrl) {
+    throw new Error('GitHub release thiếu latest.yml hoặc installer .exe');
+  }
+
+  const updatesDir = path.join(app.getPath('userData'), 'updates');
+  fs.mkdirSync(updatesDir, { recursive: true });
+
+  const latestYmlName = safeAssetFileName(meta.latestYmlName || 'latest.yml', 'latest.yml');
+  const installerName = safeAssetFileName(meta.installerName || `ting-setup-${meta.latestVersion}.exe`);
+  const latestYmlPath = path.join(updatesDir, latestYmlName);
+  const installerPath = path.join(updatesDir, installerName);
+  const headers = getGithubDownloadHeaders();
+
+  sendUpdateEvent({
+    status: 'downloading',
+    message: 'Đang tải latest.yml...',
+    progress: { percent: 0, transferred: 0, total: meta.installerSize || 0 },
+    info: { latestVersion: meta.latestVersion, source: 'github', fallback: true },
+  });
+
+  const latestYml = await fetchTextUrl(meta.latestYmlUrl, { headers });
+  fs.writeFileSync(latestYmlPath, latestYml, 'utf8');
+  const expectedSha512 = parseLatestYmlSha512(latestYml, installerName);
+  if (!expectedSha512) {
+    throw new Error('Không tìm thấy SHA512 trong latest.yml');
+  }
+
+  await downloadFile(meta.installerUrl, installerPath, {
+    headers,
+    totalBytes: meta.installerSize || 0,
+    onProgress: progress => {
+      const percent = Math.round(progress.percent || 0);
+      sendUpdateEvent({
+        status: 'downloading',
+        message: `Đang tải ${percent}%`,
+        progress,
+        info: { latestVersion: meta.latestVersion, source: 'github', fallback: true },
+      });
+    },
+  });
+
+  const actualSha512 = await sha512FileBase64(installerPath);
+  if (actualSha512 !== expectedSha512) {
+    try { fs.rmSync(installerPath, { force: true }); } catch (_cleanupError) {}
+    throw new Error('SHA512 installer không khớp latest.yml');
+  }
+
+  fallbackDownloadedInstallerPath = installerPath;
+  fallbackDownloadedVersion = meta.latestVersion || '';
+  await logAndSendUpdateEvent(
+    {
+      status: 'downloaded',
+      message: `Bản cập nhật ${meta.latestVersion || ''} đã sẵn sàng`,
+      info: {
+        latestVersion: meta.latestVersion,
+        releaseUrl: meta.releaseUrl,
+        installerName,
+        source: 'github',
+        fallback: true,
+      },
+    },
+    { version: meta.latestVersion || 'unknown', status: 'downloaded', source: 'github', url: meta.releaseUrl },
+  );
+  return installerPath;
+}
+
+function startGithubFallbackDownload(meta = fallbackDownloadInfo) {
+  if (!meta) return false;
+  if (fallbackDownloadedInstallerPath
+      && fallbackDownloadedVersion === meta.latestVersion
+      && fs.existsSync(fallbackDownloadedInstallerPath)) {
+    sendUpdateEvent({
+      status: 'downloaded',
+      message: `Bản cập nhật ${meta.latestVersion || ''} đã sẵn sàng`,
+      info: { latestVersion: meta.latestVersion, releaseUrl: meta.releaseUrl, source: 'github', fallback: true },
+    });
+    return true;
+  }
+  if (updateDownloadInFlight) {
+    testLog('fallback update download skipped (single-flight lock held)');
+    return false;
+  }
+
+  fallbackDownloadInfo = meta;
+  fallbackDownloadedInstallerPath = '';
+  fallbackDownloadedVersion = '';
+  updateDownloadInFlight = true;
+  testLog('fallback update download start', `${meta.latestVersion || 'unknown'} ${meta.installerName || ''}`);
+
+  Promise.resolve()
+    .then(() => downloadGithubFallbackInstaller(meta))
+    .catch(error => {
+      fallbackDownloadedInstallerPath = '';
+      fallbackDownloadedVersion = '';
+      testLog('fallback update download error', error?.stack || error?.message || String(error));
+      logAndSendUpdateEvent(
+        {
+          status: 'error',
+          type: 'error',
+          message: error?.message || 'Không thể tải bản cập nhật từ GitHub',
+          info: { latestVersion: meta.latestVersion, releaseUrl: meta.releaseUrl, source: 'github', fallback: true },
+        },
+        { version: meta.latestVersion || 'unknown', status: 'error', source: 'github', url: meta.releaseUrl },
+      );
+    })
+    .finally(() => {
+      updateDownloadInFlight = false;
+    });
+  return true;
+}
+
 async function checkGithubRelease() {
   const currentVersion = normalizeVersion(app.getVersion());
   sendUpdateEvent({ status: 'checking', message: 'Đang kiểm tra GitHub Releases...' });
@@ -881,6 +1236,15 @@ async function checkGithubRelease() {
       publishedAt: release.published_at || '',
       source: 'github',
     };
+    const downloadInfo = isNewer
+      ? createGithubFallbackDownloadInfo(release, latestVersion, currentVersion)
+      : null;
+    fallbackDownloadInfo = downloadInfo;
+    if (downloadInfo) {
+      info.installerName = downloadInfo.installerName;
+      info.hasInstaller = true;
+      info.fallback = true;
+    }
     const log = await appendUpdateLog({
       version: latestVersion,
       status,
@@ -890,6 +1254,19 @@ async function checkGithubRelease() {
 
     testLog('github update check done', `${status} current=${currentVersion} latest=${latestVersion}`);
     sendToRenderer('update-event', { status, message: sanitizeUpdateMessage(message), info, log });
+    if (isNewer && downloadInfo) {
+      startGithubFallbackDownload(downloadInfo);
+    } else if (isNewer && !downloadInfo) {
+      logAndSendUpdateEvent(
+        {
+          status: 'error',
+          type: 'error',
+          message: 'GitHub release thiếu latest.yml hoặc installer .exe',
+          info,
+        },
+        { version: latestVersion, status: 'error', source: 'github', url: info.releaseUrl },
+      );
+    }
     return info;
   } catch (error) {
     const isNotFound = error?.statusCode === 404;
@@ -1054,6 +1431,30 @@ function setupIpc() {
     return true;
   });
 
+  ipcMain.handle('quick-add:get-context', async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      await createMainWindow();
+    }
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return { ok: false, categories: [], linkedAccounts: [] };
+    }
+
+    await waitForMainWindowReady();
+    const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        quickAddContextResolvers.delete(requestId);
+        resolve({ ok: false, categories: [], linkedAccounts: [] });
+      }, 10000);
+
+      quickAddContextResolvers.set(requestId, (result) => {
+        clearTimeout(timer);
+        resolve(result || { ok: false, categories: [], linkedAccounts: [] });
+      });
+      mainWindow.webContents.send('quick-add:context-request', { requestId });
+    });
+  });
+
   ipcMain.handle('quick-add:save', async (_event, payload) => {
     if (!mainWindow || mainWindow.isDestroyed()) {
       await createMainWindow();
@@ -1084,6 +1485,11 @@ function setupIpc() {
     if (resolveQuickAddRequest(requestId, result)) {
       if (result?.ok) setTimeout(() => quickAddWindow?.close(), 600);
     }
+  });
+
+  ipcMain.on('quick-add:context-result', (_event, result) => {
+    const requestId = String(result?.requestId || '');
+    resolveQuickAddContextRequest(requestId, result);
   });
 
   ipcMain.handle('app:get-version', () => app.getVersion());
@@ -1138,7 +1544,28 @@ function setupIpc() {
     // electron-updater không khả dụng → dùng fallback REST API GitHub Releases.
     return checkGithubRelease();
   });
+  ipcMain.handle('updates:download', async () => {
+    if (fallbackDownloadInfo) {
+      return { ok: startGithubFallbackDownload(fallbackDownloadInfo), source: 'github-fallback' };
+    }
+    const updater = setupAutoUpdater();
+    if (updater) {
+      return { ok: startUpdateDownload(updater), source: 'electron-updater' };
+    }
+    return { ok: false, error: 'Không có bản cập nhật để tải' };
+  });
   ipcMain.handle('updates:quit-and-install', () => {
+    if (fallbackDownloadedInstallerPath && fs.existsSync(fallbackDownloadedInstallerPath)) {
+      isQuitting = true;
+      const child = spawn(fallbackDownloadedInstallerPath, [], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: false,
+      });
+      child.unref();
+      app.quit();
+      return true;
+    }
     const updater = setupAutoUpdater();
     if (!updater) return false;
     isQuitting = true;

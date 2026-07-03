@@ -18,6 +18,7 @@ window.appState = {
     decryptedSharedAccounts: {},
     groupUnlocked: {},
     currentGroupId: null,
+    currentGroupTab: 'board',
     isOnline: typeof navigator === 'undefined' ? true : navigator.onLine !== false,
     firestoreFromCache: false,
     pendingSyncCount: 0,
@@ -54,7 +55,7 @@ window.appState = {
         notifyOverdueDays: 3,
         shortcuts: { openApp: 'Control+Shift+T', quickAdd: 'Control+Shift+S' },
     },
-    appVersion: '1.3.1',
+    appVersion: '1.3.2',
     updateStatus: null,
     updateLog: [],
 };
@@ -134,6 +135,7 @@ function enterDemoMode() {
     window.appState.decryptedSharedAccounts = {};
     window.appState.groupUnlocked = {};
     window.appState.currentGroupId = null;
+    window.appState.currentGroupTab = 'board';
     showAppShell();
     if (typeof hideSplash === 'function') hideSplash();
     updateHeader();
@@ -1590,8 +1592,10 @@ function openGroupDetail(groupId, isBack = false) {
     }
     if (!isBack) recordNavHistory();
     window.appState.previousPage = window.appState.currentPage;
+    if (window.appState.currentGroupId !== groupId) window.appState.currentGroupTab = 'board';
     window.appState.currentPage = 'group-detail';
     window.appState.currentGroupId = groupId;
+    window.appState.currentGroupTab = window.appState.currentGroupTab || 'board';
     document.querySelectorAll('.d-nav-item[data-page]').forEach(item => {
         item.classList.toggle('active', item.dataset.page === 'groups');
     });
@@ -1733,6 +1737,180 @@ async function handleDeleteGroup(groupId) {
     }
 }
 
+function setGroupDetailTab(tab = 'board') {
+    const allowed = new Set(['board', 'accounts', 'members']);
+    window.appState.currentGroupTab = allowed.has(tab) ? tab : 'board';
+    renderGroupDetail(window.appState.currentGroupId);
+}
+
+function normalizeGroupCategoryIdForUi(value) {
+    return String(value || '').trim().toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'danh-muc';
+}
+
+function createUniqueGroupCategoryId(name, categories = []) {
+    const used = new Set((categories || []).map(category => category.id));
+    const base = normalizeGroupCategoryIdForUi(name);
+    let id = base;
+    let index = 2;
+    while (used.has(id)) {
+        id = `${base}-${index}`;
+        index += 1;
+    }
+    return id;
+}
+
+function openGroupCategoryModal(groupId, categoryId = '') {
+    const group = getGroupById?.(groupId);
+    if (!group || group.role !== 'owner') return;
+    const categories = getGroupAccountCategories?.(group) || [];
+    const category = categories.find(item => item.id === categoryId) || null;
+    openModal(category ? 'Sửa danh mục nhóm' : 'Thêm danh mục nhóm', `
+        <div class="form-section-title">Tên danh mục</div>
+        <input type="text" id="group-category-name" class="input" value="${escapeHtml(category?.name || '')}" placeholder="VD: AI, Giải trí, Team YouTube" style="padding-left:16px">
+        <div class="form-section-title">Icon</div>
+        <input type="text" id="group-category-icon" class="input" value="${escapeHtml(category?.icon || 'folder')}" placeholder="folder, star, work..." style="padding-left:16px">
+        <div class="form-section-title">Màu</div>
+        <input type="color" id="group-category-color" class="input" value="${escapeHtml(category?.color || '#6C5CE7')}" style="height:44px;padding:8px 16px">
+        <div class="form-section-title">Ghi chú danh mục</div>
+        <textarea id="group-category-note" class="textarea-paste" style="min-height:96px" placeholder="Ghi chú dùng chung cho danh mục này">${escapeHtml(category?.note || '')}</textarea>
+        <button class="btn btn-primary" style="margin-top:18px" onclick="submitGroupCategory('${escapeJsAttr(groupId)}','${escapeJsAttr(categoryId)}')">${category ? 'Lưu danh mục' : 'Thêm danh mục'}</button>
+    `);
+    setTimeout(() => document.getElementById('group-category-name')?.focus(), 50);
+}
+
+async function submitGroupCategory(groupId, categoryId = '') {
+    const group = getGroupById?.(groupId);
+    if (!group) return;
+    const categories = getGroupAccountCategories?.(group) || [];
+    const existing = categories.find(item => item.id === categoryId) || null;
+    const name = String(document.getElementById('group-category-name')?.value || '').trim();
+    if (!name) {
+        showToast('Nhập tên danh mục', 'error');
+        return;
+    }
+    const nextCategory = {
+        id: existing?.id || createUniqueGroupCategoryId(name, categories),
+        name,
+        note: String(document.getElementById('group-category-note')?.value || '').trim(),
+        icon: String(document.getElementById('group-category-icon')?.value || 'folder').trim() || 'folder',
+        color: String(document.getElementById('group-category-color')?.value || '#6C5CE7').trim() || '#6C5CE7',
+        order: existing?.order ?? categories.length,
+    };
+    const next = existing
+        ? categories.map(item => item.id === existing.id ? nextCategory : item)
+        : [...categories, nextCategory];
+    try {
+        await updateGroupAccountCategories(groupId, next);
+        closeModal();
+        showToast(existing ? 'Đã cập nhật danh mục nhóm' : 'Đã thêm danh mục nhóm', 'success');
+    } catch (error) {
+        showToast(error.message || 'Không lưu được danh mục nhóm', 'error');
+    }
+}
+
+async function handleMoveGroupCategory(groupId, categoryId, direction) {
+    const group = getGroupById?.(groupId);
+    if (!group) return;
+    const categories = getGroupAccountCategories?.(group) || [];
+    const index = categories.findIndex(item => item.id === categoryId);
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (index < 0 || targetIndex < 0 || targetIndex >= categories.length) return;
+    const next = [...categories];
+    [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+    try {
+        await updateGroupAccountCategories(groupId, next.map((item, order) => ({ ...item, order })));
+        showToast('Đã sắp xếp danh mục', 'success');
+    } catch (error) {
+        showToast(error.message || 'Không sắp xếp được danh mục', 'error');
+    }
+}
+
+async function handleDeleteGroupCategory(groupId, categoryId) {
+    const group = getGroupById?.(groupId);
+    if (!group || group.role !== 'owner') return;
+    const categories = getGroupAccountCategories?.(group) || [];
+    const category = categories.find(item => item.id === categoryId);
+    if (!category) return;
+    const affected = (window.appState.sharedAccounts?.[groupId] || []).filter(account => account.groupCategoryId === categoryId);
+    if (!confirm(`Xoá danh mục "${category.name}"?${affected.length ? ` ${affected.length} tài khoản sẽ về Chưa phân loại.` : ''}`)) return;
+    try {
+        await updateGroupAccountCategories(groupId, categories.filter(item => item.id !== categoryId).map((item, order) => ({ ...item, order })));
+        await Promise.all(affected.map(account => updateSharedAccountGroupMeta(groupId, account.id, { groupCategoryId: null })));
+        showToast('Đã xoá danh mục nhóm', 'success');
+    } catch (error) {
+        showToast(error.message || 'Không xoá được danh mục nhóm', 'error');
+    }
+}
+
+function canManageSharedAccountForUi(group, account) {
+    if (typeof canManageSharedAccount === 'function') return canManageSharedAccount(group, account);
+    return group?.role === 'owner' || (account?.sharedByUid && account.sharedByUid === window.appState.user?.uid);
+}
+
+async function handleSetSharedAccountCategory(groupId, accountId, categoryId = '') {
+    try {
+        await updateSharedAccountGroupMeta(groupId, accountId, { groupCategoryId: categoryId || null });
+        showToast('Đã chuyển danh mục tài khoản', 'success');
+    } catch (error) {
+        showToast(error.message || 'Không chuyển được danh mục', 'error');
+    }
+}
+
+async function handleMoveSharedAccount(groupId, accountId, direction, categoryId = '') {
+    const accounts = (window.appState.sharedAccounts?.[groupId] || [])
+        .filter(account => (account.groupCategoryId || '') === (categoryId || ''));
+    const sorted = typeof sortSharedAccountsForGroup === 'function' ? sortSharedAccountsForGroup(accounts) : accounts;
+    const index = sorted.findIndex(account => account.id === accountId);
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (index < 0 || targetIndex < 0 || targetIndex >= sorted.length) return;
+    const ordered = [...sorted];
+    [ordered[index], ordered[targetIndex]] = [ordered[targetIndex], ordered[index]];
+    try {
+        await Promise.all(ordered.map((account, order) => (
+            updateSharedAccountGroupMeta(groupId, account.id, { groupSortOrder: (order + 1) * 1000 })
+        )));
+        showToast('Đã sắp xếp tài khoản', 'success');
+    } catch (error) {
+        showToast(error.message || 'Không sắp xếp được tài khoản', 'error');
+    }
+}
+
+function openSharedAccountGroupNoteModal(groupId, accountId) {
+    const group = getGroupById?.(groupId);
+    const account = getSharedAccountById(groupId, accountId);
+    if (!group || !account || !canManageSharedAccountForUi(group, account)) return;
+    openModal('Ghi chú trong nhóm', `
+        <div class="form-section-title">${escapeHtml(account.name || account.serviceName || 'Tài khoản')}</div>
+        <textarea id="shared-account-group-note" class="textarea-paste" style="min-height:120px" placeholder="Ghi chú riêng cho nhóm này">${escapeHtml(account.groupNote || '')}</textarea>
+        <button class="btn btn-primary" style="margin-top:18px" onclick="submitSharedAccountGroupNote('${escapeJsAttr(groupId)}','${escapeJsAttr(accountId)}')">Lưu ghi chú</button>
+    `);
+}
+
+async function submitSharedAccountGroupNote(groupId, accountId) {
+    const note = String(document.getElementById('shared-account-group-note')?.value || '').trim();
+    try {
+        await updateSharedAccountGroupMeta(groupId, accountId, { groupNote: note });
+        closeModal();
+        showToast('Đã lưu ghi chú nhóm', 'success');
+    } catch (error) {
+        showToast(error.message || 'Không lưu được ghi chú nhóm', 'error');
+    }
+}
+
+async function handleToggleGroupAccountManager(groupId, email, checked) {
+    try {
+        await setGroupAccountManager(groupId, email, checked);
+        showToast(checked ? 'Đã cấp quyền quản lý tài khoản' : 'Đã gỡ quyền quản lý tài khoản', 'success');
+    } catch (error) {
+        showToast(error.message || 'Không cập nhật được quyền quản lý', 'error');
+        renderGroupDetail(groupId);
+    }
+}
+
 function getSharedAccountById(groupId, accountId) {
     return (window.appState.sharedAccounts?.[groupId] || []).find(account => account.id === accountId) || null;
 }
@@ -1779,10 +1957,8 @@ async function copySharedField(groupId, accountId, field) {
 async function handleRemoveSharedAccount(groupId, accountId) {
     const group = getGroupById?.(groupId);
     const account = getSharedAccountById(groupId, accountId);
-    const isOwner = group?.role === 'owner';
-    const isSharer = account?.sharedByUid && account.sharedByUid === window.appState.user?.uid;
-    if (!isOwner && !isSharer) {
-        showToast('Chỉ chủ nhóm hoặc người chia sẻ được gỡ tài khoản', 'error');
+    if (!canManageSharedAccountForUi(group, account)) {
+        showToast('Không có quyền gỡ tài khoản này', 'error');
         return;
     }
     if (!confirm('Gỡ tài khoản này khỏi nhóm?')) return;
@@ -4083,6 +4259,7 @@ async function initDesktopIntegrations() {
         document.getElementById('notification-dropdown')?.removeAttribute('hidden');
     });
     api.onQuickAddRequest?.(handleQuickAddRequest);
+    api.onQuickAddContextRequest?.(handleQuickAddContextRequest);
     api.onUpdateEvent?.(event => {
         window.appState.updateStatus = event;
         if (Array.isArray(event?.log)) window.appState.updateLog = event.log;
@@ -4105,6 +4282,40 @@ async function initDesktopIntegrations() {
     });
 }
 
+function buildQuickAddContext() {
+    const authMethods = Object.entries(window.AUTH_METHOD_CONFIG || { email: { label: 'Email', sublabel: 'Mật khẩu' } })
+        .map(([id, config]) => ({ id, label: config.label || id, sublabel: config.sublabel || '' }));
+    const categories = typeof getSortedCategories === 'function'
+        ? getSortedCategories().map(category => ({
+            id: category.id,
+            name: category.name,
+            color: category.color || '#6C5CE7',
+            icon: category.icon || 'folder',
+        }))
+        : [];
+    const linkedAccounts = authMethods
+        .filter(method => method.id !== 'email')
+        .flatMap(method => (typeof getLinkedAccountOptions === 'function' ? getLinkedAccountOptions(method.id) : [])
+            .map(acc => ({
+                id: acc.id,
+                method: method.id,
+                name: acc.name || '',
+                platform: acc.platform || '',
+                username: typeof getLinkedAccountUsernameForSave === 'function'
+                    ? getLinkedAccountUsernameForSave(acc)
+                    : (acc.displayUsername || acc.username || ''),
+                displayUsername: acc.displayUsername || acc.username || '',
+            })));
+    return { ok: true, authMethods, categories, linkedAccounts };
+}
+
+function handleQuickAddContextRequest(event = {}) {
+    window.electronAPI?.sendQuickAddContextResult?.({
+        requestId: event.requestId,
+        ...buildQuickAddContext(),
+    });
+}
+
 async function handleQuickAddRequest(event = {}) {
     const requestId = event.requestId;
     const payload = event.payload || {};
@@ -4117,6 +4328,22 @@ async function handleQuickAddRequest(event = {}) {
         return;
     }
 
+    const authMethod = typeof getAuthMethod === 'function' ? getAuthMethod(payload.authMethod || 'email') : (payload.authMethod || 'email');
+    let linkedAccountId = null;
+    let linkedUsername = '';
+    if (authMethod !== 'email') {
+        const linkedOptions = typeof getLinkedAccountOptions === 'function' ? getLinkedAccountOptions(authMethod) : [];
+        const linked = linkedOptions.find(acc => acc.id === payload.linkedAccountId) || null;
+        if (linkedOptions.length && !linked) {
+            sendResult({ ok: false, message: `Chon TK ${getAuthMethodLabel(authMethod)} goc truoc.` });
+            return;
+        }
+        linkedAccountId = linked?.id || null;
+        linkedUsername = linked
+            ? (typeof getLinkedAccountUsernameForSave === 'function' ? getLinkedAccountUsernameForSave(linked) : (linked.displayUsername || linked.username || ''))
+            : String(payload.username || '');
+    }
+
     const result = await persistNewAccount({
         type: payload.type === 'personal' ? 'personal' : 'bought',
         name: payload.name,
@@ -4125,6 +4352,11 @@ async function handleQuickAddRequest(event = {}) {
         purchaseDate: payload.purchaseDate || todayStr(),
         expiryDate: payload.expiryDate || '',
         expiryQuick: payload.expiryQuick || '30',
+        platform: payload.platform,
+        categoryIds: Array.isArray(payload.categoryIds) ? payload.categoryIds : [],
+        authMethod,
+        linkedAccountId,
+        username: linkedUsername,
         tagsText: payload.tagsText,
         note: payload.note,
     }, {
@@ -4432,9 +4664,37 @@ async function checkForUpdates() {
     showToast(cap?.disabledMessage || 'Không hỗ trợ tự cập nhật trên nền tảng này', 'error');
 }
 
-// Định tuyến hành động "Cập nhật" (tải + cài) trên Android tới Mobile_Updater.
-// downloadAndInstall thuộc task 7.2; ở đây suy giảm nhẹ nhàng nếu chưa sẵn sàng.
+// Định tuyến hành động "Cập nhật" theo nền tảng.
 async function startUpdateDownload() {
+    const platform = typeof getUpdatePlatform === 'function'
+        ? getUpdatePlatform()
+        : (window.electronAPI?.isElectron ? 'electron' : 'web');
+
+    if (platform === 'electron') {
+        if (!window.electronAPI?.downloadUpdate && !window.electronAPI?.checkForUpdates) {
+            showToast('Chức năng tải bản cập nhật chưa sẵn sàng', 'error');
+            return;
+        }
+        window.appState.updateStatus = {
+            ...(window.appState.updateStatus || {}),
+            status: 'downloading',
+            message: 'Đang tải bản cập nhật...',
+            progress: { percent: 0 },
+        };
+        renderSettings();
+        try {
+            if (window.electronAPI?.downloadUpdate) {
+                await window.electronAPI.downloadUpdate();
+            } else {
+                await window.electronAPI.checkForUpdates();
+            }
+        } catch (error) {
+            window.appState.updateStatus = { status: 'error', message: error.message || 'Tải bản cập nhật thất bại', type: 'error' };
+            renderSettings();
+        }
+        return;
+    }
+
     const updater = window.TingMobileUpdater;
     const info = window.appState.updateStatus?.info || null;
     if (!updater?.downloadAndInstall) {
