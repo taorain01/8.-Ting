@@ -25,8 +25,14 @@ function getJavaMajor(jdkDir) {
   return match ? Number(match[1]) : 0;
 }
 
+function hasJavaExecutable(jdkDir) {
+  return fs.existsSync(path.join(jdkDir, 'bin', process.platform === 'win32' ? 'java.exe' : 'java'))
+    || fs.existsSync(path.join(jdkDir, 'bin', 'java.exe'))
+    || fs.existsSync(path.join(jdkDir, 'bin', 'java'));
+}
+
 function isJdk21(jdkDir) {
-  return fs.existsSync(path.join(jdkDir, 'bin', 'java.exe')) && getJavaMajor(jdkDir) >= 21;
+  return hasJavaExecutable(jdkDir) && getJavaMajor(jdkDir) >= 21;
 }
 
 function findJdk() {
@@ -68,6 +74,30 @@ function run(command, args, options = {}) {
   if (result.status !== 0) process.exit(result.status || 1);
 }
 
+function getPackageVersion() {
+  const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  return String(packageJson.version || '').trim();
+}
+
+function versionToAndroidCode(version) {
+  const match = String(version).match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return null;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  const patch = Number(match[3]);
+  if (![major, minor, patch].every(Number.isFinite)) return null;
+  return (major * 10000) + (minor * 100) + patch;
+}
+
+function patchAndroidVersion(versionName, versionCode) {
+  const buildGradle = path.join(androidDir, 'app', 'build.gradle');
+  if (!fs.existsSync(buildGradle) || !versionName || !versionCode) return;
+  let contents = fs.readFileSync(buildGradle, 'utf8');
+  contents = contents.replace(/versionCode\s+\d+/, `versionCode ${versionCode}`);
+  contents = contents.replace(/versionName\s+"[^"]+"/, `versionName "${versionName}"`);
+  fs.writeFileSync(buildGradle, contents);
+}
+
 const jdkDir = findJdk();
 const sdkDir = findSdk();
 
@@ -78,11 +108,6 @@ if (!jdkDir) {
 
 if (!sdkDir) {
   console.error(`Android SDK android-35 not found. Expected ANDROID_HOME or ${path.join(toolRoot, 'android-sdk')}`);
-  process.exit(1);
-}
-
-if (!fs.existsSync(androidDir)) {
-  console.error('Android platform not found. Run npm run android:add first.');
   process.exit(1);
 }
 
@@ -98,10 +123,14 @@ const env = {
   ].filter(Boolean).join(path.delimiter),
 };
 
+run(process.execPath, [path.join('scripts', 'prepare-android-web.js')], { env });
+
+if (!fs.existsSync(androidDir)) {
+  run(process.execPath, [path.join('node_modules', '@capacitor', 'cli', 'bin', 'capacitor'), 'add', 'android'], { env });
+}
+
 const localProperties = `sdk.dir=${sdkDir.replace(/\\/g, '/')}\n`;
 fs.writeFileSync(path.join(androidDir, 'local.properties'), localProperties);
-
-run(process.execPath, [path.join('scripts', 'prepare-android-web.js')], { env });
 
 run(process.execPath, [path.join('node_modules', '@capacitor', 'cli', 'bin', 'capacitor'), 'sync', 'android'], { env });
 run(process.execPath, [path.join('scripts', 'patch-android-back-button.cjs')], { env });
@@ -128,6 +157,9 @@ if (fs.existsSync(variablesGradle)) {
   }
   fs.writeFileSync(variablesGradle, variables);
 }
+
+const packageVersion = getPackageVersion();
+patchAndroidVersion(packageVersion, versionToAndroidCode(packageVersion));
 
 if (process.platform === 'win32') {
   run('cmd.exe', ['/d', '/c', '.\\gradlew.bat assembleDebug'], { cwd: androidDir, env });
