@@ -55,7 +55,7 @@ window.appState = {
         notifyOverdueDays: 3,
         shortcuts: { openApp: 'Control+Shift+T', quickAdd: 'Control+Shift+S' },
     },
-    appVersion: '1.3.4',
+    appVersion: '1.3.5',
     updateStatus: null,
     updateLog: [],
 };

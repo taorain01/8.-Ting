@@ -15,9 +15,11 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.SocketTimeoutException;
 import java.net.URL;
 import java.security.MessageDigest;
 import java.util.Arrays;
@@ -42,6 +44,10 @@ public class TingUpdaterPlugin extends Plugin {
 
     // Buffer tải 16KB.
     private static final int BUFFER_SIZE = 16 * 1024;
+    private static final int MAX_REDIRECTS = 5;
+    private static final int CONNECT_TIMEOUT_MS = 30000;
+    private static final int READ_TIMEOUT_MS = 120000;
+    private static final String USER_AGENT = "Ting-Android-Updater";
 
     // Allowlist host cho origin phát hành tin cậy của GitHub (khớp isAllowedReleaseUrl phía JS).
     private static final List<String> ALLOWED_HOSTS = Arrays.asList(
@@ -91,16 +97,11 @@ public class TingUpdaterPlugin extends Plugin {
                 InputStream input = null;
                 OutputStream output = null;
                 try {
-                    URL parsed = new URL(url);
-                    connection = (HttpURLConnection) parsed.openConnection();
-                    connection.setInstanceFollowRedirects(true);
-                    connection.setConnectTimeout(30000);
-                    connection.setReadTimeout(30000);
-                    connection.connect();
+                    connection = openDownloadConnection(url);
 
                     int statusCode = connection.getResponseCode();
                     if (statusCode < 200 || statusCode >= 300) {
-                        call.reject("Nguồn phát hành trả về lỗi khi tải bản cập nhật.");
+                        call.reject("Nguồn phát hành trả về lỗi HTTP " + statusCode + " khi tải bản cập nhật.");
                         return;
                     }
 
@@ -157,9 +158,16 @@ public class TingUpdaterPlugin extends Plugin {
                     result.put("size", actualSize);
                     result.put("sha256", actualSha256);
                     call.resolve(result);
+                } catch (SocketTimeoutException error) {
+                    deleteQuietly(apkFile);
+                    call.reject("Tải bản cập nhật quá thời gian chờ. Vui lòng thử lại.", error);
                 } catch (Exception error) {
                     deleteQuietly(apkFile);
-                    call.reject("Tải bản cập nhật thất bại.", error);
+                    String detail = error.getMessage();
+                    if (detail == null || detail.trim().isEmpty()) {
+                        detail = "Không thể kết nối tới nguồn phát hành.";
+                    }
+                    call.reject("Tải bản cập nhật thất bại: " + detail, error);
                 } finally {
                     closeQuietly(input);
                     closeQuietly(output);
@@ -338,6 +346,52 @@ public class TingUpdaterPlugin extends Plugin {
         } catch (Exception error) {
             return false;
         }
+    }
+
+    private HttpURLConnection openDownloadConnection(String initialUrl) throws IOException {
+        URL currentUrl = new URL(initialUrl);
+
+        for (int redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
+            if (!isAllowedReleaseUrl(currentUrl.toString())) {
+                throw new IOException("URL tải không thuộc nguồn phát hành tin cậy.");
+            }
+
+            HttpURLConnection connection = (HttpURLConnection) currentUrl.openConnection();
+            connection.setInstanceFollowRedirects(false);
+            connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            connection.setReadTimeout(READ_TIMEOUT_MS);
+            connection.setRequestProperty("User-Agent", USER_AGENT);
+            connection.setRequestProperty("Accept", "application/vnd.android.package-archive,application/octet-stream,*/*");
+            connection.connect();
+
+            int statusCode = connection.getResponseCode();
+            if (!isRedirectStatus(statusCode)) {
+                return connection;
+            }
+
+            String location = connection.getHeaderField("Location");
+            connection.disconnect();
+
+            if (location == null || location.trim().isEmpty()) {
+                throw new IOException("Nguồn phát hành chuyển hướng nhưng thiếu Location.");
+            }
+
+            URL nextUrl = new URL(currentUrl, location);
+            if (!isAllowedReleaseUrl(nextUrl.toString())) {
+                throw new IOException("Chuyển hướng tải không thuộc nguồn phát hành tin cậy.");
+            }
+            currentUrl = nextUrl;
+        }
+
+        throw new IOException("Nguồn phát hành chuyển hướng quá nhiều lần.");
+    }
+
+    private static boolean isRedirectStatus(int statusCode) {
+        return statusCode == HttpURLConnection.HTTP_MOVED_PERM
+            || statusCode == HttpURLConnection.HTTP_MOVED_TEMP
+            || statusCode == HttpURLConnection.HTTP_SEE_OTHER
+            || statusCode == 307
+            || statusCode == 308;
     }
 
     private static String toHex(byte[] bytes) {

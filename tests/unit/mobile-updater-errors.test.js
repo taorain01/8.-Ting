@@ -203,7 +203,8 @@ describe('Mobile_Updater.downloadAndInstall — tải thất bại giữa chừn
     // Báo lỗi và cho thử lại thủ công (6.3).
     expect(result.status).toBe('error');
     expect(result.canRetry).toBe(true);
-    expect(result.message).toBe('Tải bản cập nhật thất bại. Vui lòng thử lại.');
+    expect(result.message).toContain('Tải bản cập nhật thất bại. Vui lòng thử lại.');
+    expect(result.message).toContain('Kết nối bị ngắt khi đang tải');
 
     // KHÔNG tự thử lại kiểu toàn vẹn: downloadApk chỉ được gọi đúng 1 lần.
     expect(mockPlugin.downloadApk).toHaveBeenCalledTimes(1);

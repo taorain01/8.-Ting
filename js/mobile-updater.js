@@ -56,10 +56,10 @@
 
   /**
    * Phiên bản đang cài trên Android (khớp `versionName`/`versionCode` trong
-   * cấu hình Capacitor: versionName "1.3.4", versionCode 10304).
+   * cấu hình Capacitor: versionName "1.3.5", versionCode 10305).
    */
-  const INSTALLED_VERSION_NAME = '1.3.4';
-  const INSTALLED_VERSION_CODE = 10304;
+  const INSTALLED_VERSION_NAME = '1.3.5';
+  const INSTALLED_VERSION_CODE = 10305;
 
   /** Khóa localStorage cho nhật ký cập nhật và mốc Background_Check. */
   const STORAGE_KEY_UPDATE_LOG = 'ting.update.log';
@@ -492,6 +492,15 @@
       return /toàn vẹn|integrity|checksum|sha-?256/.test(msg);
     }
 
+    function formatDownloadFailedMessage(err) {
+      const raw = String((err && err.message) || err || '').trim();
+      if (!raw) return MSG_DOWNLOAD_FAILED;
+      const detail = updateCore.sanitizeUpdateMessage(raw);
+      if (!detail || detail === MSG_DOWNLOAD_FAILED) return MSG_DOWNLOAD_FAILED;
+      if (detail.indexOf(MSG_DOWNLOAD_FAILED) === 0) return detail;
+      return updateCore.sanitizeUpdateMessage(MSG_DOWNLOAD_FAILED + ' ' + detail);
+    }
+
     /**
      * Xoá artifact đã tải qua plugin (idempotent, không ném lỗi ra ngoài).
      * @param {Object} plugin
@@ -610,7 +619,7 @@
 
         // 8) Thất bại: KHÔNG bao giờ cài đặt (Property 11). Cung cấp thử lại thủ công.
         if (lastError || !downloadResult) {
-          const message = integrityFailure ? MSG_INTEGRITY_RETRY_MANUAL : MSG_DOWNLOAD_FAILED;
+          const message = integrityFailure ? MSG_INTEGRITY_RETRY_MANUAL : formatDownloadFailedMessage(lastError);
           writeUpdateLogEntry({ version, status: 'error', message });
           return { status: 'error', message, info: info || null, canRetry: true };
         }

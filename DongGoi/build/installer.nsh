@@ -1,6 +1,80 @@
 !ifndef nsProcess::FindProcess
   !include "nsProcess.nsh"
 !endif
+!include "nsDialogs.nsh"
+!include "WinMessages.nsh"
+
+!ifndef BUILD_UNINSTALLER
+Var TingWelcomeTitle
+Var TingWelcomeSubtitle
+Var TingWelcomeDesc
+Var TingWelcomeMeta
+Var TingWelcomeInstallButton
+Var TingWelcomeFontTitle
+Var TingWelcomeFontSubtitle
+Var TingWelcomeFontButton
+
+!macro customWelcomePage
+  Page custom TingWelcomePageCreate TingWelcomePageLeave
+!macroend
+
+!macro customInstallMode
+  ${if} $hasPerMachineInstallation == "1"
+  ${andIf} $hasPerUserInstallation == "0"
+    StrCpy $isForceMachineInstall "1"
+  ${else}
+    StrCpy $isForceCurrentInstall "1"
+  ${endif}
+!macroend
+
+Function TingWelcomePageCreate
+  nsDialogs::Create 1018
+  Pop $0
+  ${if} $0 == error
+    Abort
+  ${endif}
+
+  CreateFont $TingWelcomeFontTitle "Segoe UI" 24 700
+  CreateFont $TingWelcomeFontSubtitle "Segoe UI" 10 600
+  CreateFont $TingWelcomeFontButton "Segoe UI" 12 700
+
+  ${NSD_CreateLabel} 0u 0u 300u 34u "Ting!"
+  Pop $TingWelcomeTitle
+  SendMessage $TingWelcomeTitle ${WM_SETFONT} $TingWelcomeFontTitle 1
+  SetCtlColors $TingWelcomeTitle 0x6C5CE7 transparent
+
+  ${NSD_CreateLabel} 0u 38u 300u 18u "Sẵn sàng cài đặt bản cập nhật mới"
+  Pop $TingWelcomeSubtitle
+  SendMessage $TingWelcomeSubtitle ${WM_SETFONT} $TingWelcomeFontSubtitle 1
+  SetCtlColors $TingWelcomeSubtitle 0x1A1A2E transparent
+
+  ${NSD_CreateLabel} 0u 66u 300u 54u "Ting! sẽ tự động đóng ứng dụng đang chạy, cài đặt bản mới và giữ nguyên dữ liệu của bạn.$\r$\n$\r$\nNhấn nút bên dưới để bắt đầu."
+  Pop $TingWelcomeDesc
+  SetCtlColors $TingWelcomeDesc 0x4B5563 transparent
+
+  ${NSD_CreateButton} 0u 132u 300u 38u "Cài đặt Ting!"
+  Pop $TingWelcomeInstallButton
+  SendMessage $TingWelcomeInstallButton ${WM_SETFONT} $TingWelcomeFontButton 1
+  ${NSD_OnClick} $TingWelcomeInstallButton TingWelcomeInstallClick
+
+  ${NSD_CreateLabel} 0u 178u 300u 18u "Phiên bản: ${VERSION}  |  Đường dẫn cài đặt mặc định"
+  Pop $TingWelcomeMeta
+  SetCtlColors $TingWelcomeMeta 0x6B7280 transparent
+
+  GetDlgItem $0 $HWNDPARENT 1
+  SendMessage $0 ${WM_SETTEXT} 0 "STR:Cài đặt"
+
+  nsDialogs::Show
+FunctionEnd
+
+Function TingWelcomeInstallClick
+  Pop $0
+  SendMessage $HWNDPARENT ${WM_COMMAND} 1 0
+FunctionEnd
+
+Function TingWelcomePageLeave
+FunctionEnd
+!endif
 
 !macro closeRunningTing
   DetailPrint "Closing Ting! if it is running..."

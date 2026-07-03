@@ -1,6 +1,6 @@
 {
   "name": "ting",
-  "version": "1.3.4",
+  "version": "1.3.5",
   "private": true,
   "description": "Ting! account manager desktop, web, and Android wrapper",
   "author": "Ting!",
@@ -95,7 +95,7 @@
       "installerHeaderIcon": "DongGoi/build/icon.ico",
       "differentialPackage": false,
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
+      "allowToChangeInstallationDirectory": false,
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
       "shortcutName": "Ting!"
