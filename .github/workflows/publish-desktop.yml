@@ -1,0 +1,64 @@
+# Publish_Workflow — Bước phát hành desktop (Task 12.1)
+#
+# Build trình cài đặt `.exe` và sinh `latest.yml`, sau đó upload CẢ HAI lên nguồn
+# phát hành desktop (GitHub Releases của taorain01/8.-Ting, đã cấu hình trong
+# package.json > build.publish). electron-builder tự sinh `latest.yml` và tự
+# upload artifact khi chạy với `--publish always` cùng biến môi trường GH_TOKEN.
+#
+# Yêu cầu: 3.1 (publish latest.yml + .exe cho mỗi bản phát hành desktop), 8.1
+# (upload .exe và latest.yml lên nguồn phát hành desktop).
+#
+# Bảo mật: KHÔNG hardcode token. Token lấy từ secret `GH_TOKEN` của repo/tổ chức.
+# App phân phối không chứa token — token chỉ tồn tại trong môi trường CI này.
+
+name: Publish Desktop
+
+on:
+  # Phát hành khi đẩy tag phiên bản (ví dụ v1.4.0).
+  push:
+    tags:
+      - "v*"
+  # Cho phép chạy thủ công từ tab Actions.
+  workflow_dispatch:
+
+# Quyền tối thiểu cần thiết để tạo/cập nhật GitHub Release trên repo hiện tại.
+permissions:
+  contents: write
+
+jobs:
+  publish-desktop:
+    name: Build & publish Windows installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout mã nguồn
+        uses: actions/checkout@v4
+
+      - name: Thiết lập Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Cài đặt dependencies
+        run: npm ci
+
+      # Build .exe (NSIS) + sinh latest.yml và upload cả hai lên GitHub Releases.
+      # `--publish always` yêu cầu electron-builder upload artifact ngay sau khi build.
+      # electron-builder đọc GH_TOKEN từ môi trường để xác thực với nguồn phát hành.
+      - name: Build và publish (.exe + latest.yml)
+        run: npm run publish:win
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+      # Lưu artifact của lần chạy để kiểm tra/khắc phục sự cố (không thay cho publish).
+      - name: Lưu artifact build (chẩn đoán)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-installer
+          path: |
+            DongGoi/dist-electron/*.exe
+            DongGoi/dist-electron/latest.yml
+          if-no-files-found: warn
+          retention-days: 7

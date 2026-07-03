@@ -215,7 +215,7 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                         </button>
                     </div>
-                    <div class="d-sidebar-version">Ting! v1.2</div>
+                    <div class="d-sidebar-version">Ting! v1.3</div>
                 </div>
             </aside>
 
@@ -322,6 +322,15 @@
     <script defer src="js/platform-icons.js"></script>
     <script defer src="js/platform-tags.js"></script>
     <script defer src="js/notification.js"></script>
+    <!-- Update_System: module dùng chung (UMD) — nạp trước UI. Thứ tự quan trọng:
+         types → version-compare → update-core → platform-detector → mobile-updater
+         → background-check. -->
+    <script defer src="js/shared/types.js"></script>
+    <script defer src="js/shared/version-compare.js"></script>
+    <script defer src="js/shared/update-core.js"></script>
+    <script defer src="js/shared/platform-detector.js"></script>
+    <script defer src="js/mobile-updater.js"></script>
+    <script defer src="js/background-check.js"></script>
     <script defer src="js/desktop-ui.js"></script>
     <script defer src="js/crypto.js"></script>
     <script defer src="js/db.js"></script>

@@ -1967,6 +1967,50 @@
     border-top-right-radius:0;
     margin-bottom:0;
 }
+.add-history-row {
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    gap:6px;
+    margin:8px 0 12px;
+}
+.add-history-title {
+    color:var(--text-tertiary);
+    font-size:11px;
+    font-weight:900;
+}
+.add-history-chip {
+    max-width:100%;
+    min-height:28px;
+    padding:5px 9px;
+    border:1px solid rgba(108,92,231,0.18);
+    border-radius:var(--radius-full);
+    background:var(--bg-card);
+    color:var(--text-secondary);
+    font-size:12px;
+    font-weight:800;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    cursor:pointer;
+    transition:color var(--duration-fast), border-color var(--duration-fast), background var(--duration-fast), transform var(--duration-fast);
+}
+.add-history-chip:hover {
+    color:var(--accent);
+    border-color:rgba(108,92,231,0.42);
+    background:var(--accent-bg);
+    transform:translateY(-1px);
+}
+.add-history-bundle {
+    padding:8px 10px;
+    border:1px dashed rgba(108,92,231,0.28);
+    border-radius:var(--radius-md);
+    background:var(--bg-secondary);
+}
+.add-history-bundle .add-history-chip {
+    background:var(--accent-bg);
+    color:var(--accent);
+}
 .quick-date-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; }
 .quick-date-field label { display:block; font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px; }
 .quick-date-field .input { padding:12px; }
@@ -2233,6 +2277,8 @@
 @media (max-width:380px) {
     .platform-picker-grid { grid-template-columns:1fr; }
     .seller-source-grid { grid-template-columns:repeat(3, minmax(0, 1fr)); }
+    .shared-secret-rows .detail-row { grid-template-columns:1fr; gap:6px; }
+    .shared-secret-rows .detail-value { justify-content:flex-start; text-align:left; }
 }
 
 /* ===== Mobile upgrade fields ===== */
@@ -2556,6 +2602,43 @@
     margin-top:10px;
     padding-top:10px;
     border-top:1px solid var(--border-light);
+}
+.shared-secret-rows .detail-row {
+    display:grid;
+    grid-template-columns:96px minmax(0, 1fr);
+    align-items:center;
+    gap:10px;
+    min-height:42px;
+    padding:9px 0;
+}
+.shared-secret-rows .detail-row:not(:last-child) {
+    border-bottom:1px solid var(--border-light);
+}
+.shared-secret-rows .detail-label {
+    font-size:12px;
+    color:var(--text-tertiary);
+}
+.shared-secret-rows .detail-value {
+    justify-content:flex-end;
+    min-width:0;
+    text-align:right;
+    font-weight:800;
+}
+.shared-secret-rows .detail-value .copy-btn {
+    flex:0 0 auto;
+}
+.shared-secret-rows .detail-note-row {
+    align-items:flex-start;
+}
+.shared-secret-rows .detail-note-value {
+    min-width:0;
+}
+.shared-secret-rows .totp-widget,
+.shared-secret-rows .shared-twofa-web-row {
+    grid-column:1 / -1;
+}
+.shared-secret-rows .shared-twofa-web-row {
+    border-bottom:1px solid var(--border-light);
 }
 .shared-locked-note {
     display:flex;

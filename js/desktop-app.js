@@ -54,7 +54,7 @@ window.appState = {
         notifyOverdueDays: 3,
         shortcuts: { openApp: 'Control+Shift+T', quickAdd: 'Control+Shift+S' },
     },
-    appVersion: '1.2.0',
+    appVersion: '1.3.0',
     updateStatus: null,
     updateLog: [],
 };
@@ -87,6 +87,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupAuthListener();
     initConnectivityStatus();
     initDesktopIntegrations();
+    initSmartNavigationInputs();
     document.getElementById('auth-password')?.addEventListener('input', e => updatePasswordStrength(e.target.value));
     document.getElementById('auth-confirm-password')?.addEventListener('input', () => updatePasswordStrength(document.getElementById('auth-password')?.value || ''));
     // Ctrl+K → focus search
@@ -105,6 +106,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (dropdown && !dropdown.hidden && !dropdown.contains(e.target) && !button?.contains(e.target)) closeNotificationPanel();
     });
     schedulePeriodicCheck?.(() => window.appState.accounts);
+    // Background_Check lúc khởi động — không chặn UI (Yêu cầu 7.2, 7.3).
+    scheduleBackgroundCheck?.();
 });
 
 // ===== DEMO MODE =====
@@ -142,34 +145,102 @@ function enterDemoMode() {
 // ===== NAVIGATION =====
 const pageTitles = { dashboard:'Tổng quan', bought:'TK Mua', personal:'Cá nhân', groups:'Nhóm', 'group-detail':'Chi tiết nhóm', categories:'Danh mục', trash:'Thùng rác', settings:'Cài đặt', detail:'Chi tiết' };
 
-function recordNavHistory() {
+const NAV_STACK_LIMIT = 80;
+
+function getNavContentElement() {
+    return document.getElementById('page-content');
+}
+
+function cloneNavExpandedGroups(value = window.appState.expandedGroups) {
+    return { ...(value && typeof value === 'object' ? value : {}) };
+}
+
+function createNavEntry() {
     const page = window.appState.currentPage;
-    if (!page) return;
-    const entry = {
+    if (!page) return null;
+    const content = getNavContentElement();
+    return {
         page,
         accountId: page === 'detail' ? (window.appState.currentDetailId || null) : null,
         groupId: page === 'group-detail' ? (window.appState.currentGroupId || null) : null,
+        currentFilter: window.appState.currentFilter || 'all',
+        currentTagFilter: window.appState.currentTagFilter || '',
+        currentPlatformFilter: window.appState.currentPlatformFilter || '',
+        searchQuery: window.appState.searchQuery || '',
+        expandedGroups: cloneNavExpandedGroups(),
+        scrollTop: content ? content.scrollTop : 0,
+        windowScrollY: window.scrollY || window.pageYOffset || 0,
     };
-    if (!Array.isArray(window.appState.navStack)) window.appState.navStack = [];
-    const stack = window.appState.navStack;
+}
+
+function sameNavRoute(a, b) {
+    return Boolean(a && b
+        && a.page === b.page
+        && (a.accountId || null) === (b.accountId || null)
+        && (a.groupId || null) === (b.groupId || null));
+}
+
+function pushNavEntry(stackName, entry) {
+    if (!entry?.page) return;
+    if (!Array.isArray(window.appState[stackName])) window.appState[stackName] = [];
+    const stack = window.appState[stackName];
     const top = stack[stack.length - 1];
-    if (top && top.page === entry.page && top.accountId === entry.accountId && top.groupId === entry.groupId) return;
-    stack.push(entry);
-    if (stack.length > 50) stack.shift();
+    if (sameNavRoute(top, entry)) stack[stack.length - 1] = entry;
+    else stack.push(entry);
+    if (stack.length > NAV_STACK_LIMIT) stack.splice(0, stack.length - NAV_STACK_LIMIT);
+}
+
+function applyNavEntryState(entry) {
+    if (!entry) return;
+    window.appState.currentFilter = entry.currentFilter || 'all';
+    window.appState.currentTagFilter = entry.currentTagFilter || '';
+    window.appState.currentPlatformFilter = entry.currentPlatformFilter || '';
+    window.appState.searchQuery = entry.searchQuery || '';
+    window.appState.expandedGroups = cloneNavExpandedGroups(entry.expandedGroups);
+    const searchInput = document.getElementById('search-input');
+    if (searchInput) searchInput.value = window.appState.searchQuery;
+}
+
+function resetNavScroll() {
+    const content = getNavContentElement();
+    if (content) content.scrollTop = 0;
+    window.scrollTo?.(0, 0);
+}
+
+function restoreNavScroll(entry) {
+    const restore = () => {
+        const content = getNavContentElement();
+        if (content) content.scrollTop = Math.max(0, Number(entry?.scrollTop || 0));
+        window.scrollTo?.(0, Math.max(0, Number(entry?.windowScrollY || 0)));
+    };
+    requestAnimationFrame(() => {
+        restore();
+        requestAnimationFrame(restore);
+    });
+    setTimeout(restore, 80);
+}
+
+function recordNavHistory(entry = createNavEntry()) {
+    pushNavEntry('navStack', entry);
+    window.appState.navForwardStack = [];
 }
 
 function navigateTo(page, isBack = false) {
-    if (!isBack) recordNavHistory();
+    const isRestoring = isBack === true;
+    if (!isRestoring && page !== window.appState.currentPage) recordNavHistory();
     window.appState.previousPage = window.appState.currentPage;
     window.appState.currentPage = page;
     if (page !== 'detail') window.appState.activeDecryptedAccount = null;
     if (page !== 'detail') window.appState.currentDetailId = null;
-    if (page !== window.appState.previousPage) window.appState.expandedGroups = {};
-    window.appState.currentFilter = 'all';
-    window.appState.currentTagFilter = '';
-    window.appState.currentPlatformFilter = '';
-    window.appState.searchQuery = '';
-    document.getElementById('search-input').value = '';
+    if (!isRestoring) {
+        if (page !== window.appState.previousPage) window.appState.expandedGroups = {};
+        window.appState.currentFilter = 'all';
+        window.appState.currentTagFilter = '';
+        window.appState.currentPlatformFilter = '';
+        window.appState.searchQuery = '';
+        const searchInput = document.getElementById('search-input');
+        if (searchInput) searchInput.value = '';
+    }
     // Sidebar active
     document.querySelectorAll('.d-nav-item[data-page]').forEach(i => {
         i.classList.toggle('active', i.dataset.page === page
@@ -194,15 +265,96 @@ function navigateTo(page, isBack = false) {
             break;
     }
     renderQuickAccountIconFilter?.();
-    document.getElementById('page-content').scrollTop = 0;
+    if (!isRestoring) resetNavScroll();
 }
-function goBack() {
+async function restoreNavEntry(entry) {
+    if (!entry?.page) return false;
+    applyNavEntryState(entry);
+    if (entry.page === 'detail' && entry.accountId) {
+        const ok = await showDetail(entry.accountId, true);
+        if (ok === false) return false;
+    } else if (entry.page === 'group-detail' && entry.groupId) {
+        const ok = openGroupDetail(entry.groupId, true);
+        if (ok === false) return false;
+    } else {
+        navigateTo(entry.page, true);
+    }
+    restoreNavScroll(entry);
+    return true;
+}
+
+async function handleBackIntent() {
     const stack = Array.isArray(window.appState.navStack) ? window.appState.navStack : [];
-    const entry = stack.pop();
-    if (!entry || !entry.page) { navigateTo('dashboard', true); return; }
-    if (entry.page === 'detail' && entry.accountId) { showDetail(entry.accountId, true); return; }
-    if (entry.page === 'group-detail' && entry.groupId) { openGroupDetail(entry.groupId, true); return; }
-    navigateTo(entry.page, true);
+    const entry = stack[stack.length - 1];
+    if (!entry?.page) {
+        if (window.appState.currentPage !== 'dashboard') {
+            applyNavEntryState({ currentFilter: 'all', currentTagFilter: '', currentPlatformFilter: '', searchQuery: '', expandedGroups: {} });
+            navigateTo('dashboard', true);
+            resetNavScroll();
+            return true;
+        }
+        return false;
+    }
+    const current = createNavEntry();
+    const restored = await restoreNavEntry(entry);
+    if (restored === false) return false;
+    stack.pop();
+    pushNavEntry('navForwardStack', current);
+    return true;
+}
+
+async function handleForwardIntent() {
+    const stack = Array.isArray(window.appState.navForwardStack) ? window.appState.navForwardStack : [];
+    const entry = stack[stack.length - 1];
+    if (!entry?.page) return false;
+    const current = createNavEntry();
+    const restored = await restoreNavEntry(entry);
+    if (restored === false) return false;
+    stack.pop();
+    pushNavEntry('navStack', current);
+    return true;
+}
+
+function goBack() {
+    return handleBackIntent();
+}
+
+function goForward() {
+    return handleForwardIntent();
+}
+
+function initSmartNavigationInputs() {
+    if (window.appState.smartNavigationInputsReady) return;
+    window.appState.smartNavigationInputsReady = true;
+    let lastMouseNavAt = 0;
+    let lastMouseNavButton = null;
+    let lastNavIntentAt = 0;
+    let lastNavIntent = '';
+    const runNavigationIntent = intent => {
+        const now = Date.now();
+        if (lastNavIntent === intent && now - lastNavIntentAt < 250) return;
+        lastNavIntentAt = now;
+        lastNavIntent = intent;
+        if (intent === 'forward') handleForwardIntent();
+        else handleBackIntent();
+    };
+    const handleMouseNav = event => {
+        if (event.button !== 3 && event.button !== 4) return;
+        const now = Date.now();
+        if (lastMouseNavButton === event.button && now - lastMouseNavAt < 250) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+        }
+        lastMouseNavAt = now;
+        lastMouseNavButton = event.button;
+        event.preventDefault();
+        event.stopPropagation();
+        runNavigationIntent(event.button === 3 ? 'back' : 'forward');
+    };
+    document.addEventListener('mouseup', handleMouseNav, true);
+    document.addEventListener('auxclick', handleMouseNav, true);
+    window.electronAPI?.onNavigationIntent?.(intent => runNavigationIntent(intent === 'forward' ? 'forward' : 'back'));
 }
 
 // ===== HEADER / SIDEBAR =====
@@ -378,13 +530,13 @@ function initConnectivityStatus() {
     window.addEventListener('online', () => {
         window.appState.isOnline = true;
         renderOfflineBanner();
-        showToast('Da co mang lai. Firestore se tu dong sync du lieu.', 'success');
+        showToast('Đã có mạng lại. Firestore sẽ tự động đồng bộ dữ liệu.', 'success');
     });
 
     window.addEventListener('offline', () => {
         window.appState.isOnline = false;
         renderOfflineBanner();
-        showToast('Dang offline. Du lieu moi se duoc xep hang sync.', 'error');
+        showToast('Đang offline. Dữ liệu mới sẽ được xếp hàng đồng bộ.', 'error');
     });
 }
 
@@ -413,16 +565,16 @@ function renderOfflineBanner() {
     banner.classList.toggle('is-pending', pending > 0);
 
     if (!isOnline) {
-        if (title) title.textContent = 'Dang offline';
-        if (desc) desc.textContent = 'Ban van xem duoc du lieu cache. Thay doi moi se sync khi co mang.';
+        if (title) title.textContent = 'Đang offline';
+        if (desc) desc.textContent = 'Bạn vẫn xem được dữ liệu cache. Thay đổi mới sẽ đồng bộ khi có mạng.';
     } else if (pending > 0) {
-        if (title) title.textContent = 'Dang cho sync';
-        if (desc) desc.textContent = 'Firestore da luu cuc bo va se day len Cloud trong giay lat.';
+        if (title) title.textContent = 'Đang chờ đồng bộ';
+        if (desc) desc.textContent = 'Firestore đã lưu cục bộ và sẽ đẩy lên Cloud trong giây lát.';
     } else {
-        if (title) title.textContent = 'Dang doc tu cache';
-        if (desc) desc.textContent = 'Du lieu tam thoi lay tu bo nho cuc bo trong khi ket noi Cloud cap nhat.';
+        if (title) title.textContent = 'Đang đọc từ cache';
+        if (desc) desc.textContent = 'Dữ liệu tạm thời lấy từ bộ nhớ cục bộ trong khi kết nối Cloud cập nhật.';
     }
-    if (meta) meta.textContent = pending > 0 ? `${pending} thay doi` : 'Firestore cache';
+    if (meta) meta.textContent = pending > 0 ? `${pending} thay đổi` : 'Firestore cache';
 }
 
 function getSortedCategories() {
@@ -1363,9 +1515,9 @@ function lockMasterPassword(reason = 'Đã tự khoá Master Password') {
 
 async function showDetail(id, isBack = false) {
     const acc = window.appState.accounts.find(a => a.id === id);
-    if (!acc) return;
+    if (!acc) return false;
     const decrypted = await getSensitiveAccountData(acc, 'Để xem chi tiết tài khoản');
-    if (!decrypted) return;
+    if (!decrypted) return false;
 
     if (!isBack) recordNavHistory();
     window.appState.previousPage = window.appState.currentPage;
@@ -1375,6 +1527,8 @@ async function showDetail(id, isBack = false) {
     clearRevealedSecrets();
     window.appState.activeDecryptedAccount = { id, data: decrypted };
     renderDetail(id);
+    if (!isBack) resetNavScroll();
+    return true;
 }
 
 async function copyField(id, field) {
@@ -1432,7 +1586,7 @@ function openGroupDetail(groupId, isBack = false) {
     const group = getGroupById?.(groupId);
     if (!group) {
         showToast('Không tìm thấy nhóm', 'error');
-        return;
+        return false;
     }
     if (!isBack) recordNavHistory();
     window.appState.previousPage = window.appState.currentPage;
@@ -1448,7 +1602,8 @@ function openGroupDetail(groupId, isBack = false) {
     if (!isGroupUnlocked?.(groupId)) {
         setTimeout(() => openUnlockGroupModal(groupId), 120);
     }
-    document.getElementById('page-content')?.scrollTo?.({ top: 0 });
+    if (!isBack) resetNavScroll();
+    return true;
 }
 
 function openUnlockGroupModal(groupId) {
@@ -1511,11 +1666,11 @@ async function handleAddGroupMember(groupId) {
 function openAcceptGroupInviteModal(groupId) {
     const invite = getGroupInviteById?.(groupId);
     if (!invite) return;
-    openModal('Chap nhan loi moi', `
+    openModal('Chấp nhận lời mời', `
         <div class="group-unlock-title">${escapeHtml(invite.name || '')}</div>
-        <div class="form-section-title">Mat khau chung</div>
-        <input type="password" id="group-invite-password" class="input" placeholder="Nhap mat khau nhom" style="padding-left:16px" onkeydown="if(event.key==='Enter'){event.preventDefault();submitAcceptGroupInvite('${escapeJsAttr(groupId)}')}">
-        <button class="btn btn-primary" style="margin-top:18px" onclick="submitAcceptGroupInvite('${escapeJsAttr(groupId)}')">Chap nhan</button>
+        <div class="form-section-title">Mật khẩu chung</div>
+        <input type="password" id="group-invite-password" class="input" placeholder="Nhập mật khẩu nhóm" style="padding-left:16px" onkeydown="if(event.key==='Enter'){event.preventDefault();submitAcceptGroupInvite('${escapeJsAttr(groupId)}')}">
+        <button class="btn btn-primary" style="margin-top:18px" onclick="submitAcceptGroupInvite('${escapeJsAttr(groupId)}')">Chấp nhận</button>
     `);
     setTimeout(() => document.getElementById('group-invite-password')?.focus(), 50);
 }
@@ -1525,20 +1680,20 @@ async function submitAcceptGroupInvite(groupId) {
     try {
         await acceptGroupInvite(groupId, password);
         closeModal();
-        showToast('Da tham gia nhom', 'success');
+        showToast('Đã tham gia nhóm', 'success');
         openGroupDetail(groupId);
     } catch (error) {
-        showToast(error.message || 'Khong the tham gia nhom', 'error');
+        showToast(error.message || 'Không thể tham gia nhóm', 'error');
     }
 }
 
 async function handleCancelGroupInvite(groupId, email = '') {
-    if (!confirm('Huy loi moi nay?')) return;
+    if (!confirm('Huỷ lời mời này?')) return;
     try {
         await cancelGroupInvite(groupId, email);
-        showToast('Da huy loi moi', 'success');
+        showToast('Đã huỷ lời mời', 'success');
     } catch (error) {
-        showToast(error.message || 'Khong huy duoc loi moi', 'error');
+        showToast(error.message || 'Không huỷ được lời mời', 'error');
     }
 }
 
@@ -1655,38 +1810,38 @@ function renderSharedAccountEditForm(group, account, decrypted) {
     const rawValue = [decrypted?.username, decrypted?.password, decrypted?.twoFaCode].filter(Boolean).join('|');
     const direct = canDirectEditSharedAccount(group, account);
     return `
-        <div class="form-section-title">Dan thong tin tai khoan</div>
+        <div class="form-section-title">Dán thông tin tài khoản</div>
         <textarea class="textarea-paste" id="paste-input" placeholder="user@email.com|password123|2FA_CODE" oninput="previewParse()">${escapeHtml(rawValue)}</textarea>
         <div id="parse-preview"></div>
 
-        <div class="form-section-title">Ten dich vu</div>
+        <div class="form-section-title">Tên dịch vụ</div>
         <input type="text" id="add-name" class="input" value="${escapeHtml(account.name || account.serviceName || '')}" style="padding-left:16px">
 
-        <div class="form-section-title">Thoi han</div>
-        <input type="text" id="add-smart-date" class="input smart-date-input" value="${isLifetime ? 'Vinh vien' : '30 ngay'}" placeholder="30 ngay, 28/04 30, 28/04 > 28/05" oninput="applySmartDateInput(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();applySmartDateInput(this.value)}">
+        <div class="form-section-title">Thời hạn</div>
+        <input type="text" id="add-smart-date" class="input smart-date-input" value="${isLifetime ? 'Vĩnh viễn' : '30 ngày'}" placeholder="30 ngày, 28/04 30, 28/04 > 28/05" oninput="applySmartDateInput(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();applySmartDateInput(this.value)}">
         <input type="hidden" id="add-purchase" value="${escapeHtml(purchaseValue)}">
         <input type="hidden" id="add-expiry" value="${escapeHtml(expiryValue)}">
         <div id="add-expiry-hint" class="quick-date-hint smart-date-preview"></div>
         <div class="smart-date-options">
-            <label class="quick-lifetime"><input type="checkbox" id="add-date-custom" onchange="toggleSmartDateDetails(this)" checked> Tuy chinh chi tiet</label>
-            <label class="quick-lifetime"><input type="checkbox" id="add-lifetime" onchange="handleAddLifetimeToggle(this)" ${isLifetime ? 'checked' : ''}> Vinh vien</label>
+            <label class="quick-lifetime"><input type="checkbox" id="add-date-custom" onchange="toggleSmartDateDetails(this)" checked> Tuỳ chỉnh chi tiết</label>
+            <label class="quick-lifetime"><input type="checkbox" id="add-lifetime" onchange="handleAddLifetimeToggle(this)" ${isLifetime ? 'checked' : ''}> Vĩnh viễn</label>
         </div>
         <div id="smart-date-details" class="smart-date-details">
             <div class="quick-date-grid">
                 <div class="quick-date-field">
-                    <label>Ngay mua</label>
+                    <label>Ngày mua</label>
                     <input type="date" id="add-purchase-detail" class="input" value="${escapeHtml(purchaseValue)}" onchange="setAddPurchaseDate(this.value)">
                 </div>
                 <div class="quick-date-field">
-                    <label>Ngay het han</label>
-                    <input type="date" id="add-expiry-detail" class="input" value="${escapeHtml(expiryValue)}" onchange="setExpiryDate(inputValueToDate(this.value), 'tuy chinh')">
+                    <label>Ngày hết hạn</label>
+                    <input type="date" id="add-expiry-detail" class="input" value="${escapeHtml(expiryValue)}" onchange="setExpiryDate(inputValueToDate(this.value), 'tuỳ chỉnh')">
                 </div>
             </div>
         </div>
 
-        <div class="form-section-title">Ghi chu</div>
+        <div class="form-section-title">Ghi chú</div>
         <textarea class="textarea-paste" id="add-note" style="min-height:100px">${escapeHtml(decrypted?.note || '')}</textarea>
-        <button class="btn btn-primary" style="margin-top:18px" onclick="submitSharedAccountEdit('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}')">${direct ? 'Luu thay doi' : 'Gui yeu cau duyet'}</button>
+        <button class="btn btn-primary" style="margin-top:18px" onclick="submitSharedAccountEdit('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}')">${direct ? 'Lưu thay đổi' : 'Gửi yêu cầu duyệt'}</button>
     `;
 }
 
@@ -1708,12 +1863,12 @@ async function openSharedAccountEditModal(groupId, accountId) {
     if (!group || !account) return;
     if (!isGroupUnlocked?.(groupId)) {
         openUnlockGroupModal(groupId);
-        showToast('Mo khoa nhom truoc khi sua tai khoan', 'error');
+        showToast('Mở khoá nhóm trước khi sửa tài khoản', 'error');
         return;
     }
     const decrypted = await decryptSharedAccountForDisplay(groupId, accountId);
     if (!decrypted) return;
-    openModal('Sua tai khoan chia se', renderSharedAccountEditForm(group, account, decrypted));
+    openModal('Sửa tài khoản chia sẻ', renderSharedAccountEditForm(group, account, decrypted));
     finishSharedAccountEditForm(account);
 }
 
@@ -1725,11 +1880,11 @@ function collectSharedAccountEditInput(groupId, accountId) {
     const rawName = document.getElementById('add-name')?.value?.trim() || '';
     const smartName = parseSmartName(rawName);
     const name = smartName.name || rawName;
-    if (!name) return { ok: false, message: 'Nhap ten dich vu' };
+    if (!name) return { ok: false, message: 'Nhập tên dịch vụ' };
     const isLifetime = document.getElementById('add-lifetime')?.checked === true;
     const purchaseDate = document.getElementById('add-purchase')?.value || account?.purchaseDate || todayStr();
     const expiryDate = isLifetime ? null : (document.getElementById('add-expiry')?.value || account?.expiryDate || '');
-    if (!isLifetime && !expiryDate) return { ok: false, message: 'Chon ngay het han hoac bat Vinh vien' };
+    if (!isLifetime && !expiryDate) return { ok: false, message: 'Chọn ngày hết hạn hoặc bật Vĩnh viễn' };
     const username = parsed.username || decrypted.username || '';
     const password = parsed.password || decrypted.password || '';
     const twoFaCode = parsed.twoFaCode || decrypted.twoFaCode || '';
@@ -1778,37 +1933,37 @@ async function submitSharedAccountEdit(groupId, accountId) {
         if (canDirectEditSharedAccount(group, account)) {
             await updateSharedAccountInGroup(groupId, accountId, built.account, sharedPassword);
             delete window.appState.decryptedSharedAccounts?.[getSharedAccountCacheKey(groupId, accountId)];
-            showToast('Da luu tai khoan chia se', 'success');
+            showToast('Đã lưu tài khoản chia sẻ', 'success');
         } else {
             await createSharedEditRequest(groupId, accountId, built.account, sharedPassword);
-            showToast('Da gui yeu cau sua, cho nguoi goc Accept', 'success');
+            showToast('Đã gửi yêu cầu sửa, chờ người chia sẻ duyệt', 'success');
         }
         closeModal();
         renderGroupDetail(groupId);
     } catch (error) {
-        showToast(error.message || 'Khong luu duoc thay doi', 'error');
+        showToast(error.message || 'Không lưu được thay đổi', 'error');
     }
 }
 
 async function handleAcceptSharedEditRequest(groupId, requestId) {
     const request = getSharedEditRequestById?.(groupId, requestId);
-    if (!request || !confirm('Accept thay doi nay?')) return;
+    if (!request || !confirm('Duyệt thay đổi này?')) return;
     try {
         await acceptSharedEditRequest(groupId, requestId);
         if (request.accountId) delete window.appState.decryptedSharedAccounts?.[getSharedAccountCacheKey(groupId, request.accountId)];
-        showToast('Da Accept thay doi', 'success');
+        showToast('Đã duyệt thay đổi', 'success');
     } catch (error) {
-        showToast(error.message || 'Khong Accept duoc yeu cau', 'error');
+        showToast(error.message || 'Không duyệt được yêu cầu', 'error');
     }
 }
 
 async function handleRejectSharedEditRequest(groupId, requestId) {
-    if (!confirm('Tu choi yeu cau sua nay?')) return;
+    if (!confirm('Từ chối yêu cầu sửa này?')) return;
     try {
         await rejectSharedEditRequest(groupId, requestId);
-        showToast('Da tu choi yeu cau', 'success');
+        showToast('Đã từ chối yêu cầu', 'success');
     } catch (error) {
-        showToast(error.message || 'Khong tu choi duoc yeu cau', 'error');
+        showToast(error.message || 'Không từ chối được yêu cầu', 'error');
     }
 }
 
@@ -2927,11 +3082,16 @@ function wrapNoteSelection(type) {
     const start = textarea.selectionStart ?? 0;
     const end = textarea.selectionEnd ?? 0;
     const selected = textarea.value.slice(start, end);
-    const fallback = type === 'copy' ? 'BACKUP-ABC-123' : 'code';
-    const content = selected || fallback;
-    const wrapped = type === 'copy' ? `[copy]${content}[/copy]` : `[code] ${content}`;
-    textarea.setRangeText(wrapped, start, end, 'end');
+    const tag = type === 'copy' ? 'copy' : 'code';
+    const openTag = `[${tag}]`;
+    const closeTag = `[/${tag}]`;
+    const wrapped = `${openTag}${selected}${closeTag}`;
+    textarea.setRangeText(wrapped, start, end, selected ? 'end' : 'select');
     textarea.focus();
+    if (!selected) {
+        const caret = start + openTag.length;
+        textarea.setSelectionRange(caret, caret);
+    }
 }
 
 function autoTagNoteLinks(noteText) {
@@ -3922,6 +4082,20 @@ async function initDesktopIntegrations() {
         window.appState.updateStatus = event;
         if (Array.isArray(event?.log)) window.appState.updateLog = event.log;
         if (window.appState.currentPage === 'settings') renderSettings();
+        // Background_Check trên desktop (event-driven): khi lần kiểm tra NỀN phát
+        // hiện bản mới, để controller quyết định toast/dialog theo khoảng cách
+        // (Yêu cầu 7.6/7.7/7.8). Kiểm tra thủ công không đi qua đường này.
+        if (desktopBackgroundCheckPending && (event?.status === 'available' || event?.status === 'update-available')) {
+            desktopBackgroundCheckPending = false;
+            const controller = typeof getBackgroundCheckController === 'function' ? getBackgroundCheckController() : null;
+            if (controller && event?.info) {
+                controller.notifyUpdateAvailable(event.info);
+                return;
+            }
+        }
+        if (desktopBackgroundCheckPending && (event?.status === 'not-available' || event?.status === 'error')) {
+            desktopBackgroundCheckPending = false;
+        }
         if (event?.message) showToast(event.message, event.type === 'error' ? 'error' : 'success');
     });
 }
@@ -4201,22 +4375,198 @@ async function openNotificationSettingsFromApp() {
 }
 
 async function checkForUpdates() {
-    if (!window.electronAPI?.checkForUpdates) {
-        showToast('Cập nhật chỉ khả dụng trên bản desktop', 'error');
+    const platform = typeof getUpdatePlatform === 'function'
+        ? getUpdatePlatform()
+        : (window.electronAPI?.isElectron ? 'electron' : 'web');
+
+    // Desktop (Electron): định tuyến qua IPC tới Desktop_Updater.
+    if (platform === 'electron') {
+        if (!window.electronAPI?.checkForUpdates) {
+            showToast('Cập nhật chỉ khả dụng trên bản desktop', 'error');
+            return;
+        }
+        window.appState.updateStatus = { status: 'checking', message: 'Đang kiểm tra cập nhật...' };
+        renderSettings();
+        try {
+            await window.electronAPI.checkForUpdates();
+        } catch (error) {
+            window.appState.updateStatus = { status: 'error', message: error.message || 'Không thể kiểm tra cập nhật', type: 'error' };
+            renderSettings();
+        }
         return;
     }
-    window.appState.updateStatus = { status: 'checking', message: 'Đang kiểm tra cập nhật...' };
-    renderSettings();
+
+    // Android: định tuyến tới Mobile_Updater trong webview.
+    if (platform === 'android') {
+        const updater = window.TingMobileUpdater;
+        if (!updater?.checkForUpdate) {
+            showToast('Không thể kiểm tra cập nhật trên thiết bị này', 'error');
+            return;
+        }
+        window.appState.updateStatus = { status: 'checking', message: 'Đang kiểm tra cập nhật...' };
+        renderSettings();
+        try {
+            const result = await updater.checkForUpdate();
+            window.appState.updateStatus = result;
+            const log = updater.readUpdateLog?.();
+            if (Array.isArray(log)) window.appState.updateLog = log;
+            renderSettings();
+            if (result?.message) {
+                const isError = result.status === 'error' || result.status === 'offline';
+                showToast(result.message, isError ? 'error' : 'success');
+            }
+        } catch (error) {
+            window.appState.updateStatus = { status: 'error', message: error.message || 'Không thể kiểm tra cập nhật', type: 'error' };
+            renderSettings();
+        }
+        return;
+    }
+
+    // iOS / web / nền tảng không xác định: suy giảm nhẹ nhàng, không phát sinh lỗi.
+    const cap = typeof getUpdateCapability === 'function' ? getUpdateCapability(platform) : null;
+    showToast(cap?.disabledMessage || 'Không hỗ trợ tự cập nhật trên nền tảng này', 'error');
+}
+
+// Định tuyến hành động "Cập nhật" (tải + cài) trên Android tới Mobile_Updater.
+// downloadAndInstall thuộc task 7.2; ở đây suy giảm nhẹ nhàng nếu chưa sẵn sàng.
+async function startUpdateDownload() {
+    const updater = window.TingMobileUpdater;
+    const info = window.appState.updateStatus?.info || null;
+    if (!updater?.downloadAndInstall) {
+        showToast('Chức năng tải bản cập nhật chưa sẵn sàng', 'error');
+        return;
+    }
+    const setDownloading = percent => {
+        window.appState.updateStatus = {
+            ...(window.appState.updateStatus || {}),
+            status: 'downloading',
+            message: 'Đang tải bản cập nhật...',
+            progress: { percent: Number.isFinite(percent) ? percent : 0 },
+        };
+        if (window.appState.currentPage === 'settings') renderSettings();
+    };
+    setDownloading(0);
     try {
-        await window.electronAPI.checkForUpdates();
+        updater.onProgress?.(percent => setDownloading(Number(percent)));
+        await updater.downloadAndInstall(info);
     } catch (error) {
-        window.appState.updateStatus = { status: 'error', message: error.message || 'Không thể kiểm tra cập nhật', type: 'error' };
+        window.appState.updateStatus = { status: 'error', message: error.message || 'Tải bản cập nhật thất bại', type: 'error' };
         renderSettings();
     }
 }
 
 function installDownloadedUpdate() {
     window.electronAPI?.quitAndInstall?.();
+}
+
+// ===== BACKGROUND_CHECK (Update_System — Yêu cầu 7.1–7.9) =====
+
+// Cờ đánh dấu một Background_Check trên desktop đang chờ kết quả (electron-updater
+// phát sự kiện bất đồng bộ qua update-event thay vì trả về trực tiếp). Dùng để chỉ
+// phát thông báo toast/dialog cho lần kiểm tra NỀN, không phải kiểm tra thủ công.
+let desktopBackgroundCheckPending = false;
+
+// Instance điều phối Background_Check (tạo một lần, bơm phụ thuộc thật theo nền tảng).
+let backgroundCheckController = null;
+
+// Định tuyến kiểm tra cập nhật NỀN theo nền tảng cho Background_Check_Controller.
+// - Android: gọi Mobile_Updater.checkForUpdate({background:true}) và TRẢ VỀ kết quả
+//   để controller quyết định toast/dialog.
+// - Desktop: kích hoạt electron-updater (event-driven); đánh dấu cờ để onUpdateEvent
+//   phát thông báo khi nhận 'available'. Không trả về kết quả trạng thái.
+async function runPlatformBackgroundCheck() {
+    const platform = typeof getUpdatePlatform === 'function'
+        ? getUpdatePlatform()
+        : (window.electronAPI?.isElectron ? 'electron' : 'web');
+
+    if (platform === 'android') {
+        const updater = window.TingMobileUpdater;
+        if (!updater?.checkForUpdate) return { status: 'error', message: 'no-updater', info: null };
+        const result = await updater.checkForUpdate({ background: true });
+        // Đồng bộ nhật ký vào UI nếu đang xem Cài đặt.
+        const log = updater.readUpdateLog?.();
+        if (Array.isArray(log)) window.appState.updateLog = log;
+        if (result) window.appState.updateStatus = result;
+        if (window.appState.currentPage === 'settings') renderSettings();
+        return result;
+    }
+
+    if (platform === 'electron' && window.electronAPI?.checkForUpdates) {
+        desktopBackgroundCheckPending = true;
+        try {
+            await window.electronAPI.checkForUpdates();
+        } catch (error) {
+            desktopBackgroundCheckPending = false;
+        }
+        // Kết quả (available/not-available) tới qua update-event.
+        return null;
+    }
+
+    // iOS / web / không xác định: không có đường cập nhật trong app.
+    return { status: 'up-to-date', message: '', info: null };
+}
+
+// Tạo/lấy Background_Check_Controller mặc định với phụ thuộc thật:
+// - State: desktop dùng electron-store qua IPC; Android/web dùng localStorage.
+// - runCheck: định tuyến theo nền tảng; notify: hiển thị toast/dialog qua Update_UI.
+function getBackgroundCheckController() {
+    if (backgroundCheckController) return backgroundCheckController;
+    const factory = window.TingBackgroundCheckFactory;
+    if (!factory?.createBackgroundCheckController) return null;
+
+    const isElectron = Boolean(window.electronAPI?.isElectron);
+    const overrides = {
+        runCheck: () => runPlatformBackgroundCheck(),
+        notify: payload => {
+            if (typeof showUpdateNotification === 'function') showUpdateNotification(payload);
+        },
+    };
+
+    // Desktop: đọc/ghi BackgroundCheckState qua electron-store (IPC).
+    if (isElectron && window.electronAPI?.getBackgroundCheckState) {
+        overrides.readState = () => window.electronAPI.getBackgroundCheckState();
+        overrides.writeState = patch => window.electronAPI.setBackgroundCheckState?.(patch);
+    }
+    // Android/web: mặc định dùng localStorage (không cần override).
+
+    try {
+        backgroundCheckController = factory.createBackgroundCheckController(overrides);
+    } catch (error) {
+        console.warn('Không khởi tạo được Background_Check:', error);
+        backgroundCheckController = null;
+    }
+    return backgroundCheckController;
+}
+
+// Chạy Background_Check lúc khởi động — KHÔNG chặn trình tự khởi động (Yêu cầu 7.3):
+// gọi mà không await, và trì hoãn nhẹ để nhường luồng khởi động chính.
+function scheduleBackgroundCheck() {
+    const start = () => {
+        const controller = getBackgroundCheckController();
+        if (!controller) return;
+        // Không await: chạy nền, mọi lỗi được nuốt an toàn.
+        Promise.resolve(controller.runAtStartup()).catch(() => {});
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(start, { timeout: 3000 });
+    } else {
+        setTimeout(start, 1200);
+    }
+}
+
+// Hành động "Cập nhật ngay" từ dialog Background_Check: đóng dialog rồi định tuyến
+// theo nền tảng (Android tải + cài; desktop mở Cài đặt để theo dõi/cài đặt).
+function triggerUpdateActionFromDialog() {
+    closeModal?.();
+    const platform = typeof getUpdatePlatform === 'function'
+        ? getUpdatePlatform()
+        : (window.electronAPI?.isElectron ? 'electron' : 'web');
+    if (platform === 'android') {
+        startUpdateDownload?.();
+        return;
+    }
+    // Desktop: bản tải tự chạy khi phát hiện bản mới; đưa người dùng tới Cài đặt.
+    if (typeof navigateTo === 'function') navigateTo('settings');
 }
 
 // ===== AUTH =====

@@ -57,7 +57,7 @@ function getCurrentGroupUser() {
 function requireGroupUser() {
     const user = getCurrentGroupUser();
     if (!user.uid || !user.email) throw new Error('Chua dang nhap');
-    if (!user.verified) throw new Error('Can xac minh email truoc khi dung Nhom');
+    if (!user.verified) throw new Error('Cần xác minh email trước khi dùng Nhóm');
     return user;
 }
 
@@ -120,8 +120,8 @@ function buildDemoGroupSnapshot(group, currentEmail = '') {
 async function createGroup(name, sharedPassword) {
     ensureGroupState();
     const groupName = String(name || '').trim();
-    if (!groupName) throw new Error('Nhap ten nhom');
-    if (String(sharedPassword || '').length < 6) throw new Error('Mat khau chung can toi thieu 6 ky tu');
+    if (!groupName) throw new Error('Nhập tên nhóm');
+    if (String(sharedPassword || '').length < 6) throw new Error('Mật khẩu chung cần tối thiểu 6 ký tự');
     const user = requireGroupUser();
     const sharedPwSalt = generateSalt();
     const sharedPwHash = await hashSharedPassword(sharedPassword, sharedPwSalt);
@@ -250,7 +250,7 @@ function loadGroupsRealtime() {
             if (typeof isDBPermissionError === 'function' && isDBPermissionError(error) && typeof showDBPermissionToast === 'function') {
                 showDBPermissionToast();
             } else if (typeof showToast === 'function') {
-                showToast(error.message || 'Khong tai duoc danh sach nhom', 'error');
+                showToast(error.message || 'Không tải được danh sách nhóm', 'error');
             }
             notifyGroupsChanged();
         });
@@ -272,7 +272,7 @@ function loadGroupsRealtime() {
             if (typeof isDBPermissionError === 'function' && isDBPermissionError(error) && typeof showDBPermissionToast === 'function') {
                 showDBPermissionToast();
             } else if (typeof showToast === 'function') {
-                showToast(error.message || 'Khong tai duoc loi moi nhom', 'error');
+                showToast(error.message || 'Không tải được lời mời nhóm', 'error');
             }
             notifyGroupsChanged();
         });
@@ -293,12 +293,12 @@ function stopGroupsRealtime() {
 async function addGroupMember(groupId, email) {
     ensureGroupState();
     const normalizedEmail = normalizeGroupEmail(email);
-    if (!isValidGroupEmail(normalizedEmail)) throw new Error('Email moi khong hop le');
+    if (!isValidGroupEmail(normalizedEmail)) throw new Error('Email mời không hợp lệ');
     const group = getGroupById(groupId);
-    if (!group) throw new Error('Khong tim thay nhom');
-    if (group.role !== 'owner') throw new Error('Chi chu nhom duoc moi thanh vien');
-    if ((group.memberEmails || []).includes(normalizedEmail)) throw new Error('Email da co trong nhom');
-    if ((group.pendingMemberEmails || []).includes(normalizedEmail)) throw new Error('Email nay da co loi moi dang cho');
+    if (!group) throw new Error('Không tìm thấy nhóm');
+    if (group.role !== 'owner') throw new Error('Chỉ chủ nhóm được mời thành viên');
+    if ((group.memberEmails || []).includes(normalizedEmail)) throw new Error('Email đã có trong nhóm');
+    if ((group.pendingMemberEmails || []).includes(normalizedEmail)) throw new Error('Email này đã có lời mời đang chờ');
 
     if (window.appState.isDemo) {
         group.pendingMemberEmails = [...(group.pendingMemberEmails || []), normalizedEmail];
@@ -318,11 +318,11 @@ async function cancelGroupInvite(groupId, email = '') {
     ensureGroupState();
     const user = requireGroupUser();
     const group = getKnownGroupById(groupId);
-    if (!group) throw new Error('Khong tim thay nhom');
+    if (!group) throw new Error('Không tìm thấy nhóm');
     const normalizedEmail = normalizeGroupEmail(email || user.email);
     const isOwner = group.ownerUid === user.uid || group.role === 'owner';
     const isSelf = normalizedEmail === user.email;
-    if (!isOwner && !isSelf) throw new Error('Khong co quyen huy loi moi nay');
+    if (!isOwner && !isSelf) throw new Error('Không có quyền huỷ lời mời này');
 
     if (window.appState.isDemo) {
         group.pendingMemberEmails = (group.pendingMemberEmails || []).filter(item => item !== normalizedEmail);
@@ -343,14 +343,14 @@ async function acceptGroupInvite(groupId, sharedPassword) {
     ensureGroupState();
     const user = requireGroupUser();
     const group = getGroupInviteById(groupId) || getKnownGroupById(groupId);
-    if (!group) throw new Error('Khong tim thay loi moi');
+    if (!group) throw new Error('Không tìm thấy lời mời');
     if (!(group.pendingMemberEmails || []).includes(user.email) && !window.appState.isDemo) {
-        throw new Error('Email cua ban khong co trong loi moi nhom');
+        throw new Error('Email của bạn không có trong lời mời nhóm');
     }
-    if (!sharedPassword) throw new Error('Nhap mat khau chung cua nhom');
+    if (!sharedPassword) throw new Error('Nhập mật khẩu chung của nhóm');
 
     const ok = await verifyGroupPassword(group, sharedPassword);
-    if (!ok) throw new Error('Mat khau chung khong dung');
+    if (!ok) throw new Error('Mật khẩu chung không đúng');
 
     if (window.appState.isDemo) {
         group.pendingMemberEmails = (group.pendingMemberEmails || []).filter(item => item !== user.email);
@@ -388,9 +388,9 @@ async function removeGroupMember(groupId, email) {
     ensureGroupState();
     const normalizedEmail = normalizeGroupEmail(email);
     const group = getGroupById(groupId);
-    if (!group) throw new Error('Khong tim thay nhom');
-    if (group.role !== 'owner') throw new Error('Chi chu nhom duoc xoa thanh vien');
-    if (normalizedEmail === normalizeGroupEmail(group.ownerEmail)) throw new Error('Khong the xoa chu nhom');
+    if (!group) throw new Error('Không tìm thấy nhóm');
+    if (group.role !== 'owner') throw new Error('Chỉ chủ nhóm được xoá thành viên');
+    if (normalizedEmail === normalizeGroupEmail(group.ownerEmail)) throw new Error('Không thể xoá chủ nhóm');
 
     if (window.appState.isDemo) {
         group.memberEmails = (group.memberEmails || []).filter(item => item !== normalizedEmail);
@@ -408,10 +408,10 @@ async function removeGroupMember(groupId, email) {
 
 async function renameGroup(groupId, name) {
     const groupName = String(name || '').trim();
-    if (!groupName) throw new Error('Nhap ten nhom');
+    if (!groupName) throw new Error('Nhập tên nhóm');
     const group = getGroupById(groupId);
-    if (!group) throw new Error('Khong tim thay nhom');
-    if (group.role !== 'owner') throw new Error('Chi chu nhom duoc doi ten');
+    if (!group) throw new Error('Không tìm thấy nhóm');
+    if (group.role !== 'owner') throw new Error('Chỉ chủ nhóm được đổi tên');
 
     if (window.appState.isDemo) {
         group.name = groupName;
@@ -429,8 +429,8 @@ async function renameGroup(groupId, name) {
 
 async function deleteGroup(groupId) {
     const group = getGroupById(groupId);
-    if (!group) throw new Error('Khong tim thay nhom');
-    if (group.role !== 'owner') throw new Error('Chi chu nhom duoc xoa nhom');
+    if (!group) throw new Error('Không tìm thấy nhóm');
+    if (group.role !== 'owner') throw new Error('Chỉ chủ nhóm được xoá nhóm');
 
     if (window.appState.isDemo) {
         window.appState.groups = (window.appState.groups || []).filter(item => item.id !== groupId);
@@ -456,7 +456,7 @@ async function deleteGroup(groupId) {
 }
 
 async function verifyGroupPassword(group, sharedPassword) {
-    if (!group?.sharedPwHash || !group?.sharedPwSalt) throw new Error('Nhom thieu thong tin xac minh mat khau');
+    if (!group?.sharedPwHash || !group?.sharedPwSalt) throw new Error('Nhóm thiếu thông tin xác minh mật khẩu');
     return verifySharedPassword(sharedPassword, group.sharedPwHash, group.sharedPwSalt);
 }
 
@@ -536,7 +536,7 @@ function loadSharedAccountsRealtime(groupId) {
             console.error('Load shared accounts error:', error);
             window.appState.sharedAccounts[groupId] = [];
             window.appState.sharedAccountCounts[groupId] = 0;
-            if (typeof showToast === 'function') showToast(error.message || 'Khong tai duoc tai khoan chia se', 'error');
+            if (typeof showToast === 'function') showToast(error.message || 'Không tải được tài khoản chia sẻ', 'error');
             notifyGroupsChanged(groupId);
         });
     sharedAccountsUnsubscribes.set(groupId, unsubscribe);
@@ -577,7 +577,7 @@ function loadSharedEditRequestsRealtime(groupId) {
             console.error('Load shared edit requests error:', error);
             window.appState.sharedEditRequests[groupId] = [];
             window.appState.sharedEditRequestCounts[groupId] = 0;
-            if (typeof showToast === 'function') showToast(error.message || 'Khong tai duoc yeu cau sua', 'error');
+            if (typeof showToast === 'function') showToast(error.message || 'Không tải được yêu cầu sửa', 'error');
             notifyGroupsChanged(groupId);
         });
     sharedEditRequestsUnsubscribes.set(groupId, unsubscribe);
@@ -618,7 +618,7 @@ async function buildSharedAccountWriteData(plainAccount, sharedPassword) {
     const safe = getSharedAccountSafeData(plainAccount);
     return cleanGroupFirestoreData({
         ...safe,
-        name: safe.name || safe.serviceName || 'Tai khoan chia se',
+        name: safe.name || safe.serviceName || 'Tài khoản chia sẻ',
         serviceName: safe.serviceName || safe.name || '',
         displayUsername: safe.displayUsername || (typeof maskUsername === 'function' ? maskUsername(sensitive.username) : ''),
         protectedByMasterPassword: true,
@@ -631,10 +631,10 @@ async function buildSharedAccountWriteData(plainAccount, sharedPassword) {
 async function shareAccountToGroup(groupId, plainAccount, sharedPassword) {
     ensureGroupState();
     const group = getGroupById(groupId);
-    if (!group) throw new Error('Khong tim thay nhom');
-    if (!sharedPassword) throw new Error('Can mo khoa nhom truoc khi chia se');
+    if (!group) throw new Error('Không tìm thấy nhóm');
+    if (!sharedPassword) throw new Error('Cần mở khoá nhóm trước khi chia sẻ');
     if (plainAccount?.id && hasSharedSourceAccount(groupId, plainAccount.id)) {
-        throw new Error('Tai khoan nay da duoc chia se len nhom');
+        throw new Error('Tài khoản này đã được chia sẻ lên nhóm');
     }
     const user = requireGroupUser();
     const writeData = await buildSharedAccountWriteData(plainAccount, sharedPassword);
@@ -670,11 +670,11 @@ async function updateSharedAccountInGroup(groupId, accountId, plainAccount, shar
     const user = requireGroupUser();
     const group = getGroupById(groupId);
     const account = getSharedAccountByIdFromState(groupId, accountId);
-    if (!group || !account) throw new Error('Khong tim thay tai khoan chia se');
+    if (!group || !account) throw new Error('Không tìm thấy tài khoản chia sẻ');
     if (group.role !== 'owner' && account.sharedByUid !== user.uid) {
-        throw new Error('Chi chu nhom hoac nguoi chia se duoc luu truc tiep');
+        throw new Error('Chỉ chủ nhóm hoặc người chia sẻ được lưu trực tiếp');
     }
-    if (!sharedPassword) throw new Error('Can mo khoa nhom truoc khi luu');
+    if (!sharedPassword) throw new Error('Cần mở khoá nhóm trước khi lưu');
 
     const writeData = await buildSharedAccountWriteData({ ...account, ...plainAccount }, sharedPassword);
     const update = cleanGroupFirestoreData({
@@ -700,12 +700,12 @@ async function createSharedEditRequest(groupId, accountId, plainAccount, sharedP
     const user = requireGroupUser();
     const group = getGroupById(groupId);
     const account = getSharedAccountByIdFromState(groupId, accountId);
-    if (!group || !account) throw new Error('Khong tim thay tai khoan chia se');
-    if (!sharedPassword) throw new Error('Can mo khoa nhom truoc khi gui yeu cau sua');
+    if (!group || !account) throw new Error('Không tìm thấy tài khoản chia sẻ');
+    if (!sharedPassword) throw new Error('Cần mở khoá nhóm trước khi gửi yêu cầu sửa');
 
     const reviewerUid = account.sharedByUid || group.ownerUid;
     const reviewerEmail = normalizeGroupEmail(account.sharedByEmail || group.ownerEmail);
-    if (!reviewerUid && !reviewerEmail) throw new Error('Tai khoan nay thieu nguoi duyet');
+    if (!reviewerUid && !reviewerEmail) throw new Error('Tài khoản này thiếu người duyệt');
 
     const writeData = await buildSharedAccountWriteData({ ...account, ...plainAccount }, sharedPassword);
     const { encryptedData, salt, iv, ...proposedSafeData } = writeData;
@@ -755,14 +755,14 @@ async function acceptSharedEditRequest(groupId, requestId) {
     const user = requireGroupUser();
     const group = getGroupById(groupId);
     const request = getSharedEditRequestById(groupId, requestId);
-    if (!group || !request) throw new Error('Khong tim thay yeu cau sua');
+    if (!group || !request) throw new Error('Không tìm thấy yêu cầu sửa');
     const isReviewer = request.reviewerUid === user.uid || normalizeGroupEmail(request.reviewerEmail) === user.email;
-    if (!isReviewer) throw new Error('Chi nguoi chia se tai khoan duoc Accept');
-    if (request.status !== 'pending') throw new Error('Yeu cau nay da duoc xu ly');
+    if (!isReviewer) throw new Error('Chỉ người chia sẻ tài khoản được duyệt');
+    if (request.status !== 'pending') throw new Error('Yêu cầu này đã được xử lý');
 
     if (window.appState.isDemo) {
         const account = getSharedAccountByIdFromState(groupId, request.accountId);
-        if (!account) throw new Error('Khong tim thay tai khoan chia se');
+        if (!account) throw new Error('Không tìm thấy tài khoản chia sẻ');
         Object.assign(account, buildSharedAccountUpdateFromRequest(request, new Date()));
         request.status = 'accepted';
         request.reviewedByUid = user.uid;
@@ -796,10 +796,10 @@ async function rejectSharedEditRequest(groupId, requestId) {
     ensureGroupState();
     const user = requireGroupUser();
     const request = getSharedEditRequestById(groupId, requestId);
-    if (!request) throw new Error('Khong tim thay yeu cau sua');
+    if (!request) throw new Error('Không tìm thấy yêu cầu sửa');
     const isReviewer = request.reviewerUid === user.uid || normalizeGroupEmail(request.reviewerEmail) === user.email;
-    if (!isReviewer) throw new Error('Chi nguoi chia se tai khoan duoc tu choi');
-    if (request.status !== 'pending') throw new Error('Yeu cau nay da duoc xu ly');
+    if (!isReviewer) throw new Error('Chỉ người chia sẻ tài khoản được từ chối');
+    if (request.status !== 'pending') throw new Error('Yêu cầu này đã được xử lý');
 
     if (window.appState.isDemo) {
         request.status = 'rejected';

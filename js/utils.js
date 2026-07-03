@@ -143,6 +143,75 @@ function scheduleClipboardClear(text, label) {
     }, 30000);
 }
 
+function formatTotpCode(code) {
+    return String(code || '').replace(/(\d{3})(\d{3})/, '$1 $2');
+}
+
+async function refreshRegisteredTotpWidgets() {
+    const widgets = document.querySelectorAll('[data-totp-key]');
+    if (!widgets.length) {
+        if (window.tingTotpWidgetInterval) {
+            clearInterval(window.tingTotpWidgetInterval);
+            window.tingTotpWidgetInterval = null;
+        }
+        return;
+    }
+
+    const secrets = window.tingTotpWidgetSecrets || {};
+    for (const widget of widgets) {
+        const secret = secrets[widget.dataset.totpKey];
+        const codeEl = widget.querySelector('.totp-code');
+        const countEl = widget.querySelector('.totp-count');
+        const barEl = widget.querySelector('.totp-bar');
+        if (!secret || typeof generateTOTP !== 'function') {
+            if (codeEl) codeEl.textContent = '------';
+            continue;
+        }
+
+        const code = await generateTOTP(secret);
+        if (codeEl) codeEl.textContent = code ? formatTotpCode(code) : '------';
+        const remain = typeof totpTimeRemaining === 'function' ? totpTimeRemaining(30) : 30;
+        if (countEl) countEl.textContent = `${remain}s`;
+        if (barEl) barEl.style.width = `${Math.round((remain / 30) * 100)}%`;
+    }
+}
+
+function registerTotpWidget(key, secret) {
+    if (!key || !secret) return;
+    window.tingTotpWidgetSecrets = window.tingTotpWidgetSecrets || {};
+    window.tingTotpWidgetSecrets[key] = secret;
+    setTimeout(refreshRegisteredTotpWidgets, 0);
+    if (!window.tingTotpWidgetInterval) {
+        window.tingTotpWidgetInterval = setInterval(refreshRegisteredTotpWidgets, 1000);
+    }
+}
+
+async function copyRegisteredTotpCode(key) {
+    const secret = window.tingTotpWidgetSecrets?.[key];
+    if (!secret || typeof generateTOTP !== 'function') return;
+    const code = await generateTOTP(secret);
+    if (code) await copyToClipboard(code, 'mã 2FA');
+}
+
+function renderRegisteredTotpWidget(key, secret) {
+    if (!key || !secret) return '';
+    registerTotpWidget(key, secret);
+    const safeKey = escapeJsAttr(key);
+    const copyIcon = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+    return `<div class="totp-widget shared-totp-widget" data-totp-key="${escapeHtml(key)}">
+        <div class="totp-main">
+            <span class="totp-label">Mã hiện tại</span>
+            <span class="totp-code">------</span>
+            <button type="button" class="icon-btn totp-copy" onclick="copyRegisteredTotpCode('${safeKey}')" title="Copy mã 2FA">${copyIcon}</button>
+        </div>
+        <div class="totp-timer">
+            <span class="totp-count">30s</span>
+            <div class="totp-progress"><div class="totp-bar"></div></div>
+        </div>
+        <button type="button" class="totp-web-link" onclick="openWeb2FA('${escapeJsAttr(secret)}')" title="Mở trang web 2FA dự phòng">🌐 Web 2FA</button>
+    </div>`;
+}
+
 /**
  * Tạo ID ngắn ngẫu nhiên
  */
@@ -591,6 +660,218 @@ function renderSmartNote(note) {
     return `<div class="smart-note">${rows.join('')}</div>`;
 }
 
+function getAddHistoryTime(value) {
+    if (!value) return 0;
+    if (typeof value.toDate === 'function') return value.toDate().getTime() || 0;
+    if (value instanceof Date) return value.getTime() || 0;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    const parsed = new Date(value).getTime();
+    return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function getAddHistoryReadableNote(acc) {
+    const active = window.appState?.activeDecryptedAccount;
+    const cached = active?.id === acc?.id ? active.data : null;
+    return String(cached?.note || acc?.note || '').trim();
+}
+
+function normalizeAddHistoryKey(value) {
+    return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function getAddHistoryPreview(value, max = 42) {
+    const text = String(value || '').trim().replace(/\s+/g, ' ');
+    return text.length > max ? `${text.slice(0, max - 3)}...` : text;
+}
+
+function buildAddFormHistorySuggestions(editingId = '') {
+    const accounts = [...(window.appState?.accounts || [])]
+        .filter(acc => acc && acc.id !== editingId)
+        .sort((a, b) => {
+            const bTime = getAddHistoryTime(b.updatedAt) || getAddHistoryTime(b.createdAt) || getAddHistoryTime(b.purchaseDate);
+            const aTime = getAddHistoryTime(a.updatedAt) || getAddHistoryTime(a.createdAt) || getAddHistoryTime(a.purchaseDate);
+            return bTime - aTime;
+        });
+
+    const notes = [];
+    const sellers = [];
+    const prices = [];
+    const bundles = [];
+    const noteKeys = new Set();
+    const sellerKeys = new Set();
+    const priceKeys = new Set();
+    const bundleKeys = new Set();
+
+    accounts.forEach(acc => {
+        const note = getAddHistoryReadableNote(acc);
+        const sellerName = String(acc.sellerName || '').trim();
+        const sellerLink = String(acc.sellerLink || '').trim();
+        const sellerPlatform = acc.sellerPlatform || 'other';
+        const sellerDisplay = sellerName || sellerLink;
+        const price = typeof parsePriceValue === 'function' ? parsePriceValue(acc.purchasePrice) : acc.purchasePrice;
+
+        if (note && notes.length < 6) {
+            const key = normalizeAddHistoryKey(note);
+            if (!noteKeys.has(key)) {
+                noteKeys.add(key);
+                notes.push({ value: note, label: getAddHistoryPreview(note) });
+            }
+        }
+
+        if (sellerDisplay && sellers.length < 6) {
+            const key = normalizeAddHistoryKey(`${sellerPlatform}|${sellerName}|${sellerLink}`);
+            if (!sellerKeys.has(key)) {
+                sellerKeys.add(key);
+                sellers.push({
+                    name: sellerName || sellerLink,
+                    platform: sellerPlatform,
+                    link: sellerLink,
+                    label: getAddHistoryPreview(sellerDisplay, 28),
+                });
+            }
+        }
+
+        if (price && prices.length < 6) {
+            const key = String(price);
+            if (!priceKeys.has(key)) {
+                priceKeys.add(key);
+                prices.push({
+                    value: price,
+                    label: typeof formatPriceInput === 'function' ? formatPriceInput(price) : String(price),
+                });
+            }
+        }
+
+        if (note && sellerDisplay && price && bundles.length < 5) {
+            const key = normalizeAddHistoryKey(`${note}|${sellerPlatform}|${sellerName}|${sellerLink}|${price}`);
+            if (!bundleKeys.has(key)) {
+                bundleKeys.add(key);
+                bundles.push({
+                    note,
+                    sellerName: sellerName || sellerLink,
+                    sellerPlatform,
+                    sellerLink,
+                    purchasePrice: price,
+                    label: getAddHistoryPreview(acc.name || acc.serviceName || sellerDisplay, 30),
+                });
+            }
+        }
+    });
+
+    return { notes, sellers, prices, bundles };
+}
+
+function encodeAddHistoryPayload(value) {
+    return encodeURIComponent(typeof value === 'string' ? value : JSON.stringify(value || {}));
+}
+
+function decodeAddHistoryPayload(value) {
+    try {
+        return decodeURIComponent(String(value || ''));
+    } catch {
+        return String(value || '');
+    }
+}
+
+function renderAddHistoryChip(label, onclick, title = '') {
+    const safeLabel = escapeHtml(label);
+    const safeTitle = escapeHtml(title || label);
+    return `<button type="button" class="add-history-chip" onclick="${onclick}" title="${safeTitle}">${safeLabel}</button>`;
+}
+
+function renderAddHistoryRow(kind, label, chips) {
+    if (!chips.length) return '';
+    return `<div class="add-history-row add-history-${kind}"><span class="add-history-title">${escapeHtml(label)}</span>${chips.join('')}</div>`;
+}
+
+function renderAddFormHistorySuggestions(editingId = '') {
+    const history = buildAddFormHistorySuggestions(editingId);
+    return {
+        note: renderAddHistoryRow('note', 'Gần đây', history.notes.map(item => {
+            const payload = escapeJsAttr(encodeAddHistoryPayload(item.value));
+            return renderAddHistoryChip(item.label, `applyAddHistoryNote('${payload}')`, item.value);
+        })),
+        seller: renderAddHistoryRow('seller', 'Gần đây', history.sellers.map(item => {
+            const name = escapeJsAttr(encodeAddHistoryPayload(item.name));
+            const platform = escapeJsAttr(item.platform || 'other');
+            const link = escapeJsAttr(encodeAddHistoryPayload(item.link || ''));
+            return renderAddHistoryChip(item.label, `applyAddHistorySeller('${name}','${platform}','${link}')`, item.name || item.link);
+        })),
+        price: renderAddHistoryRow('price', 'Gần đây', history.prices.map(item => {
+            const payload = escapeJsAttr(encodeAddHistoryPayload(String(item.value)));
+            return renderAddHistoryChip(item.label, `applyAddHistoryPrice('${payload}')`, item.label);
+        })),
+        bundle: renderAddHistoryRow('bundle', 'Bộ 3 gần đây', history.bundles.map(item => {
+            const payload = escapeJsAttr(encodeAddHistoryPayload(item));
+            return renderAddHistoryChip(item.label, `applyAddHistoryBundle('${payload}')`, `${item.label}: ${getAddHistoryPreview(item.note, 32)}`);
+        })),
+    };
+}
+
+function applyAddHistoryNote(encodedNote) {
+    const textarea = document.getElementById('add-note');
+    if (!textarea) return;
+    textarea.value = decodeAddHistoryPayload(encodedNote);
+    textarea.focus();
+    const end = textarea.value.length;
+    textarea.setSelectionRange?.(end, end);
+}
+
+function applyAddHistorySeller(encodedName, platform = 'other', encodedLink = '') {
+    const nameInput = document.getElementById('add-seller-name');
+    const platformInput = document.getElementById('add-seller-platform');
+    const linkInput = document.getElementById('add-seller-link');
+    const sellerName = decodeAddHistoryPayload(encodedName);
+    const sellerPlatform = platform || 'other';
+    const savedLink = decodeAddHistoryPayload(encodedLink);
+
+    if (nameInput) {
+        nameInput.value = sellerName;
+        nameInput.dataset.sellerAuto = 'false';
+    }
+    if (typeof selectSellerPlatform === 'function') {
+        selectSellerPlatform(sellerPlatform, { syncLink: false });
+    } else {
+        if (platformInput) platformInput.value = sellerPlatform;
+        document.querySelectorAll('[data-seller-platform]').forEach(button => {
+            button.classList.toggle('active', button.dataset.sellerPlatform === sellerPlatform);
+        });
+    }
+
+    const resolvedLink = savedLink || (sellerName && typeof normalizeSellerLink === 'function'
+        ? normalizeSellerLink(sellerName, sellerPlatform)
+        : '');
+    if (platformInput) platformInput.value = sellerPlatform;
+    if (linkInput) linkInput.value = resolvedLink;
+    if (typeof updateSellerLinkHint === 'function') updateSellerLinkHint(resolvedLink);
+    nameInput?.focus();
+}
+
+function applyAddHistoryPrice(encodedPrice) {
+    const input = document.getElementById('add-price');
+    if (!input) return;
+    const price = decodeAddHistoryPayload(encodedPrice);
+    input.value = typeof formatPriceInput === 'function' ? formatPriceInput(price) : price;
+    if (typeof formatPriceField === 'function') formatPriceField(input);
+    input.focus();
+}
+
+function applyAddHistoryBundle(encodedBundle) {
+    let bundle = {};
+    try {
+        bundle = JSON.parse(decodeAddHistoryPayload(encodedBundle));
+    } catch {
+        bundle = {};
+    }
+    if (bundle.note) applyAddHistoryNote(encodeAddHistoryPayload(bundle.note));
+    applyAddHistorySeller(
+        encodeAddHistoryPayload(bundle.sellerName || ''),
+        bundle.sellerPlatform || 'other',
+        encodeAddHistoryPayload(bundle.sellerLink || '')
+    );
+    if (bundle.purchasePrice) applyAddHistoryPrice(encodeAddHistoryPayload(String(bundle.purchasePrice)));
+}
+
 
 // ===== GIÁ MUA / TIỀN TỆ =====
 function parsePriceValue(value) {
@@ -622,6 +903,12 @@ function formatPriceField(input) {
 }
 
 if (typeof window !== 'undefined') {
+    window.buildAddFormHistorySuggestions = buildAddFormHistorySuggestions;
+    window.renderAddFormHistorySuggestions = renderAddFormHistorySuggestions;
+    window.applyAddHistoryNote = applyAddHistoryNote;
+    window.applyAddHistorySeller = applyAddHistorySeller;
+    window.applyAddHistoryPrice = applyAddHistoryPrice;
+    window.applyAddHistoryBundle = applyAddHistoryBundle;
     window.parsePriceValue = parsePriceValue;
     window.formatPriceInput = formatPriceInput;
     window.formatPriceVN = formatPriceVN;

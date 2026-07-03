@@ -5,6 +5,14 @@ const http = require('http');
 const https = require('https');
 const path = require('path');
 
+// ===== Module logic thuần dùng chung (Update_System) =====
+// Nguồn sự thật duy nhất cho so sánh phiên bản và các quyết định logic cập nhật,
+// dùng chung giữa Electron main (Node) và webview Android. Thay cho các bản sao
+// cục bộ trước đây trong file này (compareVersions/normalizeVersion/
+// sanitizeUpdateMessage/appendUpdateLog).
+const { normalizeVersion, compareVersions } = require('../../js/shared/version-compare.js');
+const { sanitizeUpdateMessage, appendUpdateLogEntry } = require('../../js/shared/update-core.js');
+
 const FIREBASE_AUTH_DOMAIN = 'ting-d2c78.firebaseapp.com';
 const LOCAL_APP_HOSTNAME = 'localhost';
 const LOCAL_APP_BIND_HOST = '127.0.0.1';
@@ -31,6 +39,10 @@ app.commandLine.appendSwitch('no-proxy-server');
 let autoUpdater = null;
 let autoUpdaterLoadAttempted = false;
 let autoUpdaterSetupDone = false;
+// KHOÁ single-flight cho luồng tải bản cập nhật desktop: đảm bảo chỉ một tiến
+// trình tải diễn ra tại một thời điểm (Yêu cầu 3.4). Được đặt `true` khi bắt
+// đầu `downloadUpdate()` và trả về `false` khi tải xong hoặc lỗi.
+let updateDownloadInFlight = false;
 
 const IS_DEV = !app.isPackaged;
 const APP_ROOT = path.resolve(__dirname, '..', '..');
@@ -109,6 +121,9 @@ const DEFAULT_SETTINGS = {
   autoLockMinutes: 5,
   updateLog: [],
   shortcuts: { ...DEFAULT_SHORTCUTS },
+  // BackgroundCheckState (Update_System): `enabled` mặc định BẬT (Yêu cầu 7.1),
+  // `lastCheckAt` (epoch ms) phục vụ ngưỡng 24h (Yêu cầu 7.4).
+  backgroundCheck: { enabled: true, lastCheckAt: null },
 };
 
 app.setName(IS_DEV ? (IS_TEST ? 'Ting! Test' : 'Ting! Dev') : 'Ting!');
@@ -529,6 +544,13 @@ async function createMainWindow() {
   };
   mainWindow.on('maximize', sendMaximizeState);
   mainWindow.on('unmaximize', sendMaximizeState);
+  mainWindow.on('app-command', (event, command) => {
+    const normalized = String(command || '').toLowerCase();
+    if (normalized === 'browser-backward' || normalized === 'browser-forward') {
+      event.preventDefault();
+      sendToRenderer('navigation-intent', normalized === 'browser-forward' ? 'forward' : 'back');
+    }
+  });
 
   let windowShown = false;
   const showWhenReady = (reason = 'show') => {
@@ -734,7 +756,12 @@ function getAutoUpdater() {
 
 async function appendUpdateLog(entry) {
   const current = store.get('updateLog', []) || [];
-  const next = [{ ...entry, date: new Date().toLocaleString('vi-VN') }, ...current].slice(0, 10);
+  // Dùng Update_Core để chèn mục mới nhất lên đầu và cắt còn tối đa 10 mục;
+  // việc gắn `date`/lưu trữ (I/O) do tầng cạnh (main process) đảm nhiệm.
+  const next = appendUpdateLogEntry(current, {
+    ...entry,
+    date: new Date().toLocaleString('vi-VN'),
+  });
   store.set('updateLog', next);
   return next;
 }
@@ -748,41 +775,44 @@ function sendUpdateEvent(payload) {
   });
 }
 
-function sanitizeUpdateMessage(message) {
-  const raw = String(message || '');
-  if (!raw) return '';
-  const lower = raw.toLowerCase();
-  if (
-    lower.includes('set-cookie')
-    || lower.includes('domain=.github.com')
-    || lower.includes('logged_in=')
-    || lower.includes('samesite=')
-    || lower.includes('latest.yml')
-  ) {
-    return 'Không thể kiểm tra cập nhật tự động. Vui lòng tải bản mới từ GitHub Releases.';
-  }
-  return raw.replace(/gh[opsu]_[A-Za-z0-9_]+/g, '***').slice(0, 220);
+// Ghi một mục nhật ký (qua appendUpdateLogEntry, giữ tối đa 10 mục) RỒI phát
+// `update-event` với nhật ký vừa cập nhật. Payload chuẩn hoá gồm
+// `{status, message, info, progress, log}` (Yêu cầu 6.5). Nếu không truyền
+// `logEntry` thì chỉ đọc lại nhật ký hiện có mà không thêm mục mới.
+async function logAndSendUpdateEvent(payload, logEntry) {
+  const log = logEntry
+    ? await appendUpdateLog(logEntry)
+    : (getSetting('updateLog', []) || []);
+  sendToRenderer('update-event', {
+    ...payload,
+    message: sanitizeUpdateMessage(payload?.message),
+    log,
+  });
+  return log;
 }
 
-function normalizeVersion(value) {
-  const raw = String(value || '').trim().replace(/^v/i, '');
-  const match = raw.match(/\d+(?:\.\d+){0,2}/);
-  return match ? match[0] : raw;
-}
-
-function compareVersions(left, right) {
-  const parse = value => normalizeVersion(value)
-    .split('.')
-    .map(part => Number.parseInt(part, 10))
-    .map(part => Number.isFinite(part) ? part : 0);
-  const a = parse(left);
-  const b = parse(right);
-  const length = Math.max(a.length, b.length, 3);
-  for (let index = 0; index < length; index += 1) {
-    const diff = (a[index] || 0) - (b[index] || 0);
-    if (diff !== 0) return diff > 0 ? 1 : -1;
+// Bắt đầu tải bản cập nhật desktop dưới KHOÁ single-flight (Yêu cầu 3.4): nếu
+// đã có một tiến trình tải đang chạy thì bỏ qua yêu cầu mới, tránh tải chồng
+// lấn. Khoá được giải phóng trong handler `update-downloaded`/`error`.
+function startUpdateDownload(updater) {
+  if (!updater) return false;
+  if (updateDownloadInFlight) {
+    testLog('update download skipped (single-flight lock held)');
+    return false;
   }
-  return 0;
+  updateDownloadInFlight = true;
+  testLog('update download start');
+  Promise.resolve()
+    .then(() => updater.downloadUpdate())
+    .catch(error => {
+      updateDownloadInFlight = false;
+      testLog('update download error', error?.stack || error?.message || String(error));
+      logAndSendUpdateEvent(
+        { status: 'error', type: 'error', message: error?.message || 'Không thể tải bản cập nhật' },
+        { version: 'unknown', status: 'error', source: 'github' },
+      );
+    });
+  return true;
 }
 
 function getGithubHeaders() {
@@ -834,8 +864,9 @@ async function checkGithubRelease() {
 
   try {
     const release = await fetchJson(GITHUB_LATEST_RELEASE_API);
-    const latestVersion = normalizeVersion(release.tag_name || release.name || '');
-    if (!latestVersion) throw new Error('GitHub Release không có tag version');
+    const rawTag = release.tag_name || release.name || '';
+    if (!rawTag) throw new Error('GitHub Release không có tag version');
+    const latestVersion = normalizeVersion(rawTag);
 
     const isNewer = compareVersions(latestVersion, currentVersion) > 0;
     const status = isNewer ? 'available' : 'not-available';
@@ -895,35 +926,52 @@ function setupAutoUpdater() {
   if (!updater) return null;
 
   autoUpdaterSetupDone = true;
-  updater.autoDownload = true;
+  // Tự kiểm soát bước tải để đảm bảo KHOÁ single-flight (Yêu cầu 3.4): dùng
+  // `downloadUpdate()` thủ công thay cho auto-download của electron-updater.
+  updater.autoDownload = false;
 
   updater.on('checking-for-update', () => {
     sendUpdateEvent({ status: 'checking', message: 'Đang kiểm tra cập nhật...' });
   });
   updater.on('update-available', info => {
-    sendUpdateEvent({ status: 'available', message: `Có bản cập nhật ${info.version}`, info });
+    // Yêu cầu 3.2/3.3: phát hiện Latest_Version > Installed_Version → phát
+    // trạng thái "có bản cập nhật" và bắt đầu tải trình cài đặt.
+    logAndSendUpdateEvent(
+      { status: 'available', message: `Có bản cập nhật ${info?.version || ''}`, info },
+      { version: info?.version || 'unknown', status: 'available', source: 'github' },
+    );
+    startUpdateDownload(updater);
   });
-  updater.on('update-not-available', () => {
-    sendUpdateEvent({ status: 'not-available', message: 'Bạn đang dùng bản mới nhất' });
+  updater.on('update-not-available', info => {
+    // Yêu cầu 3.7: đã ở bản mới nhất.
+    logAndSendUpdateEvent(
+      { status: 'not-available', message: 'Đang ở bản mới nhất', info },
+      { version: info?.version || normalizeVersion(app.getVersion()), status: 'not-available', source: 'github' },
+    );
   });
   updater.on('download-progress', progress => {
-    sendUpdateEvent({ status: 'downloading', message: `Đang tải ${Math.round(progress.percent || 0)}%`, progress });
-  });
-  updater.on('update-downloaded', async info => {
-    const log = await appendUpdateLog({ version: info.version || 'unknown', status: 'downloaded' });
-    sendToRenderer('update-event', {
-      status: 'downloaded',
-      message: `Đã tải xong bản ${info.version || ''}`,
-      info,
-      log,
+    // Yêu cầu 3.4: hiển thị tiến độ tải theo phần trăm.
+    sendUpdateEvent({
+      status: 'downloading',
+      message: `Đang tải ${Math.round(progress?.percent || 0)}%`,
+      progress,
     });
+  });
+  updater.on('update-downloaded', info => {
+    // Yêu cầu 3.5: tải xong → giải phóng khoá và báo sẵn sàng cài đặt.
+    updateDownloadInFlight = false;
+    logAndSendUpdateEvent(
+      { status: 'downloaded', message: `Bản cập nhật đã sẵn sàng${info?.version ? ` (${info.version})` : ''}`, info },
+      { version: info?.version || 'unknown', status: 'downloaded', source: 'github' },
+    );
   });
   updater.on('error', error => {
-    sendUpdateEvent({
-      status: 'error',
-      type: 'error',
-      message: sanitizeUpdateMessage(error?.message || 'Lỗi cập nhật'),
-    });
+    // Giải phóng khoá single-flight khi có lỗi để cho phép thử lại.
+    updateDownloadInFlight = false;
+    logAndSendUpdateEvent(
+      { status: 'error', type: 'error', message: error?.message || 'Lỗi cập nhật' },
+      { version: 'unknown', status: 'error', source: 'github' },
+    );
   });
 
   return updater;
@@ -1042,7 +1090,52 @@ function setupIpc() {
   ipcMain.handle('updates:get-log', () => {
     return store.get('updateLog', []) || [];
   });
+  // ===== BackgroundCheckState (Update_System — Yêu cầu 7.1/7.4/7.5) =====
+  // Desktop lưu {enabled, lastCheckAt} trong electron-store; Android dùng
+  // localStorage (xem js/background-check.js). Chuẩn hoá kiểu ngay tại nguồn.
+  ipcMain.handle('updates:get-bg-state', () => {
+    const raw = store.get('backgroundCheck', { enabled: true, lastCheckAt: null }) || {};
+    const enabled = raw.enabled === undefined || raw.enabled === null ? true : Boolean(raw.enabled);
+    const lastCheckAt = (typeof raw.lastCheckAt === 'number' && Number.isFinite(raw.lastCheckAt))
+      ? raw.lastCheckAt
+      : null;
+    return { enabled, lastCheckAt };
+  });
+  ipcMain.handle('updates:set-bg-state', (_event, patch) => {
+    const current = store.get('backgroundCheck', { enabled: true, lastCheckAt: null }) || {};
+    const next = {
+      enabled: current.enabled === undefined || current.enabled === null ? true : Boolean(current.enabled),
+      lastCheckAt: (typeof current.lastCheckAt === 'number' && Number.isFinite(current.lastCheckAt))
+        ? current.lastCheckAt
+        : null,
+    };
+    if (patch && Object.prototype.hasOwnProperty.call(patch, 'enabled')) {
+      next.enabled = Boolean(patch.enabled);
+    }
+    if (patch && Object.prototype.hasOwnProperty.call(patch, 'lastCheckAt')
+        && typeof patch.lastCheckAt === 'number' && Number.isFinite(patch.lastCheckAt)) {
+      next.lastCheckAt = patch.lastCheckAt;
+    }
+    store.set('backgroundCheck', next);
+    return next;
+  });
   ipcMain.handle('updates:check', async () => {
+    // Ưu tiên luồng electron-updater đầu-cuối (checkForUpdates → downloadUpdate
+    // → quitAndInstall). Sự kiện được phát qua các handler đã đăng ký trong
+    // setupAutoUpdater.
+    const updater = setupAutoUpdater();
+    if (updater) {
+      try {
+        const result = await updater.checkForUpdates();
+        return { ok: true, source: 'electron-updater', version: result?.updateInfo?.version };
+      } catch (error) {
+        // electron-updater chưa phân giải được bản cập nhật (thiếu latest.yml
+        // hoặc đang chạy môi trường dev) → suy giảm nhẹ nhàng về REST API GitHub.
+        testLog('electron-updater check failed, fallback REST', error?.message || String(error));
+        return checkGithubRelease();
+      }
+    }
+    // electron-updater không khả dụng → dùng fallback REST API GitHub Releases.
     return checkGithubRelease();
   });
   ipcMain.handle('updates:quit-and-install', () => {

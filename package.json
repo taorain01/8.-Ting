@@ -1,6 +1,6 @@
 {
   "name": "ting",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "private": true,
   "description": "Ting! account manager desktop, web, and Android wrapper",
   "author": "Ting!",
@@ -11,13 +11,16 @@
     "electron:dev": "electron .",
     "electron:test": "node scripts/run-electron-test.cjs",
     "dist:win": "npm run icons:sync && electron-builder --win --x64 && node scripts/keep-single-installer.js",
+    "publish:win": "npm run icons:sync && electron-builder --win --x64 --publish always",
     "dist:unpacked": "npm run icons:sync && electron-builder --win --x64 --dir",
     "prepare:android-web": "node scripts/prepare-android-web.js",
     "android:add": "npm run prepare:android-web && npx cap add android && node scripts/patch-android-back-button.cjs && npm run icons:sync",
     "android:sync": "npm run prepare:android-web && npx cap sync android && node scripts/patch-android-back-button.cjs && npm run icons:sync",
     "android:open": "npm run android:sync && npx cap open android",
     "android:build:debug": "node scripts/build-android-debug.cjs",
-    "build:all": "node scripts/build-all.cjs"
+    "build:all": "node scripts/build-all.cjs",
+    "test": "vitest run",
+    "test:property": "vitest run tests/property"
   },
   "dependencies": {
     "@capacitor-firebase/authentication": "^7.2.0",
@@ -31,7 +34,9 @@
   "devDependencies": {
     "@capacitor/cli": "7.4.3",
     "electron": "^41.3.0",
-    "electron-builder": "^26.8.1"
+    "electron-builder": "^26.8.1",
+    "fast-check": "^3.23.2",
+    "vitest": "^2.1.9"
   },
   "overrides": {
     "@capacitor/cli": {

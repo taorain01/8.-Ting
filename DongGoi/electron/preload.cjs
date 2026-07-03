@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
   getUpdateLog: () => ipcRenderer.invoke('updates:get-log'),
+  getBackgroundCheckState: () => ipcRenderer.invoke('updates:get-bg-state'),
+  setBackgroundCheckState: patch => ipcRenderer.invoke('updates:set-bg-state', patch),
   getShortcuts: () => ipcRenderer.invoke('settings:get-shortcuts'),
   setShortcut: (action, accelerator) => ipcRenderer.invoke('settings:set-shortcut', action, accelerator),
   resetShortcuts: () => ipcRenderer.invoke('settings:reset-shortcuts'),
@@ -35,6 +37,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event, payload) => callback(payload);
     ipcRenderer.on('quick-add:save-request', handler);
     return () => ipcRenderer.removeListener('quick-add:save-request', handler);
+  },
+  onNavigationIntent: callback => {
+    const handler = (_event, intent) => callback(intent);
+    ipcRenderer.on('navigation-intent', handler);
+    return () => ipcRenderer.removeListener('navigation-intent', handler);
   },
   sendQuickAddResult: result => ipcRenderer.send('quick-add:save-result', result),
 

@@ -130,7 +130,7 @@ if (fs.existsSync(variablesGradle)) {
 }
 
 if (process.platform === 'win32') {
-  run('cmd.exe', ['/d', '/s', '/c', 'gradlew.bat', 'assembleDebug'], { cwd: androidDir, env });
+  run('cmd.exe', ['/d', '/c', '.\\gradlew.bat assembleDebug'], { cwd: androidDir, env });
 } else {
   run('./gradlew', ['assembleDebug'], { cwd: androidDir, env });
 }

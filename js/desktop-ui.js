@@ -1174,19 +1174,19 @@ function renderCategoryForm(category = null) {
 function renderCategoryIconOptions(selectedIcon, color) {
     const activeIcon = getCategoryIconId(selectedIcon);
     const labels = {
-        folder: 'Thu muc',
-        building: 'Cong ty',
-        briefcase: 'Cong viec',
-        users: 'Nhom',
+        folder: 'Thư mục',
+        building: 'Công ty',
+        briefcase: 'Công việc',
+        users: 'Nhóm',
         sparkles: 'AI',
         cloud: 'Cloud',
         code: 'Code',
         game: 'Game',
-        music: 'Nhac',
+        music: 'Nhạc',
         video: 'Video',
-        cart: 'Mua sam',
-        lock: 'Bao mat',
-        chart: 'Bao cao',
+        cart: 'Mua sắm',
+        lock: 'Bảo mật',
+        chart: 'Báo cáo',
     };
     return `<div class="category-icon-grid" style="--category-color:${getSafeCategoryColor(color)}">
         ${Object.keys(CATEGORY_SVG_ICONS).map(iconId => `
@@ -1215,7 +1215,7 @@ function renderCategoryForm(category = null) {
             <input type="color" id="category-color" class="input category-color-input" value="${color}">
         </div>
     </div>
-    <button class="btn btn-primary" style="margin-top:18px" onclick="saveCategory('${escapeJsAttr(category?.id || '')}')">Luu danh muc</button>`;
+    <button class="btn btn-primary" style="margin-top:18px" onclick="saveCategory('${escapeJsAttr(category?.id || '')}')">Lưu danh mục</button>`;
 }
 
 function renderAccountCategoryForm(acc) {
@@ -1517,7 +1517,7 @@ function renderSharedAccountCard(group, account) {
                 <div class="account-user">${escapeHtml(account.displayUsername || '')}</div>
                 <div class="shared-account-meta">${escapeHtml(meta.expiryText || '')}${account.sharedByEmail ? ` · ${escapeHtml(account.sharedByEmail)}` : ''}</div>
             </div>
-            ${account.pendingSync ? '<span class="sync-pending-badge">Chờ sync</span>' : ''}
+            ${account.pendingSync ? '<span class="sync-pending-badge">Chờ đồng bộ</span>' : ''}
         </div>
         ${unlocked
             ? (decrypted ? renderSharedSecretRows(group, account, decrypted) : '<div class="shared-locked-note">Đang giải mã...</div>')
@@ -1581,8 +1581,8 @@ function renderGroupCard(group) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
         </div>
         <div class="group-card-main">
-            <div class="group-card-title">${escapeHtml(group.name || 'Nhom')}</div>
-            <div class="group-card-meta">${escapeHtml(getGroupRoleLabel(group))} - ${(group.memberEmails || []).length} thanh vien - ${count} TK${editCount ? ` - ${editCount} cho duyet` : ''}</div>
+            <div class="group-card-title">${escapeHtml(group.name || 'Nhóm')}</div>
+            <div class="group-card-meta">${escapeHtml(getGroupRoleLabel(group))} · ${(group.memberEmails || []).length} thành viên · ${count} tài khoản${editCount ? ` · ${editCount} chờ duyệt` : ''}</div>
         </div>
         <span class="group-lock-badge ${unlocked ? 'unlocked' : ''}">${escapeHtml(getGroupLockLabel(group.id))}</span>
     </button>`;
@@ -1594,12 +1594,12 @@ function renderGroupInviteCard(group) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 12h-6"/><path d="m19 9 3 3-3 3"/><path d="M14 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="7.5" cy="7" r="4"/></svg>
         </div>
         <div class="group-card-main">
-            <div class="group-card-title">${escapeHtml(group.name || 'Nhom')}</div>
-            <div class="group-card-meta">Moi boi ${escapeHtml(group.ownerEmail || '')} - ${(group.memberEmails || []).length} thanh vien</div>
+            <div class="group-card-title">${escapeHtml(group.name || 'Nhóm')}</div>
+            <div class="group-card-meta">Mời bởi ${escapeHtml(group.ownerEmail || '')} · ${(group.memberEmails || []).length} thành viên</div>
         </div>
         <div class="group-invite-actions">
-            <button type="button" class="btn btn-sm btn-primary" onclick="openAcceptGroupInviteModal('${escapeJsAttr(group.id)}')">Nhap MK</button>
-            <button type="button" class="btn btn-sm btn-outline" onclick="handleCancelGroupInvite('${escapeJsAttr(group.id)}')">Bo qua</button>
+            <button type="button" class="btn btn-sm btn-primary" onclick="openAcceptGroupInviteModal('${escapeJsAttr(group.id)}')">Nhập mật khẩu</button>
+            <button type="button" class="btn btn-sm btn-outline" onclick="handleCancelGroupInvite('${escapeJsAttr(group.id)}')">Bỏ qua</button>
         </div>
     </div>`;
 }
@@ -1607,7 +1607,7 @@ function renderGroupInviteCard(group) {
 function renderGroupInviteSection(invites) {
     if (!invites.length) return '';
     return `<div class="group-invite-section anim-fade-in-up">
-        <div class="section-header"><span class="section-title">Loi moi vao team</span><span class="section-badge">${invites.length}</span></div>
+        <div class="section-header"><span class="section-title">Lời mời vào nhóm</span><span class="section-badge">${invites.length}</span></div>
         <div class="group-grid group-invite-grid">${invites.map(renderGroupInviteCard).join('')}</div>
     </div>`;
 }
@@ -1628,18 +1628,18 @@ function renderGroupList() {
     document.getElementById('page-content').innerHTML = `
         <div class="group-page-head anim-fade-in-up">
             <div>
-                <div class="section-title">Nhom</div>
-                <div class="group-page-desc">${filtered.length} nhom${filteredInvites.length ? ` - ${filteredInvites.length} loi moi` : ''}</div>
+                <div class="section-title">Nhóm</div>
+                <div class="group-page-desc">${filtered.length} nhóm${filteredInvites.length ? ` · ${filteredInvites.length} lời mời` : ''}</div>
             </div>
             <button class="btn btn-primary btn-sm" onclick="openCreateGroupModal()">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M12 5v14M5 12h14"/></svg>
-                Tao nhom
+                Tạo nhóm
             </button>
         </div>
         ${renderGroupInviteSection(filteredInvites)}
         ${filtered.length
             ? `<div class="group-grid">${filtered.map(renderGroupCard).join('')}</div>`
-            : `<div class="d-empty-state anim-fade-in-up"><div class="d-empty-state-title">Chua co nhom</div><div class="d-empty-state-desc">Tao nhom de chia se tai khoan dung chung.</div></div>`}
+            : `<div class="d-empty-state anim-fade-in-up"><div class="d-empty-state-title">Chưa có nhóm</div><div class="d-empty-state-desc">Tạo nhóm để chia sẻ tài khoản dùng chung.</div></div>`}
     `;
 }
 
@@ -1649,7 +1649,7 @@ function renderGroupMembers(group) {
     const pending = group.pendingMemberEmails || [];
     return `<div class="group-panel group-members-panel anim-fade-in-up">
         <div class="group-panel-head">
-            <div class="section-title">Thanh vien</div>
+            <div class="section-title">Thành viên</div>
             <span class="section-badge">${(group.memberEmails || []).length}${pending.length ? `+${pending.length}` : ''}</span>
         </div>
         <div class="group-member-list">
@@ -1657,34 +1657,44 @@ function renderGroupMembers(group) {
                 const isGroupOwnerEmail = normalizeGroupEmail?.(email) === ownerEmail;
                 return `<div class="group-member-row">
                     <span class="group-member-email" title="${escapeHtml(email)}">${escapeHtml(email)}</span>
-                    <span class="group-member-role">${isGroupOwnerEmail ? 'Chu nhom' : 'Thanh vien'}</span>
-                    ${isOwner && !isGroupOwnerEmail ? `<button class="copy-btn" onclick="handleRemoveGroupMember('${escapeJsAttr(group.id)}','${escapeJsAttr(email)}')" title="Xoa thanh vien"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>` : ''}
+                    <span class="group-member-role">${isGroupOwnerEmail ? 'Chủ nhóm' : 'Thành viên'}</span>
+                    ${isOwner && !isGroupOwnerEmail ? `<button class="copy-btn" onclick="handleRemoveGroupMember('${escapeJsAttr(group.id)}','${escapeJsAttr(email)}')" title="Xoá thành viên"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>` : ''}
                 </div>`;
             }).join('')}
             ${isOwner && pending.length ? pending.map(email => `<div class="group-member-row pending">
                 <span class="group-member-email" title="${escapeHtml(email)}">${escapeHtml(email)}</span>
-                <span class="group-member-role">Dang moi</span>
-                <button class="copy-btn" onclick="handleCancelGroupInvite('${escapeJsAttr(group.id)}','${escapeJsAttr(email)}')" title="Huy loi moi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+                <span class="group-member-role">Đang mời</span>
+                <button class="copy-btn" onclick="handleCancelGroupInvite('${escapeJsAttr(group.id)}','${escapeJsAttr(email)}')" title="Huỷ lời mời"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
             </div>`).join('') : ''}
         </div>
         ${isOwner ? `<div class="group-member-add">
             <input type="email" id="group-member-email" class="input" placeholder="email@domain.com" onkeydown="if(event.key==='Enter'){event.preventDefault();handleAddGroupMember('${escapeJsAttr(group.id)}')}">
-            <button class="btn btn-primary btn-sm" onclick="handleAddGroupMember('${escapeJsAttr(group.id)}')">Moi</button>
+            <button class="btn btn-primary btn-sm" onclick="handleAddGroupMember('${escapeJsAttr(group.id)}')">Mời</button>
         </div>` : ''}
     </div>`;
+}
+
+function renderSharedTwoFaExtra(group, account, secret) {
+    if (!secret) return '';
+    const isTotp = typeof isLikelyTotpSecret === 'function' && isLikelyTotpSecret(secret);
+    if (isTotp && typeof renderRegisteredTotpWidget === 'function') {
+        return renderRegisteredTotpWidget(`shared:${group.id}:${account.id}`, secret);
+    }
+    return `<div class="detail-row totp-web-row shared-twofa-web-row"><span class="detail-label"></span><button type="button" class="btn btn-sm btn-outline" onclick="openWeb2FA('${escapeJsAttr(secret)}')">🌐 Tạo mã 2FA trên web</button></div>`;
 }
 
 function renderSharedSecretRows(group, account, decrypted) {
     const canRemove = group.role === 'owner' || account.sharedByUid === window.appState.user?.uid;
     const pendingCount = (getSharedEditRequestsForAccount?.(group.id, account.id) || []).filter(request => request.status === 'pending').length;
+    const twoFaSecret = decrypted.twoFaCode || '';
     return `<div class="shared-secret-rows">
-        <div class="detail-row"><span class="detail-label">Tai khoan</span><span class="detail-value secret-value">${escapeHtml(decrypted.username || '')} <button class="copy-btn" onclick="copySharedField('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','username')" title="Copy tai khoan">${renderCopyIconSvg()}</button></span></div>
-        <div class="detail-row"><span class="detail-label">Mat khau</span><span class="detail-value secret-value">${escapeHtml(decrypted.password || '')} <button class="copy-btn" onclick="copySharedField('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','password')" title="Copy mat khau">${renderCopyIconSvg()}</button></span></div>
-        ${decrypted.twoFaCode ? `<div class="detail-row"><span class="detail-label">2FA</span><span class="detail-value secret-value">${escapeHtml(decrypted.twoFaCode)} <button class="copy-btn" onclick="copySharedField('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','2fa')" title="Copy 2FA">${renderCopyIconSvg()}</button></span></div>` : ''}
-        ${decrypted.note ? `<div class="detail-row detail-note-row"><span class="detail-label">Ghi chu</span><div class="detail-note-value">${renderSmartNote(decrypted.note)}</div></div>` : ''}
+        <div class="detail-row"><span class="detail-label">Tài khoản</span><span class="detail-value secret-value">${escapeHtml(decrypted.username || '')} <button class="copy-btn" onclick="copySharedField('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','username')" title="Copy tài khoản">${renderCopyIconSvg()}</button></span></div>
+        <div class="detail-row"><span class="detail-label">Mật khẩu</span><span class="detail-value secret-value">${escapeHtml(decrypted.password || '')} <button class="copy-btn" onclick="copySharedField('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','password')" title="Copy mật khẩu">${renderCopyIconSvg()}</button></span></div>
+        ${twoFaSecret ? `<div class="detail-row"><span class="detail-label">2FA</span><span class="detail-value secret-value">${escapeHtml(twoFaSecret)} <button class="copy-btn" onclick="copySharedField('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','2fa')" title="Copy 2FA">${renderCopyIconSvg()}</button></span></div>${renderSharedTwoFaExtra(group, account, twoFaSecret)}` : ''}
+        ${decrypted.note ? `<div class="detail-row detail-note-row"><span class="detail-label">Ghi chú</span><div class="detail-note-value">${renderSmartNote(decrypted.note)}</div></div>` : ''}
         <div class="shared-account-actions">
-            <button class="btn btn-sm btn-outline" onclick="openSharedAccountEditModal('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}')">Sua${pendingCount ? ` (${pendingCount})` : ''}</button>
-            ${canRemove ? `<button class="btn btn-sm btn-danger-outline shared-remove-btn" onclick="handleRemoveSharedAccount('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}')">Go khoi nhom</button>` : ''}
+            <button class="btn btn-sm btn-outline" onclick="openSharedAccountEditModal('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}')">Sửa${pendingCount ? ` (${pendingCount})` : ''}</button>
+            ${canRemove ? `<button class="btn btn-sm btn-danger-outline shared-remove-btn" onclick="handleRemoveSharedAccount('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}')">Gỡ khỏi nhóm</button>` : ''}
         </div>
     </div>`;
 }
@@ -1694,14 +1704,14 @@ function renderSharedEditRequestCard(group, request) {
     const currentEmail = typeof normalizeGroupEmail === 'function' ? normalizeGroupEmail(user.email) : String(user.email || '').toLowerCase();
     const reviewerEmail = typeof normalizeGroupEmail === 'function' ? normalizeGroupEmail(request.reviewerEmail) : String(request.reviewerEmail || '').toLowerCase();
     const canReview = request.reviewerUid === user.uid || reviewerEmail === currentEmail;
-    const proposedName = request.proposedSafeData?.name || request.accountName || 'Tai khoan';
+    const proposedName = request.proposedSafeData?.name || request.accountName || 'Tài khoản';
     return `<div class="shared-edit-request-card">
         <div class="shared-edit-request-main">
             <strong>${escapeHtml(proposedName)}</strong>
             <span>${escapeHtml(request.requestedByEmail || '')}</span>
         </div>
         <div class="shared-edit-request-actions">
-            ${canReview ? `<button class="btn btn-sm btn-primary" onclick="handleAcceptSharedEditRequest('${escapeJsAttr(group.id)}','${escapeJsAttr(request.id)}')">Accept</button><button class="btn btn-sm btn-outline" onclick="handleRejectSharedEditRequest('${escapeJsAttr(group.id)}','${escapeJsAttr(request.id)}')">Reject</button>` : '<span class="group-lock-badge">Cho duyet</span>'}
+            ${canReview ? `<button class="btn btn-sm btn-primary" onclick="handleAcceptSharedEditRequest('${escapeJsAttr(group.id)}','${escapeJsAttr(request.id)}')">Duyệt</button><button class="btn btn-sm btn-outline" onclick="handleRejectSharedEditRequest('${escapeJsAttr(group.id)}','${escapeJsAttr(request.id)}')">Từ chối</button>` : '<span class="group-lock-badge">Chờ duyệt</span>'}
         </div>
     </div>`;
 }
@@ -1719,7 +1729,7 @@ function renderSharedEditRequests(group) {
     });
     if (!pending.length) return '';
     return `<div class="shared-edit-requests">
-        <div class="section-header"><span class="section-title">Yeu cau sua dang cho</span><span class="section-badge">${pending.length}</span></div>
+        <div class="section-header"><span class="section-title">Yêu cầu sửa đang chờ</span><span class="section-badge">${pending.length}</span></div>
         ${pending.map(request => renderSharedEditRequestCard(group, request)).join('')}
     </div>`;
 }
@@ -1743,15 +1753,15 @@ function renderSharedAccountCard(group, account) {
         <div class="shared-account-top">
             <div class="account-logo" style="${meta.logoStyle}">${meta.logoMark}</div>
             <div class="shared-account-info">
-                <div class="account-name">${escapeHtml(account.name || account.serviceName || 'Tai khoan')}${pendingCount ? ` <span class="sync-pending-badge">${pendingCount} cho duyet</span>` : ''}</div>
+                <div class="account-name">${escapeHtml(account.name || account.serviceName || 'Tài khoản')}${pendingCount ? ` <span class="sync-pending-badge">${pendingCount} chờ duyệt</span>` : ''}</div>
                 <div class="account-user">${escapeHtml(account.displayUsername || '')}</div>
-                <div class="shared-account-meta">${escapeHtml(meta.expiryText || '')}${account.sharedByEmail ? ` - ${escapeHtml(account.sharedByEmail)}` : ''}</div>
+                <div class="shared-account-meta">${escapeHtml(meta.expiryText || '')}${account.sharedByEmail ? ` · ${escapeHtml(account.sharedByEmail)}` : ''}</div>
             </div>
-            ${account.pendingSync ? '<span class="sync-pending-badge">Cho sync</span>' : ''}
+            ${account.pendingSync ? '<span class="sync-pending-badge">Chờ đồng bộ</span>' : ''}
         </div>
         ${unlocked
-            ? (decrypted ? renderSharedSecretRows(group, account, decrypted) : '<div class="shared-locked-note">Dang giai ma...</div>')
-            : `<div class="shared-locked-note"><span>Noi dung nhay cam dang an</span><button class="btn btn-sm btn-outline" onclick="openUnlockGroupModal('${escapeJsAttr(group.id)}')">Nhap mat khau nhom</button></div>`}
+            ? (decrypted ? renderSharedSecretRows(group, account, decrypted) : '<div class="shared-locked-note">Đang giải mã...</div>')
+            : `<div class="shared-locked-note"><span>Nội dung nhạy cảm đang ẩn</span><button class="btn btn-sm btn-outline" onclick="openUnlockGroupModal('${escapeJsAttr(group.id)}')">Nhập mật khẩu nhóm</button></div>`}
     </div>`;
 }
 
@@ -1760,16 +1770,16 @@ function renderGroupSharedAccounts(group) {
     const unlocked = Boolean(isGroupUnlocked?.(group.id));
     return `<div class="group-panel group-shared-panel anim-fade-in-up">
         <div class="group-panel-head">
-            <div class="section-title">Tai khoan chia se</div>
+            <div class="section-title">Tài khoản chia sẻ</div>
             <div class="group-panel-actions">
                 <span class="group-lock-badge ${unlocked ? 'unlocked' : ''}">${escapeHtml(getGroupLockLabel(group.id))}</span>
-                ${unlocked ? '' : `<button class="btn btn-sm btn-outline" onclick="openUnlockGroupModal('${escapeJsAttr(group.id)}')">Mo khoa</button>`}
+                ${unlocked ? '' : `<button class="btn btn-sm btn-outline" onclick="openUnlockGroupModal('${escapeJsAttr(group.id)}')">Mở khoá</button>`}
             </div>
         </div>
         ${renderSharedEditRequests(group)}
         ${accounts.length
             ? `<div class="shared-account-list">${accounts.map(account => renderSharedAccountCard(group, account)).join('')}</div>`
-            : `<div class="d-empty-state compact"><div class="d-empty-state-title">Chua co tai khoan chia se</div></div>`}
+            : `<div class="d-empty-state compact"><div class="d-empty-state-title">Chưa có tài khoản chia sẻ</div></div>`}
     </div>`;
 }
 
@@ -1780,19 +1790,19 @@ function renderGroupDetail(groupId) {
         return;
     }
     const isOwner = group.role === 'owner';
-    document.getElementById('page-title').textContent = group.name || 'Chi tiet nhom';
+    document.getElementById('page-title').textContent = group.name || 'Chi tiết nhóm';
     document.getElementById('page-content').innerHTML = `
-        <button class="back-btn" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polyline points="15,18 9,12 15,6"/></svg> Nhom</button>
+        <button class="back-btn" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polyline points="15,18 9,12 15,6"/></svg> Nhóm</button>
         <div class="group-detail-head anim-fade-in-up">
             <div class="group-detail-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
             </div>
             <div class="group-detail-main">
-                <div class="group-detail-title">${escapeHtml(group.name || 'Nhom')}</div>
-                <div class="group-card-meta">${escapeHtml(getGroupRoleLabel(group))} - ${(group.memberEmails || []).length} thanh vien</div>
+                <div class="group-detail-title">${escapeHtml(group.name || 'Nhóm')}</div>
+                <div class="group-card-meta">${escapeHtml(getGroupRoleLabel(group))} · ${(group.memberEmails || []).length} thành viên</div>
             </div>
             <div class="group-detail-actions">
-                ${isOwner ? `<button class="btn btn-sm btn-outline" onclick="handleRenameGroup('${escapeJsAttr(group.id)}')">Doi ten</button><button class="btn btn-sm btn-danger-outline" onclick="handleDeleteGroup('${escapeJsAttr(group.id)}')">Xoa</button>` : ''}
+                ${isOwner ? `<button class="btn btn-sm btn-outline" onclick="handleRenameGroup('${escapeJsAttr(group.id)}')">Đổi tên</button><button class="btn btn-sm btn-danger-outline" onclick="handleDeleteGroup('${escapeJsAttr(group.id)}')">Xoá</button>` : ''}
             </div>
         </div>
         <div class="group-detail-grid">
@@ -1948,7 +1958,7 @@ function renderDesktopCard(acc, isPersonal=false, isChild=false) {
     const emoji = getPlatformEmoji(platformRef);
     const logoStyle = typeof getPlatformLogoStyle === 'function' ? getPlatformLogoStyle(platformRef, acc.name) : `background:${stringToColor(acc.name)}15;color:${stringToColor(acc.name)}`;
     const logoMark = typeof renderPlatformLogoMark === 'function' ? renderPlatformLogoMark(platformRef, emoji) : emoji;
-    const syncBadge = acc.pendingSync ? '<span class="sync-pending-badge">Cho sync</span>' : '';
+    const syncBadge = acc.pendingSync ? '<span class="sync-pending-badge">Chờ đồng bộ</span>' : '';
     const authBadge = renderAuthMethodBadge(acc);
     const mutedClass = isMutedAccountInQuickFilter(acc) ? 'is-muted-account' : '';
     const preferenceActions = `${renderPinButton(acc)}${renderFavoriteButton(acc)}`;
@@ -2092,10 +2102,60 @@ function renderTagEditorForm(acc) {
 }
 
 // ===== SETTINGS =====
+
+// Trang phát hành để người dùng web tải bản cài đặt thủ công (Requirement 10.4).
+const UPDATE_RELEASES_URL = 'https://github.com/taorain01/8.-Ting/releases';
+
+// Ánh xạ 8 trạng thái vòng đời cập nhật sang nhãn/thông báo tiếng Việt
+// (idle|checking|update-available|downloading|downloaded|up-to-date|error|offline).
+const UPDATE_STATUS_LABELS = {
+    idle: 'Chưa kiểm tra trong phiên này',
+    checking: 'Đang kiểm tra cập nhật...',
+    'update-available': 'Đã có bản cập nhật mới',
+    downloading: 'Đang tải bản cập nhật...',
+    downloaded: 'Bản cập nhật đã sẵn sàng',
+    'up-to-date': 'Đang ở bản mới nhất',
+    error: 'Đã xảy ra lỗi khi cập nhật',
+    offline: 'Không có kết nối mạng',
+};
+
+// Xác định nền tảng runtime qua Platform_Detector (có fallback an toàn khi
+// module dùng chung chưa nạp).
+function getUpdatePlatform() {
+    const detector = window.TingShared?.PlatformDetector;
+    if (detector?.detectPlatform) {
+        try { return detector.detectPlatform(window); } catch (err) { /* fallback bên dưới */ }
+    }
+    return window.electronAPI?.isElectron ? 'electron' : 'web';
+}
+
+// Năng lực cập nhật của nền tảng qua Platform_Detector (có fallback an toàn).
+function getUpdateCapability(platform) {
+    const detector = window.TingShared?.PlatformDetector;
+    if (detector?.updateCapability) {
+        try { return detector.updateCapability(platform); } catch (err) { /* fallback bên dưới */ }
+    }
+    return (platform === 'electron' || platform === 'android')
+        ? { canCheck: true, disabledMessage: null }
+        : { canCheck: false, disabledMessage: 'Không hỗ trợ tự cập nhật trên nền tảng này' };
+}
+
+// Ánh xạ trạng thái cập nhật sang thông báo tiếng Việt; kèm phần trăm khi đang tải.
+function getUpdateStatusMessage(status) {
+    if (!status) return UPDATE_STATUS_LABELS.idle;
+    const kind = status.status;
+    if (kind === 'downloading') {
+        const percent = Number(status.progress?.percent ?? status.percent);
+        const percentText = Number.isFinite(percent) ? ` ${Math.round(percent)}%` : '';
+        return `${UPDATE_STATUS_LABELS.downloading}${percentText}`;
+    }
+    return status.message || UPDATE_STATUS_LABELS[kind] || kind || 'Đang chờ';
+}
+
 function renderUpdateStatus() {
     const status = window.appState.updateStatus;
-    if (!status) return '<div class="settings-item-desc">Chưa kiểm tra trong phiên này</div>';
-    return `<div class="settings-item-desc">${escapeHtml(status.message || status.status || 'Đang chờ')}</div>`;
+    if (!status) return `<div class="settings-item-desc">${UPDATE_STATUS_LABELS.idle}</div>`;
+    return `<div class="settings-item-desc">${escapeHtml(getUpdateStatusMessage(status))}</div>`;
 }
 
 function renderUpdateLog() {
@@ -2106,6 +2166,151 @@ function renderUpdateLog() {
             <span>${escapeHtml(item.version || 'unknown')}${item.status ? ` · ${escapeHtml(item.status)}` : ''}</span>
             <small>${escapeHtml(item.date || '')}</small>
         </div>`).join('')}</div>`;
+}
+
+// Thông báo Background_Check: hiển thị toast nhẹ (khoảng cách <= 3, Yêu cầu 7.7)
+// hoặc dialog nổi (khoảng cách > 3 hoặc khi mở app, Yêu cầu 7.6/7.8), kèm hành
+// động cập nhật và tùy chọn bỏ qua. `kind` do Background_Check_Controller quyết
+// định qua Update_Core.decideNotificationKind — hàm này chỉ lo phần hiển thị.
+function showUpdateNotification(payload) {
+    const info = payload?.info || null;
+    const kind = payload?.kind === 'dialog' ? 'dialog' : 'toast';
+    const latest = escapeHtml(info?.latestVersion || (info?.manifest && info.manifest.latestVersion) || '');
+    const latestText = latest ? ` ${latest}` : '';
+
+    // Toast nhẹ, KHÔNG chặn (7.7): thông báo có bản mới, người dùng vào Cài đặt để cập nhật.
+    if (kind === 'toast') {
+        showToast(`Đã có bản cập nhật mới${latestText}. Mở Cài đặt để cập nhật.`, 'success');
+        return;
+    }
+
+    // Dialog nổi (7.6/7.8): khuyến nghị cập nhật, kèm nút "Cập nhật ngay" và "Bỏ qua".
+    const notes = info?.releaseNotes || (info?.manifest && info.manifest.releaseNotes) || '';
+    const notesHtml = notes
+        ? `<div class="update-dialog-notes" style="margin:12px 0;white-space:pre-wrap">${escapeHtml(notes)}</div>`
+        : '';
+    openModal('Có bản cập nhật mới', `
+        <div class="update-dialog-body">
+            <p>Đã có phiên bản mới${latestText} của Ting!. Bạn nên cập nhật để nhận tính năng mới và bản vá.</p>
+            ${notesHtml}
+            <div class="update-dialog-actions" style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+                <button class="btn btn-outline" onclick="closeModal()">Bỏ qua</button>
+                <button class="btn btn-primary" onclick="triggerUpdateActionFromDialog()">Cập nhật ngay</button>
+            </div>
+        </div>`);
+}
+
+
+// Min_Supported_Version được định nghĩa theo versionCode trong Release_Manifest, nên phép
+// so sánh chỉ có nghĩa trên Android — nơi biết được versionCode đang cài. Dùng
+// TingShared.VersionCompare.compareVersions để so sánh; trả về `false` khi thiếu dữ liệu.
+function isBelowMinSupportedVersion(platform, status) {
+    const info = status?.info || null;
+    // info có thể là UpdateInfo bọc `manifest`, hoặc chính là manifest.
+    const manifest = (info && info.manifest) || info || null;
+    const minSupported = manifest && manifest.minSupportedVersion;
+    if (typeof minSupported !== 'number' || !Number.isFinite(minSupported)) return false;
+
+    const vc = window.TingShared?.VersionCompare;
+    if (!vc?.compareVersions) return false;
+
+    // Chỉ Android mang khái niệm versionCode; lấy version code đang cài từ Mobile_Updater.
+    const installedCode = platform === 'android'
+        ? window.TingMobileUpdater?.INSTALLED_VERSION_CODE
+        : null;
+    if (typeof installedCode !== 'number' || !Number.isFinite(installedCode)) return false;
+
+    try {
+        return vc.compareVersions(installedCode, minSupported) < 0;
+    } catch (err) {
+        return false;
+    }
+}
+
+// Người dùng "Bỏ qua" cảnh báo Min_Supported_Version: ẩn cảnh báo NHƯNG không chặn ứng
+// dụng — người dùng tiếp tục sử dụng bình thường (Requirement 9.7).
+function dismissMinSupportedWarning() {
+    window.appState.minSupportedWarningDismissed = true;
+    if (window.appState.currentPage === 'settings') renderSettings();
+}
+
+// Cảnh báo NỔI BẬT khi Installed_Version < Min_Supported_Version: khuyến nghị cập nhật
+// ngay nhưng vẫn cho phép bỏ qua/tiếp tục dùng app (không chặn) — Requirement 9.7.
+function renderMinSupportedWarning(platform, status) {
+    if (!isBelowMinSupportedVersion(platform, status)) return '';
+    if (window.appState.minSupportedWarningDismissed) return '';
+
+    const info = status?.info || null;
+    const manifest = (info && info.manifest) || info || null;
+    const latest = escapeHtml(info?.latestVersion || manifest?.latestVersion || '');
+    const latestText = latest ? ` ${latest}` : '';
+
+    return `<div class="settings-item settings-min-version-warning" style="background:var(--danger-bg);border-left:4px solid var(--danger)">
+        <div class="settings-item-icon" style="background:var(--danger);color:#fff">⚠️</div>
+        <div class="settings-item-content">
+            <div class="settings-item-title" style="color:var(--danger)">Phiên bản của bạn đã quá cũ</div>
+            <div class="settings-item-desc">Bạn nên cập nhật ngay lên bản mới nhất${latestText} để tiếp tục nhận hỗ trợ và bản vá. Bạn vẫn có thể bỏ qua và tiếp tục sử dụng ứng dụng.</div>
+            <div class="settings-min-version-actions" style="margin-top:8px;display:flex;gap:8px">
+                <button class="btn btn-sm btn-primary settings-inline-btn" onclick="startUpdateDownload()">Cập nhật ngay</button>
+                <button class="btn btn-sm btn-outline settings-inline-btn" onclick="dismissMinSupportedWarning()">Bỏ qua</button>
+            </div>
+        </div>
+    </div>`;
+}
+
+// Khu "Phiên bản" đa nền tảng: hiển thị Installed_Version trên mọi nền tảng, bật/vô
+// hiệu hoá "Kiểm tra" theo Platform_Detector, định tuyến hành động theo nền tảng, và
+// khoá hành động khi đang tải (Requirements 1.1-1.6, 3.4/3.5/3.7, 4.4/4.6/4.8, 10.1-10.4).
+function renderUpdateSection() {
+    const version = escapeHtml(window.appState.appVersion || '1.3.0');
+    const platform = getUpdatePlatform();
+    const cap = getUpdateCapability(platform);
+    const status = window.appState.updateStatus;
+    const kind = status?.status || null;
+    const checking = kind === 'checking';
+    const downloading = kind === 'downloading';
+    const ready = kind === 'downloaded';
+    const available = kind === 'update-available';
+    const busy = checking || downloading;
+
+    // Nút "Kiểm tra": bật theo updateCapability, vô hiệu khi đang kiểm tra/tải (1.2-1.6, 10.2).
+    const checkDisabled = !cap.canCheck || busy;
+    const checkLabel = checking ? 'Đang kiểm tra' : 'Kiểm tra';
+    const checkBtn = `<button class="btn btn-sm btn-outline settings-inline-btn" onclick="checkForUpdates()" ${checkDisabled ? 'disabled' : ''}>${checkLabel}</button>`;
+
+    // Dòng chính: luôn hiển thị Installed_Version + trạng thái (1.1, 10.1, 10.3).
+    let rows = `<div class="settings-item"><div class="settings-item-icon" style="background:#E0F2FE">⬆️</div><div class="settings-item-content"><div class="settings-item-title">Ting! v${version}</div>${renderUpdateStatus()}</div>${checkBtn}</div>`;
+
+    // Cảnh báo NỔI BẬT khi Installed_Version < Min_Supported_Version, đặt lên đầu để
+    // dễ thấy; không chặn — vẫn cho bỏ qua/tiếp tục (9.7).
+    rows = renderMinSupportedWarning(platform, status) + rows;
+
+    // Nền tảng không hỗ trợ tự cập nhật: hiển thị thông báo phù hợp; web kèm link tải thủ công (1.4, 10.4).
+    if (!cap.canCheck && cap.disabledMessage) {
+        const desc = platform === 'web'
+            ? `Tải bản mới nhất từ trang phát hành. <a href="${UPDATE_RELEASES_URL}" target="_blank" rel="noopener noreferrer">Tải thủ công</a>`
+            : 'Cập nhật được quản lý bởi nền tảng.';
+        rows += `<div class="settings-item"><div class="settings-item-icon" style="background:var(--warning-bg)">ℹ️</div><div class="settings-item-content"><div class="settings-item-title">${escapeHtml(cap.disabledMessage)}</div><div class="settings-item-desc">${desc}</div></div></div>`;
+    }
+
+    // Android có bản cập nhật: hiển thị phiên bản mới + release notes + nút "Cập nhật";
+    // khoá (ẩn) nút khi đang tải để chỉ một tiến trình tải diễn ra (4.4, 4.6).
+    if (platform === 'android' && available && !downloading) {
+        const latest = escapeHtml(status?.info?.latestVersion || '');
+        const notes = status?.info?.releaseNotes
+            ? `<div class="settings-item-desc">${escapeHtml(status.info.releaseNotes)}</div>`
+            : '';
+        rows += `<div class="settings-item"><div class="settings-item-icon" style="background:var(--accent-bg)">🆕</div><div class="settings-item-content"><div class="settings-item-title">Phiên bản mới${latest ? ' ' + latest : ''}</div>${notes}</div><button class="btn btn-sm btn-primary settings-inline-btn" onclick="startUpdateDownload()">Cập nhật</button></div>`;
+    }
+
+    // Desktop đã tải xong: hiển thị "Bản cập nhật đã sẵn sàng" + nút "Cài đặt" (3.5).
+    if (platform === 'electron' && ready) {
+        rows += `<div class="settings-item"><div class="settings-item-icon" style="background:var(--success-bg)">✅</div><div class="settings-item-content"><div class="settings-item-title">Bản cập nhật đã sẵn sàng</div><div class="settings-item-desc">Khởi động lại để cài đặt</div></div><button class="btn btn-sm btn-primary settings-inline-btn" onclick="installDownloadedUpdate()">Cài đặt</button></div>`;
+    }
+
+    rows += `<div class="settings-log-wrap">${renderUpdateLog()}</div>`;
+
+    return `<div class="settings-group"><div class="settings-group-title">Phiên bản</div><div class="settings-card">${rows}</div></div>`;
 }
 
 function renderNotifyDaysOptions(days) {
@@ -2130,8 +2335,6 @@ function renderSettings() {
         : { enabled: true, nativeEnabled: true, inAppEnabled: true, daysBefore: [5, 3, 1], repeatHours: 24, overdueDays: 3 };
     const isElectron = Boolean(window.electronAPI?.isElectron);
     const autoLock = Number(settings.autoLockMinutes ?? 5);
-    const updateReady = window.appState.updateStatus?.status === 'downloaded';
-    const updateChecking = window.appState.updateStatus?.status === 'checking';
     document.getElementById('page-content').innerHTML = `
     <div class="d-settings-layout">
         <div class="settings-group"><div class="settings-group-title">Bảo mật</div><div class="settings-card">
@@ -2161,11 +2364,7 @@ function renderSettings() {
             <div class="settings-item"><div class="settings-item-icon" style="background:var(--accent-bg)">⚙️</div><div class="settings-item-content"><div class="settings-item-title">Cài đặt thông báo Windows</div><div class="settings-item-desc">Bật banner, âm thanh và tắt Không làm phiền</div></div><button class="btn btn-sm btn-outline settings-inline-btn" onclick="openNotificationSettingsFromApp()">Mở</button></div>
             <div class="settings-item"><div class="settings-item-icon" style="background:var(--success-bg)">📅</div><div class="settings-item-content"><div class="settings-item-title">Gia hạn mặc định</div><div class="settings-item-desc">30 ngày</div></div></div>
         </div></div>
-        <div class="settings-group"><div class="settings-group-title">Phiên bản</div><div class="settings-card">
-            <div class="settings-item"><div class="settings-item-icon" style="background:#E0F2FE">⬆️</div><div class="settings-item-content"><div class="settings-item-title">Ting! v${escapeHtml(window.appState.appVersion || '1.2.0')}</div>${renderUpdateStatus()}</div><button class="btn btn-sm btn-outline settings-inline-btn" onclick="checkForUpdates()" ${isElectron && !updateChecking ? '' : 'disabled'}>${updateChecking ? 'Đang kiểm tra' : 'Kiểm tra'}</button></div>
-            ${updateReady ? `<div class="settings-item"><div class="settings-item-icon" style="background:var(--success-bg)">✅</div><div class="settings-item-content"><div class="settings-item-title">Bản cập nhật đã sẵn sàng</div><div class="settings-item-desc">Khởi động lại để cài đặt</div></div><button class="btn btn-sm btn-primary settings-inline-btn" onclick="installDownloadedUpdate()">Cài đặt</button></div>` : ''}
-            <div class="settings-log-wrap">${renderUpdateLog()}</div>
-        </div></div>
+        ${renderUpdateSection()}
         <div class="settings-group"><div class="settings-group-title">Dữ liệu</div><div class="settings-card">
             <div class="settings-item"><div class="settings-item-icon" style="background:#E0F2FE">📤</div><div class="settings-item-content"><div class="settings-item-title">Xuất dữ liệu (JSON)</div><div class="settings-item-desc">Sao lưu mã hoá</div></div><svg class="settings-item-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg></div>
             <div class="settings-item"><div class="settings-item-icon" style="background:#E0F2FE">📥</div><div class="settings-item-content"><div class="settings-item-title">Nhập dữ liệu</div><div class="settings-item-desc">Khôi phục từ JSON</div></div><svg class="settings-item-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg></div>
@@ -2639,6 +2838,9 @@ function renderAddForm(type, editData = null) {
                 <button type="button" class="quick-chip primary" onclick="createInlineCategoryFromAddForm()">Tạo</button>
             </div>
         </div>`;
+    const history = typeof renderAddFormHistorySuggestions === 'function'
+        ? renderAddFormHistorySuggestions(editData?.id || '')
+        : { note: '', seller: '', price: '', bundle: '' };
     return `
     ${renderAuthMethodInlineSelector(authMethod)}
     <div id="add-auth-linked-wrap" class="add-auth-linked-wrap" ${authMethod === 'email' ? 'hidden' : ''}>
@@ -2695,9 +2897,11 @@ function renderAddForm(type, editData = null) {
             <button type="button" class="note-toolbar-btn" onclick="wrapNoteSelection('code')">${renderNoteToolbarIcon('code')} Code</button>
         </div>
         <textarea class="textarea-paste" id="add-note" placeholder="Ghi chú thông minh...
-[copy]BACKUP-ABC-123[/copy]
+[copy][/copy]
+[code][/code]
 https://example.com" style="min-height:110px">${escapeHtml(editData?.note || '')}</textarea>
     </div>
+    ${history.note}
 
     <div class="form-section-title">Ngu&#7891;n g&#7889;c / Ng&#432;&#7901;i b&#225;n <span class="optional-label">(T&#249;y ch&#7885;n)</span></div>
     <div class="input-group" style="margin-bottom:8px">
@@ -2705,6 +2909,7 @@ https://example.com" style="min-height:110px">${escapeHtml(editData?.note || '')
         <label for="add-seller-name" class="input-label" style="left:16px">T&#234;n ng&#432;&#7901;i b&#225;n</label>
     </div>
     ${renderSellerPlatformPicker(editData?.sellerPlatform || 'other', editData?.sellerLink || '')}
+    ${history.seller}
 
     <div class="form-section-title">Giá mua <span class="optional-label">(Tùy chọn)</span></div>
     <div class="input-group price-input-group" style="margin-bottom:8px">
@@ -2712,6 +2917,9 @@ https://example.com" style="min-height:110px">${escapeHtml(editData?.note || '')
         <label for="add-price" class="input-label" style="left:16px">VD: 50.000 (để trống nếu không nhập)</label>
         <span class="price-suffix" aria-hidden="true">₫</span>
     </div>
+
+    ${history.price}
+    ${history.bundle}
 
     <div class="form-section-title add-advanced-title">Tùy chọn nâng cao</div>
     ${renderCollapsibleSection('category', '📁', `Danh mục (${defaultCategoryIds.length})`, categoryContent)}

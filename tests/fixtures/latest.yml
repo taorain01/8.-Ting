@@ -1,0 +1,24 @@
+# ============================================================================
+# Feature: auto-update-system — Task 6.4
+#   `latest.yml` MẪU cho electron-updater (feed cục bộ/mock).
+#
+#   Đây là metadata bản phát hành desktop mà Publish_Workflow sinh ra kèm trình
+#   cài đặt `.exe` (Yêu cầu 3.1). electron-updater tải file này từ nguồn phát
+#   hành GitHub, so sánh `version` với Installed_Version để quyết định có bản
+#   cập nhật hay không (Yêu cầu 3.2/3.3), rồi tải trình cài đặt tương ứng.
+#
+#   File dùng cho:
+#     - Integration test tự động (tests/integration/desktop-updater-flow.test.js):
+#       nạp giá trị `version` để cấu hình kịch bản "có bản cập nhật".
+#     - Kiểm thử thủ công với feed cục bộ (tests/integration/desktop-updater-manual.md).
+#
+#   Định dạng theo chuẩn electron-updater (generic/GitHub provider).
+# ============================================================================
+version: 1.4.0
+files:
+  - url: Ting-setup-1.4.0.exe
+    sha512: 2Vv9m2m3g0oQ8dQ2kqLh8j2mQ0p3n6c1a5s7d9f0g2h4j6k8l0z1x3c5v7b9n1m3Q4w6e8r0t2y4u6i8o0p2a4s6d8f0g2h4j6k8l0zQ==
+    size: 78123456
+path: Ting-setup-1.4.0.exe
+sha512: 2Vv9m2m3g0oQ8dQ2kqLh8j2mQ0p3n6c1a5s7d9f0g2h4j6k8l0z1x3c5v7b9n1m3Q4w6e8r0t2y4u6i8o0p2a4s6d8f0g2h4j6k8l0zQ==
+releaseDate: '2024-06-01T00:00:00.000Z'
