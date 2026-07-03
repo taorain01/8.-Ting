@@ -55,7 +55,7 @@ window.appState = {
         notifyOverdueDays: 3,
         shortcuts: { openApp: 'Control+Shift+T', quickAdd: 'Control+Shift+S' },
     },
-    appVersion: '1.3.5',
+    appVersion: '1.3.6',
     updateStatus: null,
     updateLog: [],
 };
@@ -1858,6 +1858,96 @@ async function handleSetSharedAccountCategory(groupId, accountId, categoryId = '
     } catch (error) {
         showToast(error.message || 'Không chuyển được danh mục', 'error');
     }
+}
+
+/* ---- Custom category dropdown (thay cho <select> native để tránh giật & đẹp hơn) ---- */
+let _activeCatMenu = null;
+
+function _catMenuOutsideHandler(event) {
+    if (!_activeCatMenu) return;
+    if (_activeCatMenu.menu.contains(event.target) || _activeCatMenu.trigger.contains(event.target)) return;
+    closeCategoryDropdown();
+}
+
+function _catMenuKeyHandler(event) {
+    if (event.key === 'Escape') closeCategoryDropdown();
+}
+
+function closeCategoryDropdown() {
+    if (!_activeCatMenu) return;
+    const { menu, trigger } = _activeCatMenu;
+    _activeCatMenu = null;
+    trigger?.classList.remove('open');
+    menu.classList.remove('open');
+    document.removeEventListener('mousedown', _catMenuOutsideHandler, true);
+    document.removeEventListener('keydown', _catMenuKeyHandler, true);
+    window.removeEventListener('scroll', closeCategoryDropdown, true);
+    window.removeEventListener('resize', closeCategoryDropdown, true);
+    setTimeout(() => menu.remove(), 120);
+}
+
+function _positionCatMenu(menu, trigger) {
+    const rect = trigger.getBoundingClientRect();
+    menu.style.minWidth = `${Math.max(rect.width, 180)}px`;
+    const menuRect = menu.getBoundingClientRect();
+    const gap = 6;
+    let top = rect.bottom + gap;
+    if (top + menuRect.height > window.innerHeight - 8) {
+        const above = rect.top - menuRect.height - gap;
+        top = above >= 8 ? above : Math.max(8, window.innerHeight - 8 - menuRect.height);
+    }
+    let left = rect.left;
+    if (left + menuRect.width > window.innerWidth - 8) {
+        left = Math.max(8, window.innerWidth - 8 - menuRect.width);
+    }
+    menu.style.top = `${top}px`;
+    menu.style.left = `${left}px`;
+}
+
+function openCategoryDropdown(trigger, groupId, accountId) {
+    if (_activeCatMenu && _activeCatMenu.trigger === trigger) {
+        closeCategoryDropdown();
+        return;
+    }
+    closeCategoryDropdown();
+    const group = getGroupById?.(groupId);
+    if (!group) return;
+    const account = (window.appState.sharedAccounts?.[groupId] || []).find(item => item.id === accountId);
+    const currentId = account?.groupCategoryId || '';
+    const categories = getGroupAccountCategories?.(group) || [];
+    const options = [{ id: '', name: 'Chưa phân loại', color: '#9CA3AF' }, ...categories];
+
+    const menu = document.createElement('div');
+    menu.className = 'cat-menu';
+    menu.innerHTML = options.map(option => {
+        const id = option.id || '';
+        const active = (id === (currentId || ''));
+        return `<button type="button" class="cat-menu-option${active ? ' is-active' : ''}" data-id="${escapeHtml(id)}">
+            <span class="cat-menu-dot" style="background:${escapeHtml(option.color || '#9CA3AF')}"></span>
+            <span class="cat-menu-name">${escapeHtml(option.name)}</span>
+            <svg class="cat-menu-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" width="15" height="15"><polyline points="20,6 9,17 4,12"/></svg>
+        </button>`;
+    }).join('');
+    document.body.appendChild(menu);
+
+    menu.querySelectorAll('.cat-menu-option').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = btn.getAttribute('data-id') || '';
+            closeCategoryDropdown();
+            if ((id || '') !== (currentId || '')) handleSetSharedAccountCategory(groupId, accountId, id);
+        });
+    });
+
+    _positionCatMenu(menu, trigger);
+    trigger.classList.add('open');
+    requestAnimationFrame(() => menu.classList.add('open'));
+    _activeCatMenu = { menu, trigger };
+    setTimeout(() => {
+        document.addEventListener('mousedown', _catMenuOutsideHandler, true);
+        document.addEventListener('keydown', _catMenuKeyHandler, true);
+        window.addEventListener('scroll', closeCategoryDropdown, true);
+        window.addEventListener('resize', closeCategoryDropdown, true);
+    }, 0);
 }
 
 async function handleMoveSharedAccount(groupId, accountId, direction, categoryId = '') {

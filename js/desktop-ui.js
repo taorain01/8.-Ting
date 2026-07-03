@@ -1949,10 +1949,16 @@ function renderGroupAccountCategorySelect(group, account) {
     const canManage = typeof canManageSharedAccountForUi === 'function' ? canManageSharedAccountForUi(group, account) : false;
     if (!canManage) return '';
     const categories = getGroupAccountCategories?.(group) || [];
-    return `<select class="group-account-category-select" onchange="handleSetSharedAccountCategory('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}',this.value)">
-        <option value="" ${account.groupCategoryId ? '' : 'selected'}>Chưa phân loại</option>
-        ${categories.map(category => `<option value="${escapeHtml(category.id)}" ${account.groupCategoryId === category.id ? 'selected' : ''}>${escapeHtml(category.name)}</option>`).join('')}
-    </select>`;
+    const current = categories.find(category => category.id === account.groupCategoryId) || null;
+    const label = current ? current.name : 'Chưa phân loại';
+    const dotColor = current?.color || '#9CA3AF';
+    return `<div class="cat-select${current ? '' : ' is-uncategorized'}">
+        <button type="button" class="cat-select-trigger" title="Đổi danh mục" onclick="event.stopPropagation();openCategoryDropdown(this,'${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}')">
+            <span class="cat-select-dot" style="background:${escapeHtml(dotColor)}"></span>
+            <span class="cat-select-label">${escapeHtml(label)}</span>
+            <svg class="cat-select-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" width="14" height="14"><polyline points="6,9 12,15 18,9"/></svg>
+        </button>
+    </div>`;
 }
 
 function renderGroupBoardAccount(group, account, categoryId, index, total) {
@@ -2131,7 +2137,7 @@ function renderGroupMembers(group) {
     </div>`;
 }
 
-function renderGroupDetail(groupId) {
+function renderGroupDetail(groupId, options = {}) {
     const group = getGroupById?.(groupId);
     if (!group) {
         renderGroupList();
@@ -2146,9 +2152,16 @@ function renderGroupDetail(groupId) {
         : activeTab === 'accounts'
             ? renderGroupAccountsTab(group)
             : renderGroupBoard(group);
-    document.getElementById('page-content').innerHTML = `
+    const pageContent = document.getElementById('page-content');
+    // On data-driven refresh (Firestore snapshot) don't replay entrance animations,
+    // otherwise every update makes the whole board fade in again and looks like a jitter.
+    // The quiet marker lives on a wrapper inside the rendered HTML so it never leaks to other pages.
+    const quietClass = options.quiet ? ' group-detail-quiet' : '';
+    const headAnim = options.quiet ? '' : ' anim-fade-in-up';
+    pageContent.innerHTML = `
+        <div class="group-detail-root${quietClass}">
         <button class="back-btn" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polyline points="15,18 9,12 15,6"/></svg> Nhóm</button>
-        <div class="group-detail-head anim-fade-in-up">
+        <div class="group-detail-head${headAnim}">
             <div class="group-detail-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
             </div>
@@ -2162,6 +2175,7 @@ function renderGroupDetail(groupId) {
         </div>
         ${renderGroupTabs(group)}
         ${tabContent}
+        </div>
     `;
 }
 
@@ -2618,7 +2632,7 @@ function renderMinSupportedWarning(platform, status) {
 // hiệu hoá "Kiểm tra" theo Platform_Detector, định tuyến hành động theo nền tảng, và
 // khoá hành động khi đang tải (Requirements 1.1-1.6, 3.4/3.5/3.7, 4.4/4.6/4.8, 10.1-10.4).
 function renderUpdateSection() {
-    const version = escapeHtml(window.appState.appVersion || '1.3.5');
+    const version = escapeHtml(window.appState.appVersion || '1.3.6');
     const platform = getUpdatePlatform();
     const cap = getUpdateCapability(platform);
     const status = window.appState.updateStatus;

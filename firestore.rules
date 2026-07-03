@@ -72,14 +72,32 @@ service cloud.firestore {
         function isParentOwner() {
           return isVerified() && request.auth.uid == parentGroup().ownerUid;
         }
+        function parentAccountManagerEmails() {
+          return parentGroup().keys().hasAny(['accountManagerEmails'])
+            ? parentGroup().accountManagerEmails
+            : [];
+        }
+        function isParentAccountManager() {
+          return isVerified() && request.auth.token.email in parentAccountManagerEmails();
+        }
         function isOriginalSharer() {
           return isVerified() && request.auth.uid == resource.data.sharedByUid;
+        }
+        function onlySharedAccountManageFieldsChanged() {
+          return request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['groupCategoryId', 'groupSortOrder', 'groupNote', 'updatedAt']);
         }
         allow read: if inParentGroup();
         allow create: if inParentGroup()
                       && request.resource.data.sharedByUid == request.auth.uid;
-        allow update, delete: if inParentGroup()
-                              && (isParentOwner() || isOriginalSharer());
+        allow update: if inParentGroup()
+                      && (
+                        isParentOwner()
+                        || isOriginalSharer()
+                        || (isParentAccountManager() && onlySharedAccountManageFieldsChanged())
+                      );
+        allow delete: if inParentGroup()
+                      && (isParentOwner() || isOriginalSharer() || isParentAccountManager());
       }
 
       match /sharedEditRequests/{requestId} {

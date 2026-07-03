@@ -54,6 +54,26 @@
         </label>
       </div>
 
+      <div class="quick-grid quick-sync-grid">
+        <label class="quick-field">
+          <span class="quick-label">Danh má»¥c</span>
+          <select id="quick-category">
+            <option value="">KhĂ´ng gáº¯n</option>
+          </select>
+        </label>
+        <label class="quick-field">
+          <span class="quick-label">ÄÄƒng nháº­p</span>
+          <select id="quick-auth-method">
+            <option value="email">Email</option>
+          </select>
+        </label>
+      </div>
+
+      <label id="quick-linked-wrap" class="quick-field" hidden>
+        <span class="quick-label">TK gá»‘c</span>
+        <select id="quick-linked-account"></select>
+      </label>
+
       <div class="quick-date-line">
         <label class="quick-check">
           <input id="quick-lifetime" type="checkbox">
@@ -113,6 +133,10 @@
         expiry: document.getElementById('quick-expiry'),
         preview: document.getElementById('quick-parse-preview'),
         platform: document.getElementById('quick-platform-chip'),
+        category: document.getElementById('quick-category'),
+        authMethod: document.getElementById('quick-auth-method'),
+        linkedWrap: document.getElementById('quick-linked-wrap'),
+        linkedAccount: document.getElementById('quick-linked-account'),
         tags: document.getElementById('quick-tags'),
         tagSuggestions: document.getElementById('quick-tag-suggestions'),
         note: document.getElementById('quick-note'),
@@ -126,6 +150,7 @@
         autoTags: [],
         latestParsed: null,
         latestDetection: { platforms: [], tags: [] },
+        context: { authMethods: [{ id: 'email', label: 'Email', sublabel: '' }], categories: [], linkedAccounts: [] },
       };
 
       function escapeHtml(value) {
@@ -135,6 +160,59 @@
           .replace(/>/g, '&gt;')
           .replace(/"/g, '&quot;')
           .replace(/'/g, '&#039;');
+      }
+
+      function renderQuickContext() {
+        const context = state.context || {};
+        const categories = Array.isArray(context.categories) ? context.categories : [];
+        const authMethods = Array.isArray(context.authMethods) && context.authMethods.length
+          ? context.authMethods
+          : [{ id: 'email', label: 'Email', sublabel: '' }];
+
+        const selectedCategory = els.category.value || '';
+        els.category.innerHTML = `<option value="">KhĂ´ng gáº¯n</option>${categories.map(category => (
+          `<option value="${escapeHtml(category.id)}" ${category.id === selectedCategory ? 'selected' : ''}>${escapeHtml(category.name || category.id)}</option>`
+        )).join('')}`;
+
+        const selectedMethod = els.authMethod.value || 'email';
+        els.authMethod.innerHTML = authMethods.map(method => (
+          `<option value="${escapeHtml(method.id)}" ${method.id === selectedMethod ? 'selected' : ''}>${escapeHtml(method.label || method.id)}</option>`
+        )).join('');
+        if (![...els.authMethod.options].some(option => option.value === selectedMethod)) els.authMethod.value = 'email';
+        updateLinkedAccountOptions();
+      }
+
+      function updateLinkedAccountOptions() {
+        const method = els.authMethod.value || 'email';
+        const linked = (state.context.linkedAccounts || []).filter(account => account.method === method);
+        els.linkedWrap.hidden = method === 'email';
+        if (method === 'email') {
+          els.linkedAccount.innerHTML = '';
+          return;
+        }
+        els.linkedAccount.innerHTML = linked.length
+          ? linked.map(account => {
+              const label = [account.name, account.displayUsername || account.username].filter(Boolean).join(' - ');
+              return `<option value="${escapeHtml(account.id)}" data-username="${escapeHtml(account.username || account.displayUsername || '')}">${escapeHtml(label || account.id)}</option>`;
+            }).join('')
+          : '<option value="">KhĂ´ng cĂ³ TK phĂ¹ há»£p</option>';
+      }
+
+      async function loadQuickContext() {
+        if (!window.quickAddAPI?.getContext) return;
+        try {
+          const context = await window.quickAddAPI.getContext();
+          if (context?.ok) {
+            state.context = {
+              authMethods: context.authMethods || state.context.authMethods,
+              categories: context.categories || [],
+              linkedAccounts: context.linkedAccounts || [],
+            };
+            renderQuickContext();
+          }
+        } catch {
+          renderQuickContext();
+        }
       }
 
       function todayIso() {
@@ -544,6 +622,8 @@
         els.purchase.value = todayIso();
         els.smartDate.value = '30 ngày';
         applySmartDateInput();
+        renderQuickContext();
+        loadQuickContext();
         renderParsePreview(null);
         renderPlatformChip(null);
         renderTagSuggestions([]);
@@ -566,6 +646,7 @@
       });
       els.smartDate.addEventListener('input', applySmartDateInput);
       els.type.addEventListener('change', () => updateLifetimeState(false));
+      els.authMethod.addEventListener('change', updateLinkedAccountOptions);
       els.lifetime.addEventListener('change', () => updateLifetimeState(true));
       els.purchase.addEventListener('change', () => {
         if (els.smartDate.value.trim()) applySmartDateInput();
@@ -599,6 +680,11 @@
           expiryDate: els.expiry.value,
           expiryQuick: els.smartDate.value,
           isLifetime: els.lifetime.checked,
+          platform: state.latestDetection?.platforms?.[0]?.id || (typeof detectPlatform === 'function' ? detectPlatform(els.name.value.trim()) : ''),
+          categoryIds: els.category.value ? [els.category.value] : [],
+          authMethod: els.authMethod.value || 'email',
+          linkedAccountId: els.authMethod.value === 'email' ? null : (els.linkedAccount.value || null),
+          username: els.linkedAccount.selectedOptions?.[0]?.dataset?.username || '',
           tagsText: els.tags.value,
           note: els.note.value.trim(),
         };

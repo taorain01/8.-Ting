@@ -818,6 +818,7 @@ async function signOut() {
             window.appState.decryptedSharedAccounts = {};
             window.appState.groupUnlocked = {};
             window.appState.currentGroupId = null;
+            window.appState.currentGroupTab = 'board';
             if (typeof clearRevealedSecrets === 'function') clearRevealedSecrets();
             updateEmailVerificationBanner(null);
             showAuthScreen();
@@ -851,6 +852,7 @@ async function signOut() {
         window.appState.decryptedSharedAccounts = {};
         window.appState.groupUnlocked = {};
         window.appState.currentGroupId = null;
+        window.appState.currentGroupTab = 'board';
         if (typeof clearRevealedSecrets === 'function') clearRevealedSecrets();
         updateEmailVerificationBanner(null);
         showAuthScreen();
@@ -953,6 +955,7 @@ function resetAppSessionState() {
     window.appState.decryptedSharedAccounts = {};
     window.appState.groupUnlocked = {};
     window.appState.currentGroupId = null;
+    window.appState.currentGroupTab = 'board';
     window.appState.navStack = [];
     window.appState.currentDetailId = null;
     window.appState.previousPage = null;
@@ -994,6 +997,7 @@ async function handleAuthenticatedUser(user) {
     window.appState.groupUnlocked = {};
     window.appState.decryptedSharedAccounts = {};
     window.appState.currentGroupId = null;
+    window.appState.currentGroupTab = 'board';
     if (typeof clearRevealedSecrets === 'function') clearRevealedSecrets();
     window.appState.user = {
         uid: user.uid,

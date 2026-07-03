@@ -28,6 +28,64 @@ function normalizeGroupEmailList(value) {
     return Array.isArray(value) ? value.map(normalizeGroupEmail).filter(Boolean) : [];
 }
 
+function normalizeGroupCategoryId(value) {
+    return String(value || '').trim().toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+}
+
+function normalizeGroupAccountCategories(value) {
+    if (!Array.isArray(value)) return [];
+    const seen = new Set();
+    return value
+        .map((category, index) => {
+            const rawName = String(category?.name || '').trim();
+            const id = normalizeGroupCategoryId(category?.id || rawName);
+            if (!id || !rawName || seen.has(id)) return null;
+            seen.add(id);
+            const order = Number(category?.order);
+            return {
+                id,
+                name: rawName,
+                note: String(category?.note || '').trim(),
+                icon: String(category?.icon || 'folder').trim() || 'folder',
+                color: String(category?.color || '#6C5CE7').trim() || '#6C5CE7',
+                order: Number.isFinite(order) ? order : index,
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+}
+
+function getGroupAccountManagerEmails(group = {}) {
+    return normalizeGroupEmailList(group.accountManagerEmails);
+}
+
+function getGroupAccountCategories(group = {}) {
+    return normalizeGroupAccountCategories(group.accountCategories);
+}
+
+function isGroupOwnerUser(group, user = getCurrentGroupUser()) {
+    return Boolean(group && user?.uid && group.ownerUid === user.uid);
+}
+
+function isGroupAccountManager(group, user = getCurrentGroupUser()) {
+    if (!group || !user?.email) return false;
+    return isGroupOwnerUser(group, user) || getGroupAccountManagerEmails(group).includes(user.email);
+}
+
+function canManageGroupAccounts(group) {
+    return isGroupAccountManager(group);
+}
+
+function canManageSharedAccount(group, account) {
+    const user = getCurrentGroupUser();
+    return isGroupAccountManager(group, user) || Boolean(account?.sharedByUid && account.sharedByUid === user.uid);
+}
+
 function isValidGroupEmail(email) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeGroupEmail(email));
 }
@@ -79,13 +137,29 @@ function getKnownGroupById(groupId) {
     return getGroupById(groupId) || getGroupInviteById(groupId);
 }
 
-function notifyGroupsChanged(groupId = null) {
+let _groupsRenderTimer = null;
+let _pendingGroupRenderId = null;
+
+function runGroupsChangedRender() {
+    _groupsRenderTimer = null;
+    const groupId = _pendingGroupRenderId;
+    _pendingGroupRenderId = null;
     if (typeof updateHeader === 'function') updateHeader();
     const page = window.appState?.currentPage || '';
     if (page === 'groups' && typeof renderGroupList === 'function') renderGroupList();
     if (page === 'group-detail' && (!groupId || window.appState.currentGroupId === groupId) && typeof renderGroupDetail === 'function') {
-        renderGroupDetail(window.appState.currentGroupId || groupId);
+        // Data-driven refresh: render without replaying entrance animations to avoid flicker.
+        renderGroupDetail(window.appState.currentGroupId || groupId, { quiet: true });
     }
+}
+
+// Firestore snapshots (with includeMetadataChanges) + the group doc "updatedAt" write
+// can fire this several times in a very short burst. Debounce so a burst collapses into
+// a single repaint instead of the interface jittering 2-3 times.
+function notifyGroupsChanged(groupId = null) {
+    if (groupId !== null) _pendingGroupRenderId = groupId;
+    if (_groupsRenderTimer) clearTimeout(_groupsRenderTimer);
+    _groupsRenderTimer = setTimeout(runGroupsChangedRender, 50);
 }
 
 function cleanGroupFirestoreData(data = {}) {
@@ -104,10 +178,14 @@ function getSharedAccountSafeData(account = {}) {
 function buildDemoGroupSnapshot(group, currentEmail = '') {
     const memberEmails = normalizeGroupEmailList(group.memberEmails);
     const pendingMemberEmails = normalizeGroupEmailList(group.pendingMemberEmails);
+    const accountManagerEmails = getGroupAccountManagerEmails(group);
+    const accountCategories = getGroupAccountCategories(group);
     return {
         ...group,
         memberEmails,
         pendingMemberEmails,
+        accountManagerEmails,
+        accountCategories,
         createdAt: group.createdAt || new Date(),
         updatedAt: group.updatedAt || new Date(),
         sharedAccountCount: (window.appState.sharedAccounts?.[group.id] || []).length,
@@ -135,6 +213,8 @@ async function createGroup(name, sharedPassword) {
             ownerEmail: user.email,
             memberEmails: [user.email],
             pendingMemberEmails: [],
+            accountManagerEmails: [],
+            accountCategories: [],
             sharedPwHash,
             sharedPwSalt,
             role: 'owner',
@@ -153,6 +233,8 @@ async function createGroup(name, sharedPassword) {
         ownerEmail: user.email,
         memberEmails: [user.email],
         pendingMemberEmails: [],
+        accountManagerEmails: [],
+        accountCategories: [],
         sharedPwHash,
         sharedPwSalt,
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -166,6 +248,8 @@ function mapGroupDoc(doc, currentEmail, currentUid, options = {}) {
     const data = doc.data() || {};
     const memberEmails = normalizeGroupEmailList(data.memberEmails);
     const pendingMemberEmails = normalizeGroupEmailList(data.pendingMemberEmails);
+    const accountManagerEmails = getGroupAccountManagerEmails(data);
+    const accountCategories = getGroupAccountCategories(data);
     const isOwner = data.ownerUid === currentUid;
     const isMember = memberEmails.includes(currentEmail);
     const isInvited = pendingMemberEmails.includes(currentEmail) && !isMember;
@@ -174,6 +258,8 @@ function mapGroupDoc(doc, currentEmail, currentUid, options = {}) {
         ...data,
         memberEmails,
         pendingMemberEmails,
+        accountManagerEmails,
+        accountCategories,
         role: isOwner ? 'owner' : isMember ? 'member' : 'invited',
         sharedAccountCount: window.appState?.sharedAccountCounts?.[doc.id] || 0,
         editRequestCount: window.appState?.sharedEditRequestCounts?.[doc.id] || 0,
@@ -394,6 +480,7 @@ async function removeGroupMember(groupId, email) {
 
     if (window.appState.isDemo) {
         group.memberEmails = (group.memberEmails || []).filter(item => item !== normalizedEmail);
+        group.accountManagerEmails = getGroupAccountManagerEmails(group).filter(item => item !== normalizedEmail);
         group.updatedAt = new Date();
         notifyGroupsChanged(groupId);
         return true;
@@ -401,6 +488,7 @@ async function removeGroupMember(groupId, email) {
 
     await db.collection('groups').doc(groupId).update({
         memberEmails: firebase.firestore.FieldValue.arrayRemove(normalizedEmail),
+        accountManagerEmails: firebase.firestore.FieldValue.arrayRemove(normalizedEmail),
         updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     });
     return true;
@@ -482,11 +570,133 @@ function clearGroupUnlocks() {
     window.appState.groupUnlocked = {};
 }
 
+function getSharedAccountSortValue(account, fallbackIndex = 0) {
+    const value = Number(account?.groupSortOrder);
+    if (Number.isFinite(value)) return value;
+    return (fallbackIndex + 1) * 1000;
+}
+
+function sortSharedAccountsForGroup(accounts = []) {
+    return [...accounts]
+        .map((account, index) => ({ account, sortValue: getSharedAccountSortValue(account, index) }))
+        .sort((a, b) => {
+        const sortDelta = a.sortValue - b.sortValue;
+        if (sortDelta !== 0) return sortDelta;
+        const at = new Date(a.account.updatedAt || a.account.createdAt || 0).getTime();
+        const bt = new Date(b.account.updatedAt || b.account.createdAt || 0).getTime();
+        return bt - at;
+    })
+        .map(item => item.account);
+}
+
+function getNextSharedAccountSortOrder(groupId) {
+    const accounts = window.appState?.sharedAccounts?.[groupId] || [];
+    const values = accounts
+        .map(account => Number(account.groupSortOrder))
+        .filter(Number.isFinite);
+    return values.length ? Math.max(...values) + 1000 : (accounts.length + 1) * 1000;
+}
+
+function cleanSharedAccountGroupMetaPatch(patch = {}) {
+    const cleaned = {};
+    if (Object.prototype.hasOwnProperty.call(patch, 'groupCategoryId')) {
+        const categoryId = normalizeGroupCategoryId(patch.groupCategoryId);
+        cleaned.groupCategoryId = categoryId || null;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'groupSortOrder')) {
+        const order = Number(patch.groupSortOrder);
+        cleaned.groupSortOrder = Number.isFinite(order) ? order : Date.now();
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'groupNote')) {
+        cleaned.groupNote = String(patch.groupNote || '').trim();
+    }
+    return cleaned;
+}
+
+async function updateGroupAccountCategories(groupId, categories = []) {
+    ensureGroupState();
+    const group = getGroupById(groupId);
+    if (!group) throw new Error('Không tìm thấy nhóm');
+    if (group.role !== 'owner') throw new Error('Chỉ chủ nhóm được thiết kế danh mục');
+    const accountCategories = normalizeGroupAccountCategories(categories);
+
+    if (window.appState.isDemo) {
+        group.accountCategories = accountCategories;
+        group.updatedAt = new Date();
+        notifyGroupsChanged(groupId);
+        return true;
+    }
+
+    await db.collection('groups').doc(groupId).update({
+        accountCategories,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    return true;
+}
+
+async function setGroupAccountManager(groupId, email, enabled) {
+    ensureGroupState();
+    const group = getGroupById(groupId);
+    const normalizedEmail = normalizeGroupEmail(email);
+    if (!group) throw new Error('Không tìm thấy nhóm');
+    if (group.role !== 'owner') throw new Error('Chỉ chủ nhóm được cấp quyền quản lý');
+    if (!normalizedEmail || !(group.memberEmails || []).includes(normalizedEmail)) throw new Error('Email không thuộc nhóm');
+    if (normalizedEmail === normalizeGroupEmail(group.ownerEmail)) throw new Error('Chủ nhóm đã có toàn quyền');
+
+    if (window.appState.isDemo) {
+        const current = new Set(getGroupAccountManagerEmails(group));
+        if (enabled) current.add(normalizedEmail);
+        else current.delete(normalizedEmail);
+        group.accountManagerEmails = [...current];
+        group.updatedAt = new Date();
+        notifyGroupsChanged(groupId);
+        return true;
+    }
+
+    await db.collection('groups').doc(groupId).update({
+        accountManagerEmails: enabled
+            ? firebase.firestore.FieldValue.arrayUnion(normalizedEmail)
+            : firebase.firestore.FieldValue.arrayRemove(normalizedEmail),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    return true;
+}
+
+async function updateSharedAccountGroupMeta(groupId, accountId, patch = {}) {
+    ensureGroupState();
+    const group = getGroupById(groupId);
+    const account = getSharedAccountByIdFromState(groupId, accountId);
+    if (!group || !account) throw new Error('Không tìm thấy tài khoản chia sẻ');
+    if (!canManageSharedAccount(group, account)) throw new Error('Không có quyền quản lý tài khoản này');
+    const update = cleanSharedAccountGroupMetaPatch(patch);
+    if (!Object.keys(update).length) return true;
+
+    if (window.appState.isDemo) {
+        Object.assign(account, update, { updatedAt: new Date() });
+        window.appState.sharedAccounts[groupId] = sortSharedAccountsForGroup(window.appState.sharedAccounts[groupId] || []);
+        notifyGroupsChanged(groupId);
+        return true;
+    }
+
+    await db.collection('groups').doc(groupId).collection('sharedAccounts').doc(accountId).update({
+        ...update,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    await db.collection('groups').doc(groupId).update({
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    }).catch(() => {});
+    return true;
+}
+
 function mapSharedAccountDoc(doc) {
     const data = doc.data() || {};
+    const sortOrder = Number(data.groupSortOrder);
     return {
         id: doc.id,
         ...data,
+        groupCategoryId: normalizeGroupCategoryId(data.groupCategoryId) || null,
+        groupSortOrder: Number.isFinite(sortOrder) ? sortOrder : null,
+        groupNote: String(data.groupNote || ''),
         status: typeof getStatusFromExpiry === 'function'
             ? getStatusFromExpiry(data.expiryDate, data.expiryType)
             : data.status,
@@ -515,7 +725,7 @@ function loadSharedAccountsRealtime(groupId) {
     if (typeof sharedAccountsUnsubscribes.get(groupId) === 'function') return sharedAccountsUnsubscribes.get(groupId);
 
     if (window.appState.isDemo) {
-        window.appState.sharedAccounts[groupId] = window.appState.sharedAccounts[groupId] || [];
+        window.appState.sharedAccounts[groupId] = sortSharedAccountsForGroup(window.appState.sharedAccounts[groupId] || []);
         window.appState.sharedAccountCounts[groupId] = window.appState.sharedAccounts[groupId].length;
         notifyGroupsChanged(groupId);
         return null;
@@ -527,10 +737,11 @@ function loadSharedAccountsRealtime(groupId) {
             ensureGroupState();
             const accounts = [];
             snapshot.forEach(doc => accounts.push(mapSharedAccountDoc(doc)));
-            window.appState.sharedAccounts[groupId] = accounts;
-            window.appState.sharedAccountCounts[groupId] = accounts.length;
+            const sortedAccounts = sortSharedAccountsForGroup(accounts);
+            window.appState.sharedAccounts[groupId] = sortedAccounts;
+            window.appState.sharedAccountCounts[groupId] = sortedAccounts.length;
             const group = getGroupById(groupId);
-            if (group) group.sharedAccountCount = accounts.length;
+            if (group) group.sharedAccountCount = sortedAccounts.length;
             notifyGroupsChanged(groupId);
         }, (error) => {
             console.error('Load shared accounts error:', error);
@@ -638,8 +849,12 @@ async function shareAccountToGroup(groupId, plainAccount, sharedPassword) {
     }
     const user = requireGroupUser();
     const writeData = await buildSharedAccountWriteData(plainAccount, sharedPassword);
+    const sortOrder = Number(writeData.groupSortOrder);
     const payload = cleanGroupFirestoreData({
         ...writeData,
+        groupCategoryId: normalizeGroupCategoryId(writeData.groupCategoryId) || null,
+        groupSortOrder: Number.isFinite(sortOrder) ? sortOrder : getNextSharedAccountSortOrder(groupId),
+        groupNote: String(writeData.groupNote || '').trim(),
         sharedByUid: user.uid,
         sharedByEmail: user.email,
         sourceAccountId: plainAccount?.id || null,
@@ -650,7 +865,7 @@ async function shareAccountToGroup(groupId, plainAccount, sharedPassword) {
     if (window.appState.isDemo) {
         const id = `demo_shared_${Date.now()}`;
         const account = { id, ...payload, createdAt: new Date(), updatedAt: new Date() };
-        window.appState.sharedAccounts[groupId] = [account, ...(window.appState.sharedAccounts[groupId] || [])];
+        window.appState.sharedAccounts[groupId] = sortSharedAccountsForGroup([account, ...(window.appState.sharedAccounts[groupId] || [])]);
         window.appState.sharedAccountCounts[groupId] = window.appState.sharedAccounts[groupId].length;
         const demoGroup = getGroupById(groupId);
         if (demoGroup) demoGroup.sharedAccountCount = window.appState.sharedAccountCounts[groupId];
@@ -834,6 +1049,10 @@ async function decryptSharedAccount(sharedAccount, sharedPassword) {
 async function removeSharedAccount(groupId, accountId) {
     ensureGroupState();
     if (!groupId || !accountId) return false;
+    const group = getGroupById(groupId);
+    const account = getSharedAccountByIdFromState(groupId, accountId);
+    if (!group || !account) throw new Error('Không tìm thấy tài khoản chia sẻ');
+    if (!canManageSharedAccount(group, account)) throw new Error('Không có quyền gỡ tài khoản này');
 
     if (window.appState.isDemo) {
         window.appState.sharedAccounts[groupId] = (window.appState.sharedAccounts[groupId] || []).filter(account => account.id !== accountId);
@@ -877,6 +1096,14 @@ window.decryptSharedAccount = decryptSharedAccount;
 window.removeSharedAccount = removeSharedAccount;
 window.getGroupById = getGroupById;
 window.getGroupInviteById = getGroupInviteById;
+window.getGroupAccountCategories = getGroupAccountCategories;
+window.getGroupAccountManagerEmails = getGroupAccountManagerEmails;
+window.canManageGroupAccounts = canManageGroupAccounts;
+window.canManageSharedAccount = canManageSharedAccount;
+window.updateGroupAccountCategories = updateGroupAccountCategories;
+window.setGroupAccountManager = setGroupAccountManager;
+window.updateSharedAccountGroupMeta = updateSharedAccountGroupMeta;
+window.sortSharedAccountsForGroup = sortSharedAccountsForGroup;
 window.getSharedEditRequestById = getSharedEditRequestById;
 window.getSharedEditRequestsForAccount = getSharedEditRequestsForAccount;
 window.hasSharedSourceAccount = hasSharedSourceAccount;

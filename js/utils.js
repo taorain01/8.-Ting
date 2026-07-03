@@ -820,9 +820,16 @@ function guideAddFormFromPlatform(platformId) {
         return;
     }
     guide.pasteGuided = true;
-    if (!guideAddFormTo('paste-input')) {
-        guideAddFormTo('add-smart-date');
-    }
+    // Sau khi chọn platform, showPlatformPlanPanel chạy animation và ẩn lưới
+    // platform (grid.hidden = true) ở mốc 260ms, khiến layout co lại và đẩy
+    // nội dung trồi lên. Nếu cuộn tới ô dán ngay bây giờ, vị trí cuộn sẽ bị
+    // lệch xuống vùng Ghi chú sau khi lưới bị ẩn. Vì vậy hoãn cuộn tới sau khi
+    // layout ổn định (> 260ms) để màn hình dừng đúng ở ô dán nhanh.
+    window.setTimeout(() => {
+        if (!guideAddFormTo('paste-input')) {
+            guideAddFormTo('add-smart-date');
+        }
+    }, 300);
 }
 
 function handleQuickPasteGuidance() {

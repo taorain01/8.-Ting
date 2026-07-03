@@ -2743,3 +2743,283 @@
     overflow:hidden;
     text-overflow:ellipsis;
 }
+
+/* ===== Mobile Group Board Parity ===== */
+.group-list {
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+}
+.group-list-card {
+    min-height:82px;
+    align-items:center;
+    gap:10px;
+}
+.group-card-platforms {
+    width:100%;
+    display:flex;
+    justify-content:flex-start;
+}
+.group-platform-stack {
+    display:flex;
+    align-items:center;
+    gap:7px;
+    overflow:hidden;
+}
+.group-platform-icon {
+    position:relative;
+    width:32px;
+    height:32px;
+    flex:0 0 auto;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:var(--radius-md);
+    border:1px solid var(--border-light);
+    background:var(--bg-secondary);
+}
+.group-platform-icon .platform-logo-mask {
+    width:17px;
+    height:17px;
+}
+.group-platform-icon .platform-logo-text,
+.group-platform-icon .platform-logo-fallback {
+    font-size:8px;
+    font-weight:900;
+}
+.group-platform-icon > span:last-child {
+    position:absolute;
+    right:-5px;
+    bottom:-5px;
+    min-width:16px;
+    height:16px;
+    padding:0 4px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:var(--radius-full);
+    background:var(--accent);
+    color:white;
+    border:2px solid var(--bg-card);
+    font-size:9px;
+    font-weight:900;
+    line-height:1;
+}
+.group-platform-more,
+.group-platform-empty {
+    min-height:28px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:5px 9px;
+    border-radius:var(--radius-full);
+    background:var(--bg-secondary);
+    color:var(--text-secondary);
+    font-size:12px;
+    font-weight:800;
+}
+.group-tabs {
+    display:flex;
+    gap:7px;
+    margin:0 0 12px;
+    padding:5px;
+    border:1px solid var(--border-light);
+    border-radius:var(--radius-md);
+    background:var(--bg-card);
+    overflow-x:auto;
+    -webkit-overflow-scrolling:touch;
+}
+.group-tab {
+    flex:1 0 auto;
+    min-height:34px;
+    max-width:190px;
+    padding:8px 12px;
+    border-radius:var(--radius-sm);
+    color:var(--text-secondary);
+    font-size:12px;
+    font-weight:800;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+.group-tab.active {
+    color:var(--accent);
+    background:var(--accent-bg);
+}
+.group-board,
+.group-tab-panel {
+    margin-top:0;
+}
+.group-board-head {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    margin-bottom:12px;
+}
+.group-category-list {
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+}
+.group-category-section {
+    padding:12px;
+    border:1px solid var(--border-light);
+    border-radius:var(--radius-md);
+    background:var(--bg-card);
+    box-shadow:var(--shadow-3d);
+}
+.group-category-head {
+    display:flex;
+    align-items:center;
+    gap:9px;
+    margin-bottom:10px;
+}
+.group-category-icon {
+    width:36px;
+    height:36px;
+    flex:0 0 auto;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:var(--radius-md);
+    color:var(--category-color);
+    background:color-mix(in srgb, var(--category-color) 12%, transparent);
+    font-size:12px;
+    font-weight:900;
+}
+.group-category-icon svg {
+    width:18px;
+    height:18px;
+}
+.group-category-title-wrap {
+    min-width:0;
+    flex:1;
+}
+.group-category-title {
+    color:var(--text-primary);
+    font-size:14px;
+    font-weight:900;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.group-category-note {
+    margin-top:2px;
+    color:var(--text-secondary);
+    font-size:12px;
+    line-height:1.35;
+    overflow-wrap:anywhere;
+}
+.group-category-actions,
+.group-board-account-actions {
+    display:flex;
+    align-items:center;
+    gap:6px;
+    flex-shrink:0;
+}
+.group-board-account-list {
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+}
+.group-board-account {
+    display:grid;
+    grid-template-columns:auto minmax(0, 1fr);
+    gap:8px;
+    padding:9px;
+    border:1px solid var(--border-light);
+    border-radius:var(--radius-md);
+    background:var(--bg-secondary);
+}
+.group-board-account .account-logo {
+    width:36px;
+    height:36px;
+    font-size:17px;
+}
+.group-board-account-main {
+    min-width:0;
+}
+.group-board-account .group-account-category-select,
+.group-board-account-actions {
+    grid-column:1 / -1;
+}
+.group-board-empty {
+    padding:14px;
+    border:1px dashed var(--border);
+    border-radius:var(--radius-md);
+    color:var(--text-tertiary);
+    font-size:12px;
+    font-weight:800;
+    text-align:center;
+}
+.group-account-category-select {
+    width:100%;
+    min-height:36px;
+    padding:0 10px;
+    border:1px solid var(--border);
+    border-radius:var(--radius-sm);
+    background:var(--bg-card);
+    color:var(--text-primary);
+    font-size:12px;
+    font-weight:700;
+}
+.group-account-card {
+    cursor:default;
+}
+.group-account-card-tools {
+    display:flex;
+    justify-content:stretch;
+    margin-top:10px;
+}
+.group-account-card-tools .group-account-category-select {
+    width:100%;
+}
+.group-manager-toggle {
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    min-height:28px;
+    padding:4px 9px;
+    border:1px solid var(--border);
+    border-radius:var(--radius-full);
+    background:var(--bg-card);
+    color:var(--text-secondary);
+    font-size:12px;
+    font-weight:800;
+    white-space:nowrap;
+}
+.group-manager-toggle input {
+    width:14px;
+    height:14px;
+    accent-color:var(--accent);
+}
+.group-tab-panel {
+    padding:13px;
+}
+.group-detail-grid {
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+}
+.group-panel-head {
+    margin-bottom:12px;
+}
+@media (min-width: 560px) {
+    .group-list-card {
+        display:grid;
+        grid-template-columns:auto minmax(0, 1fr) minmax(180px, auto) auto;
+    }
+    .group-card-platforms {
+        width:auto;
+        justify-content:flex-end;
+    }
+    .group-board-account {
+        grid-template-columns:auto minmax(0, 1fr) minmax(140px, 190px) auto;
+        align-items:center;
+    }
+    .group-board-account .group-account-category-select,
+    .group-board-account-actions {
+        grid-column:auto;
+    }
+}
