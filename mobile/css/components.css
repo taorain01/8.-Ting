@@ -654,13 +654,21 @@
 .account-group-info { flex:1; min-width:0; }
 .account-group-title { font-size:15px; font-weight:700; color:var(--text-primary); }
 .account-group-count {
-    display:inline-flex; align-items:center; margin-left:6px; padding:2px 7px;
-    border-radius:var(--radius-full); background:var(--accent-bg); color:var(--accent);
-    font-size:11px; font-weight:700;
+    display:inline-flex; align-items:center; margin-left:6px; padding:3px 9px;
+    border-radius:var(--radius-full); background:var(--accent); color:#fff;
+    font-size:11px; font-weight:800;
 }
 .account-group-meta { margin-top:3px; font-size:12px; color:var(--text-secondary); }
 .account-group-chevron { color:var(--text-tertiary); transition:transform var(--duration-normal); }
 .account-group-chevron.open { transform:rotate(180deg); }
+.account-group-toggle {
+    flex-shrink:0; display:inline-flex; align-items:center; gap:4px;
+    padding:5px 9px; border-radius:var(--radius-full);
+    background:var(--accent-bg); color:var(--accent);
+    font-size:11px; font-weight:800; white-space:nowrap;
+}
+.account-group-caret { transition:transform var(--duration-normal); }
+.account-group-toggle.open .account-group-caret { transform:rotate(180deg); }
 .account-group-children { display:flex; flex-direction:column; gap:10px; padding:0 12px 12px; }
 
 /* === FILTER TABS === */
@@ -2769,14 +2777,43 @@
     gap:12px;
 }
 .group-list-card {
-    min-height:82px;
+    display:grid;
+    grid-template-columns:auto minmax(0,1fr) auto;
+    grid-template-areas:
+        "icon main badge"
+        "icon platforms platforms";
     align-items:center;
-    gap:10px;
+    column-gap:10px;
+    row-gap:9px;
+    min-height:82px;
+}
+.group-list-card .group-card-icon { grid-area:icon; align-self:start; }
+.group-list-card .group-card-main { grid-area:main; }
+.group-list-card .group-lock-badge { grid-area:badge; align-self:start; }
+.group-list-card .group-card-platforms { grid-area:platforms; }
+.group-card-meta {
+    margin-top:3px;
+    overflow-wrap:anywhere;
 }
 .group-card-platforms {
     width:100%;
     display:flex;
     justify-content:flex-start;
+}
+.group-list-card .group-card-platforms {
+    width:auto;
+    flex-wrap:wrap;
+    gap:6px;
+}
+/* Card lời mời giữ bố cục hàng ngang riêng, nút xuống dòng mới. */
+.group-invite-card.group-list-card {
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+}
+.group-invite-card .group-invite-actions {
+    width:100%;
+    margin-top:2px;
 }
 .group-platform-stack {
     display:flex;
@@ -2892,6 +2929,7 @@
     align-items:center;
     gap:9px;
     margin-bottom:10px;
+    flex-wrap:wrap;
 }
 .group-category-icon {
     width:36px;
@@ -2911,8 +2949,8 @@
     height:18px;
 }
 .group-category-title-wrap {
-    min-width:0;
-    flex:1;
+    min-width:110px;
+    flex:1 1 130px;
 }
 .group-category-title {
     color:var(--text-primary);
@@ -2928,6 +2966,9 @@
     font-size:12px;
     line-height:1.35;
     overflow-wrap:anywhere;
+}
+.group-category-actions {
+    margin-left:auto;
 }
 .group-category-actions,
 .group-board-account-actions {
@@ -3040,4 +3081,72 @@
     .group-board-account-actions {
         grid-column:auto;
     }
+}
+
+/* ===== Group settings tab + password management ===== */
+.form-modal-note {
+    margin-top:12px;
+    padding:10px 12px;
+    border-radius:var(--radius-md);
+    background:var(--bg-secondary);
+    color:var(--text-secondary);
+    font-size:12px;
+    line-height:1.5;
+}
+.group-detail-settings-btn {
+    flex-shrink:0;
+    width:38px;
+    height:38px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:var(--radius-md);
+    color:var(--text-secondary);
+    background:var(--bg-secondary);
+    transition:all var(--duration-fast);
+}
+.group-detail-settings-btn:hover,
+.group-detail-settings-btn:active {
+    color:var(--accent);
+    background:var(--accent-bg);
+}
+.group-settings-panel {
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+}
+.group-setting-item {
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:10px;
+}
+.group-setting-info { min-width:0; flex:1; }
+.group-setting-title {
+    font-size:14px;
+    font-weight:800;
+    color:var(--text-primary);
+}
+.group-setting-desc {
+    margin-top:3px;
+    font-size:12px;
+    line-height:1.5;
+    color:var(--text-secondary);
+}
+.group-setting-actions {
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+}
+.group-setting-actions .btn { flex:1 1 auto; }
+.group-setting-hint {
+    font-size:12px;
+    color:var(--text-tertiary);
+    font-weight:600;
+}
+.group-setting-divider {
+    height:1px;
+    background:var(--border-light);
+    margin:4px 0;
 }

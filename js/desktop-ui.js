@@ -1876,7 +1876,7 @@ function renderGroupInviteCard(group) {
             <div class="group-card-meta">Mời bởi ${escapeHtml(group.ownerEmail || '')} · ${(group.memberEmails || []).length} thành viên</div>
         </div>
         <div class="group-invite-actions">
-            <button type="button" class="btn btn-sm btn-primary" onclick="openAcceptGroupInviteModal('${escapeJsAttr(group.id)}')">Nhập mật khẩu</button>
+            <button type="button" class="btn btn-sm btn-primary" onclick="openAcceptGroupInviteModal('${escapeJsAttr(group.id)}')">${groupHasSharedPassword?.(group) ? 'Nhập mật khẩu' : 'Tham gia'}</button>
             <button type="button" class="btn btn-sm btn-outline" onclick="handleCancelGroupInvite('${escapeJsAttr(group.id)}')">Bỏ qua</button>
         </div>
     </div>`;
@@ -1927,6 +1927,7 @@ function renderGroupTabs(group) {
         { id: 'board', label: group.name || 'Nhóm' },
         { id: 'accounts', label: 'Tài khoản' },
         { id: 'members', label: 'Thành viên' },
+        { id: 'settings', label: 'Cài đặt' },
     ];
     return `<div class="group-tabs" role="tablist">
         ${tabs.map(tab => `<button type="button" class="group-tab ${active === tab.id ? 'active' : ''}" onclick="setGroupDetailTab('${escapeJsAttr(tab.id)}')" title="${escapeHtml(tab.label)}">${escapeHtml(tab.label)}</button>`).join('')}
@@ -2137,6 +2138,45 @@ function renderGroupMembers(group) {
     </div>`;
 }
 
+function renderGroupSettings(group) {
+    const isOwner = group.role === 'owner';
+    const hasPw = Boolean(groupHasSharedPassword?.(group));
+    const unlocked = Boolean(isGroupUnlocked?.(group.id));
+    const lockRow = `<div class="group-setting-item">
+        <div class="group-setting-info">
+            <div class="group-setting-title">Mật khẩu chung</div>
+            <div class="group-setting-desc">${hasPw
+                ? 'Nhóm đang yêu cầu mật khẩu chung để xem tài khoản chia sẻ.'
+                : 'Nhóm chưa đặt mật khẩu. Thành viên xem tài khoản chia sẻ mà không cần nhập gì.'}</div>
+        </div>
+        <span class="group-lock-badge ${hasPw ? '' : 'unlocked'}">${hasPw ? 'Có mật khẩu' : 'Không mật khẩu'}</span>
+    </div>`;
+    const pwActions = isOwner
+        ? `<div class="group-setting-actions">${(hasPw && !unlocked)
+            ? `<button class="btn btn-sm btn-outline" onclick="openUnlockGroupModal('${escapeJsAttr(group.id)}')">Mở khoá để chỉnh</button>`
+            : `<button class="btn btn-sm btn-primary" onclick="openGroupPasswordModal('${escapeJsAttr(group.id)}')">${hasPw ? 'Đổi mật khẩu' : 'Đặt mật khẩu'}</button>${hasPw ? `<button class="btn btn-sm btn-danger-outline" onclick="handleRemoveGroupPassword('${escapeJsAttr(group.id)}')">Gỡ mật khẩu</button>` : ''}`}</div>`
+        : `<div class="group-setting-hint">Chỉ chủ nhóm mới chỉnh được mật khẩu chung.</div>`;
+    const manageBlock = isOwner
+        ? `<div class="group-setting-divider"></div>
+        <div class="group-setting-item">
+            <div class="group-setting-info">
+                <div class="group-setting-title">Quản lý nhóm</div>
+                <div class="group-setting-desc">Đổi tên hiển thị của nhóm hoặc xoá nhóm vĩnh viễn.</div>
+            </div>
+        </div>
+        <div class="group-setting-actions">
+            <button class="btn btn-sm btn-outline" onclick="handleRenameGroup('${escapeJsAttr(group.id)}')">Đổi tên nhóm</button>
+            <button class="btn btn-sm btn-danger-outline" onclick="handleDeleteGroup('${escapeJsAttr(group.id)}')">Xoá nhóm</button>
+        </div>`
+        : '';
+    return `<div class="group-panel group-settings-panel group-tab-panel anim-fade-in-up">
+        <div class="group-panel-head"><div class="section-title">Cài đặt nhóm</div></div>
+        ${lockRow}
+        ${pwActions}
+        ${manageBlock}
+    </div>`;
+}
+
 // Signature of the last painted group-detail body. Lets quiet (data-driven)
 // refreshes bail out when nothing visible changed, avoiding the 2-3 blink jitter.
 let _lastGroupDetailSignature = null;
@@ -2155,7 +2195,9 @@ function renderGroupDetail(groupId, options = {}) {
         ? renderGroupMembers(group)
         : activeTab === 'accounts'
             ? renderGroupAccountsTab(group)
-            : renderGroupBoard(group);
+            : activeTab === 'settings'
+                ? renderGroupSettings(group)
+                : renderGroupBoard(group);
     const pageContent = document.getElementById('page-content');
     // Body without the entrance-animation markers, used both as the render source
     // and as a change signature. `@@HEAD@@` is a placeholder swapped for the head
@@ -2172,7 +2214,7 @@ function renderGroupDetail(groupId, options = {}) {
                 <div class="group-card-meta">${escapeHtml(getGroupRoleLabel(group))} · ${(group.memberEmails || []).length} thành viên · ${accountCount} tài khoản</div>
             </div>
             <div class="group-detail-actions">
-                ${isOwner ? `<button class="btn btn-sm btn-outline" onclick="handleRenameGroup('${escapeJsAttr(group.id)}')">Đổi tên</button><button class="btn btn-sm btn-danger-outline" onclick="handleDeleteGroup('${escapeJsAttr(group.id)}')">Xoá</button>` : ''}
+                <button class="icon-btn group-detail-settings-btn" title="Cài đặt nhóm" onclick="setGroupDetailTab('settings')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" width="18" height="18"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
             </div>
         </div>
         ${renderGroupTabs(group)}
@@ -2300,7 +2342,10 @@ function renderAccountGroup(group, isPersonal=false) {
                 ${dateChips}
             </div>
             <span class="account-badge ${getStatusBadgeClass(status)}">${getStatusText(status)}</span>
-            <span class="account-group-chevron ${expanded ? 'open' : ''}">⌄</span>
+            <span class="account-group-toggle ${expanded ? 'open' : ''}">
+                <span class="account-group-toggle-text">${expanded ? 'Thu gọn' : `Xem ${accounts.length} TK`}</span>
+                <svg class="account-group-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" width="15" height="15"><polyline points="6 9 12 15 18 9"/></svg>
+            </span>
         </button>
         ${expanded ? `<div class="account-group-children">${accounts.map(a => renderDesktopCard(a, isPersonal, true)).join('')}</div>` : ''}
     </div>`;
@@ -2648,7 +2693,7 @@ function renderMinSupportedWarning(platform, status) {
 // hiệu hoá "Kiểm tra" theo Platform_Detector, định tuyến hành động theo nền tảng, và
 // khoá hành động khi đang tải (Requirements 1.1-1.6, 3.4/3.5/3.7, 4.4/4.6/4.8, 10.1-10.4).
 function renderUpdateSection() {
-    const version = escapeHtml(window.appState.appVersion || '1.3.8');
+    const version = escapeHtml(window.appState.appVersion || '1.3.9');
     const platform = getUpdatePlatform();
     const cap = getUpdateCapability(platform);
     const status = window.appState.updateStatus;

@@ -28,7 +28,7 @@ window.appState = {
     isOnline: typeof navigator === 'undefined' ? true : navigator.onLine !== false,
     firestoreFromCache: false,
     pendingSyncCount: 0,
-    appVersion: '1.3.8',
+    appVersion: '1.3.9',
     updateStatus: null,
     updateLog: [],
     expandedGroups: {},
@@ -1898,10 +1898,11 @@ function openCreateGroupModal() {
     openModal('Tạo nhóm', `
         <div class="form-section-title">Tên nhóm</div>
         <input type="text" id="group-name" class="input" placeholder="VD: Team AI" style="padding-left:16px">
-        <div class="form-section-title">Mật khẩu chung</div>
-        <input type="password" id="group-password" class="input" placeholder="Tối thiểu 6 ký tự" style="padding-left:16px">
+        <div class="form-section-title">Mật khẩu chung (tuỳ chọn)</div>
+        <input type="password" id="group-password" class="input" placeholder="Để trống nếu không cần mật khẩu" style="padding-left:16px">
         <div class="form-section-title">Nhập lại mật khẩu chung</div>
-        <input type="password" id="group-password-confirm" class="input" placeholder="Nhập lại mật khẩu" style="padding-left:16px" onkeydown="if(event.key==='Enter'){event.preventDefault();submitCreateGroup()}">
+        <input type="password" id="group-password-confirm" class="input" placeholder="Nhập lại mật khẩu (nếu có)" style="padding-left:16px" onkeydown="if(event.key==='Enter'){event.preventDefault();submitCreateGroup()}">
+        <div class="form-modal-note">Không đặt mật khẩu: thành viên xem tài khoản chia sẻ ngay. Bạn có thể đặt/đổi trong tab <b>Cài đặt</b> của nhóm bất cứ lúc nào.</div>
         <button class="btn btn-primary" style="margin-top:18px" onclick="submitCreateGroup()">Tạo nhóm</button>
     `);
 }
@@ -1942,7 +1943,7 @@ function openGroupDetail(groupId, isBack = false) {
     loadSharedAccountsRealtime?.(groupId);
     loadSharedEditRequestsRealtime?.(groupId);
     renderGroupDetail(groupId);
-    if (!isGroupUnlocked?.(groupId)) {
+    if (groupHasSharedPassword?.(group) && !isGroupUnlocked?.(groupId)) {
         setTimeout(() => openUnlockGroupModal(groupId), 120);
     }
     if (!isBack) resetNavScroll();
@@ -2006,6 +2007,10 @@ async function handleAddGroupMember(groupId) {
 function openAcceptGroupInviteModal(groupId) {
     const invite = getGroupInviteById?.(groupId);
     if (!invite) return;
+    if (!groupHasSharedPassword?.(invite)) {
+        submitAcceptGroupInvite(groupId);
+        return;
+    }
     openModal('Chấp nhận lời mời', `
         <div class="group-unlock-title">${escapeHtml(invite.name || '')}</div>
         <div class="form-section-title">Mật khẩu chung</div>
@@ -2072,9 +2077,52 @@ async function handleDeleteGroup(groupId) {
 }
 
 function setGroupDetailTab(tab = 'board') {
-    const allowed = new Set(['board', 'accounts', 'members']);
+    const allowed = new Set(['board', 'accounts', 'members', 'settings']);
     window.appState.currentGroupTab = allowed.has(tab) ? tab : 'board';
     renderGroupDetail(window.appState.currentGroupId);
+}
+
+function openGroupPasswordModal(groupId) {
+    const group = getGroupById?.(groupId);
+    if (!group || group.role !== 'owner') return;
+    const has = groupHasSharedPassword?.(group);
+    openModal(has ? 'Đổi mật khẩu chung' : 'Đặt mật khẩu chung', `
+        <div class="form-section-title">Mật khẩu chung mới</div>
+        <input type="password" id="group-new-password" class="input" placeholder="Tối thiểu 6 ký tự" style="padding-left:16px">
+        <div class="form-section-title">Nhập lại mật khẩu</div>
+        <input type="password" id="group-new-password-confirm" class="input" placeholder="Nhập lại mật khẩu" style="padding-left:16px" onkeydown="if(event.key==='Enter'){event.preventDefault();submitGroupPassword('${escapeJsAttr(groupId)}')}">
+        <div class="form-modal-note">Sau khi ${has ? 'đổi' : 'đặt'} mật khẩu, thành viên sẽ phải nhập mật khẩu này để xem tài khoản chia sẻ.</div>
+        <button class="btn btn-primary" style="margin-top:18px" onclick="submitGroupPassword('${escapeJsAttr(groupId)}')">${has ? 'Đổi mật khẩu' : 'Đặt mật khẩu'}</button>
+    `);
+    setTimeout(() => document.getElementById('group-new-password')?.focus(), 50);
+}
+
+async function submitGroupPassword(groupId) {
+    const pw = document.getElementById('group-new-password')?.value || '';
+    const confirmPw = document.getElementById('group-new-password-confirm')?.value || '';
+    if (!pw) { showToast('Nhập mật khẩu mới', 'error'); return; }
+    if (pw !== confirmPw) { showToast('Mật khẩu nhập lại chưa khớp', 'error'); return; }
+    try {
+        await changeGroupSharedPassword(groupId, pw);
+        closeModal();
+        showToast('Đã cập nhật mật khẩu chung', 'success');
+        renderGroupDetail(groupId);
+    } catch (error) {
+        showToast(error.message || 'Không đổi được mật khẩu', 'error');
+    }
+}
+
+async function handleRemoveGroupPassword(groupId) {
+    const group = getGroupById?.(groupId);
+    if (!group) return;
+    if (!confirm('Gỡ mật khẩu chung? Thành viên sẽ xem tài khoản chia sẻ mà không cần nhập mật khẩu.')) return;
+    try {
+        await changeGroupSharedPassword(groupId, '');
+        showToast('Đã gỡ mật khẩu chung', 'success');
+        renderGroupDetail(groupId);
+    } catch (error) {
+        showToast(error.message || 'Không gỡ được mật khẩu', 'error');
+    }
 }
 
 function normalizeGroupCategoryIdForUi(value) {

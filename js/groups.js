@@ -199,10 +199,17 @@ async function createGroup(name, sharedPassword) {
     ensureGroupState();
     const groupName = String(name || '').trim();
     if (!groupName) throw new Error('Nhập tên nhóm');
-    if (String(sharedPassword || '').length < 6) throw new Error('Mật khẩu chung cần tối thiểu 6 ký tự');
+    // Mật khẩu chung là TUỲ CHỌN: chỉ đặt khi chủ nhóm nhập. Nếu để trống thì
+    // nhóm không yêu cầu mật khẩu (thành viên vào xem ngay, không cần mở khoá).
+    const pw = String(sharedPassword || '');
+    let sharedPwSalt = null;
+    let sharedPwHash = null;
+    if (pw) {
+        if (pw.length < 6) throw new Error('Mật khẩu chung cần tối thiểu 6 ký tự');
+        sharedPwSalt = generateSalt();
+        sharedPwHash = await hashSharedPassword(pw, sharedPwSalt);
+    }
     const user = requireGroupUser();
-    const sharedPwSalt = generateSalt();
-    const sharedPwHash = await hashSharedPassword(sharedPassword, sharedPwSalt);
 
     if (window.appState.isDemo) {
         const id = `demo_group_${Date.now()}`;
@@ -222,7 +229,7 @@ async function createGroup(name, sharedPassword) {
         window.appState.groups.unshift(group);
         window.appState.sharedAccounts[id] = [];
         window.appState.sharedEditRequests[id] = [];
-        setGroupUnlocked(id, sharedPassword);
+        if (pw) setGroupUnlocked(id, pw);
         notifyGroupsChanged(id);
         return id;
     }
@@ -240,7 +247,7 @@ async function createGroup(name, sharedPassword) {
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
         updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     });
-    setGroupUnlocked(docRef.id, sharedPassword);
+    if (pw) setGroupUnlocked(docRef.id, pw);
     return docRef.id;
 }
 
@@ -433,10 +440,12 @@ async function acceptGroupInvite(groupId, sharedPassword) {
     if (!(group.pendingMemberEmails || []).includes(user.email) && !window.appState.isDemo) {
         throw new Error('Email của bạn không có trong lời mời nhóm');
     }
-    if (!sharedPassword) throw new Error('Nhập mật khẩu chung của nhóm');
-
-    const ok = await verifyGroupPassword(group, sharedPassword);
-    if (!ok) throw new Error('Mật khẩu chung không đúng');
+    // Chỉ yêu cầu mật khẩu khi nhóm thực sự có đặt mật khẩu chung.
+    if (groupHasSharedPassword(group)) {
+        if (!sharedPassword) throw new Error('Nhập mật khẩu chung của nhóm');
+        const ok = await verifyGroupPassword(group, sharedPassword);
+        if (!ok) throw new Error('Mật khẩu chung không đúng');
+    }
 
     if (window.appState.isDemo) {
         group.pendingMemberEmails = (group.pendingMemberEmails || []).filter(item => item !== user.email);
@@ -544,8 +553,21 @@ async function deleteGroup(groupId) {
 }
 
 async function verifyGroupPassword(group, sharedPassword) {
-    if (!group?.sharedPwHash || !group?.sharedPwSalt) throw new Error('Nhóm thiếu thông tin xác minh mật khẩu');
+    // Nhóm không đặt mật khẩu chung ⇒ luôn hợp lệ (không cần mật khẩu).
+    if (!groupHasSharedPassword(group)) return true;
     return verifySharedPassword(sharedPassword, group.sharedPwHash, group.sharedPwSalt);
+}
+
+// Nhóm chỉ được coi là "có mật khẩu chung" khi chủ nhóm đã đặt (có hash + salt).
+function groupHasSharedPassword(group) {
+    return Boolean(group?.sharedPwHash && group?.sharedPwSalt);
+}
+
+// Khoá mã hoá suy diễn dùng cho nhóm KHÔNG đặt mật khẩu chung.
+// Dữ liệu nhạy cảm vẫn được mã hoá (không lưu plaintext), nhưng thành viên
+// không phải nhập mật khẩu để xem — đúng yêu cầu "chỉ nhập khi chủ nhóm đặt".
+function getGroupDerivedKey(groupId) {
+    return `ting-open-group::${String(groupId || '')}`;
 }
 
 function setGroupUnlocked(groupId, sharedPassword) {
@@ -558,6 +580,9 @@ function setGroupUnlocked(groupId, sharedPassword) {
 
 function getUnlockedGroupPassword(groupId) {
     ensureGroupState();
+    const group = getKnownGroupById(groupId);
+    // Nhóm không đặt mật khẩu ⇒ tự "mở khoá" bằng khoá suy diễn.
+    if (group && !groupHasSharedPassword(group)) return getGroupDerivedKey(groupId);
     return window.appState.groupUnlocked?.[groupId] || '';
 }
 
@@ -1068,6 +1093,94 @@ async function removeSharedAccount(groupId, accountId) {
     return true;
 }
 
+async function changeGroupSharedPassword(groupId, newPassword) {
+    ensureGroupState();
+    const group = getGroupById(groupId);
+    if (!group) throw new Error('Không tìm thấy nhóm');
+    if (group.role !== 'owner') throw new Error('Chỉ chủ nhóm được đổi mật khẩu chung');
+    const newPw = String(newPassword || '');
+    if (newPw && newPw.length < 6) throw new Error('Mật khẩu chung cần tối thiểu 6 ký tự');
+
+    const hadPassword = groupHasSharedPassword(group);
+    const currentKey = getUnlockedGroupPassword(groupId);
+    if (hadPassword && !currentKey) throw new Error('Cần mở khoá nhóm trước khi đổi mật khẩu');
+    const oldKey = currentKey || getGroupDerivedKey(groupId);
+    const newKey = newPw || getGroupDerivedKey(groupId);
+
+    let sharedPwHash = null;
+    let sharedPwSalt = null;
+    if (newPw) {
+        sharedPwSalt = generateSalt();
+        sharedPwHash = await hashSharedPassword(newPw, sharedPwSalt);
+    }
+
+    // Mã hoá lại toàn bộ tài khoản chia sẻ khi khoá đổi.
+    const accounts = (window.appState.sharedAccounts?.[groupId] || []).slice();
+    const reEncrypted = [];
+    if (oldKey !== newKey) {
+        for (const account of accounts) {
+            const decrypted = await decryptSharedAccount(account, oldKey);
+            if (!decrypted) throw new Error('Không giải mã được tài khoản chia sẻ để đổi mật khẩu');
+            const payload = await encryptAccountData({
+                username: decrypted.username || '',
+                password: decrypted.password || '',
+                twoFaCode: decrypted.twoFaCode || '',
+                note: decrypted.note || '',
+            }, newKey);
+            reEncrypted.push({ id: account.id, payload });
+        }
+    }
+
+    if (window.appState.isDemo) {
+        reEncrypted.forEach(({ id, payload }) => {
+            const acc = accounts.find(item => item.id === id);
+            if (acc) { acc.encryptedData = payload.encryptedData; acc.salt = payload.salt; acc.iv = payload.iv; }
+        });
+        group.sharedPwHash = sharedPwHash;
+        group.sharedPwSalt = sharedPwSalt;
+        group.updatedAt = new Date();
+        if (newPw) setGroupUnlocked(groupId, newPw);
+        else if (window.appState.groupUnlocked) delete window.appState.groupUnlocked[groupId];
+        window.appState.decryptedSharedAccounts = Object.fromEntries(
+            Object.entries(window.appState.decryptedSharedAccounts || {}).filter(([key]) => !key.startsWith(`${groupId}:`))
+        );
+        notifyGroupsChanged(groupId);
+        return true;
+    }
+
+    const groupRef = db.collection('groups').doc(groupId);
+    const batch = db.batch();
+    reEncrypted.forEach(({ id, payload }) => {
+        batch.update(groupRef.collection('sharedAccounts').doc(id), {
+            encryptedData: payload.encryptedData,
+            salt: payload.salt,
+            iv: payload.iv,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        });
+    });
+    batch.update(groupRef, {
+        sharedPwHash: newPw ? sharedPwHash : firebase.firestore.FieldValue.delete(),
+        sharedPwSalt: newPw ? sharedPwSalt : firebase.firestore.FieldValue.delete(),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    await batch.commit();
+
+    // Cập nhật state cục bộ để UI phản hồi ngay, không chờ snapshot.
+    group.sharedPwHash = sharedPwHash;
+    group.sharedPwSalt = sharedPwSalt;
+    reEncrypted.forEach(({ id, payload }) => {
+        const acc = (window.appState.sharedAccounts?.[groupId] || []).find(item => item.id === id);
+        if (acc) { acc.encryptedData = payload.encryptedData; acc.salt = payload.salt; acc.iv = payload.iv; }
+    });
+    if (newPw) setGroupUnlocked(groupId, newPw);
+    else if (window.appState.groupUnlocked) delete window.appState.groupUnlocked[groupId];
+    window.appState.decryptedSharedAccounts = Object.fromEntries(
+        Object.entries(window.appState.decryptedSharedAccounts || {}).filter(([key]) => !key.startsWith(`${groupId}:`))
+    );
+    notifyGroupsChanged(groupId);
+    return true;
+}
+
 window.normalizeGroupEmail = normalizeGroupEmail;
 window.createGroup = createGroup;
 window.loadGroupsRealtime = loadGroupsRealtime;
@@ -1079,6 +1192,9 @@ window.removeGroupMember = removeGroupMember;
 window.renameGroup = renameGroup;
 window.deleteGroup = deleteGroup;
 window.verifyGroupPassword = verifyGroupPassword;
+window.groupHasSharedPassword = groupHasSharedPassword;
+window.getGroupDerivedKey = getGroupDerivedKey;
+window.changeGroupSharedPassword = changeGroupSharedPassword;
 window.setGroupUnlocked = setGroupUnlocked;
 window.getUnlockedGroupPassword = getUnlockedGroupPassword;
 window.isGroupUnlocked = isGroupUnlocked;

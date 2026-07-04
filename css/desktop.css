@@ -229,9 +229,9 @@
 .account-group-info { flex:1; min-width:0; }
 .account-group-title { font-size:16px; font-weight:700; color:var(--text-primary); }
 .account-group-count {
-    display:inline-flex; align-items:center; margin-left:8px; padding:2px 8px;
-    border-radius:var(--radius-full); background:var(--accent-bg); color:var(--accent);
-    font-size:12px; font-weight:700;
+    display:inline-flex; align-items:center; margin-left:8px; padding:3px 10px;
+    border-radius:var(--radius-full); background:var(--accent); color:#fff;
+    font-size:12px; font-weight:800; letter-spacing:.2px;
 }
 .account-group-meta { margin-top:2px; font-size:13px; color:var(--text-secondary); }
 .account-group-dates { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
@@ -244,6 +244,16 @@
     font-size:20px; color:var(--text-tertiary); transition:transform var(--duration-normal);
 }
 .account-group-chevron.open { transform:rotate(180deg); }
+.account-group-toggle {
+    flex-shrink:0; display:inline-flex; align-items:center; gap:6px;
+    padding:6px 12px; border-radius:var(--radius-full);
+    background:var(--accent-bg); color:var(--accent);
+    font-size:12px; font-weight:800; white-space:nowrap;
+    transition:background var(--duration-fast), color var(--duration-fast);
+}
+.account-group-header:hover .account-group-toggle { background:var(--accent); color:#fff; }
+.account-group-caret { transition:transform var(--duration-normal); }
+.account-group-toggle.open .account-group-caret { transform:rotate(180deg); }
 .account-group-children {
     display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:12px;
     padding:0 16px 16px 16px;

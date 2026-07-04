@@ -154,7 +154,10 @@ function renderAccountGroup(group, isPersonal = false) {
                 <div class="account-group-meta">${escapeHtml(getGroupExpirySummary(accounts))}</div>
             </div>
             <span class="account-badge ${getStatusBadgeClass(status)}">${getStatusText(status)}</span>
-            <span class="account-group-chevron ${expanded ? 'open' : ''}">⌄</span>
+            <span class="account-group-toggle ${expanded ? 'open' : ''}">
+                <span class="account-group-toggle-text">${expanded ? 'Thu gọn' : `Xem ${accounts.length} TK`}</span>
+                <svg class="account-group-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg>
+            </span>
         </button>
         ${expanded ? `<div class="account-group-children">${accounts.map(acc => renderAccountCard(acc, isPersonal, true)).join('')}</div>` : ''}
     </div>`;

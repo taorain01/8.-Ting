@@ -473,7 +473,7 @@ function renderSettings() {
         </div>
     </div>
 
-    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.3.8')}</p>`;
+    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.3.9')}</p>`;
 }
 
 // ===== MOBILE DESKTOP-PARITY RENDERERS =====
@@ -875,7 +875,10 @@ function renderAccountGroup(group, isPersonal = false) {
                 <div class="account-group-meta">${escapeHtml(getGroupExpirySummary(accounts))}</div>
             </div>
             <span class="account-badge ${getStatusBadgeClass(status)}">${getStatusText(status)}</span>
-            <span class="account-group-chevron ${expanded ? 'open' : ''}">⌄</span>
+            <span class="account-group-toggle ${expanded ? 'open' : ''}">
+                <span class="account-group-toggle-text">${expanded ? 'Thu gọn' : `Xem ${accounts.length} TK`}</span>
+                <svg class="account-group-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg>
+            </span>
         </button>
         ${expanded ? `<div class="account-group-children">${accounts.map(acc => renderAccountCard(acc, isPersonal, true)).join('')}</div>` : ''}
     </div>`;
@@ -1637,7 +1640,7 @@ function renderGroupInviteCard(group) {
             <div class="group-card-meta">Mời bởi ${escapeHtml(group.ownerEmail || '')} · ${(group.memberEmails || []).length} thành viên</div>
         </div>
         <div class="group-invite-actions">
-            <button type="button" class="btn btn-sm btn-primary" onclick="openAcceptGroupInviteModal('${escapeJsAttr(group.id)}')">Nhập mật khẩu</button>
+            <button type="button" class="btn btn-sm btn-primary" onclick="openAcceptGroupInviteModal('${escapeJsAttr(group.id)}')">${groupHasSharedPassword?.(group) ? 'Nhập mật khẩu' : 'Tham gia'}</button>
             <button type="button" class="btn btn-sm btn-outline" onclick="handleCancelGroupInvite('${escapeJsAttr(group.id)}')">Bỏ qua</button>
         </div>
     </div>`;
@@ -1682,6 +1685,7 @@ function renderGroupTabs(group) {
         { id: 'board', label: group.name || 'Nhóm' },
         { id: 'accounts', label: 'Tài khoản' },
         { id: 'members', label: 'Thành viên' },
+        { id: 'settings', label: 'Cài đặt' },
     ];
     return `<div class="group-tabs" role="tablist">
         ${tabs.map(tab => `<button type="button" class="group-tab ${active === tab.id ? 'active' : ''}" onclick="setGroupDetailTab('${escapeJsAttr(tab.id)}')" title="${escapeHtml(tab.label)}">${escapeHtml(tab.label)}</button>`).join('')}
@@ -1883,6 +1887,45 @@ function renderGroupMembers(group) {
     </div>`;
 }
 
+function renderGroupSettings(group) {
+    const isOwner = group.role === 'owner';
+    const hasPw = Boolean(groupHasSharedPassword?.(group));
+    const unlocked = Boolean(isGroupUnlocked?.(group.id));
+    const lockRow = `<div class="group-setting-item">
+        <div class="group-setting-info">
+            <div class="group-setting-title">Mật khẩu chung</div>
+            <div class="group-setting-desc">${hasPw
+                ? 'Nhóm đang yêu cầu mật khẩu chung để xem tài khoản chia sẻ.'
+                : 'Nhóm chưa đặt mật khẩu. Thành viên xem tài khoản chia sẻ mà không cần nhập gì.'}</div>
+        </div>
+        <span class="group-lock-badge ${hasPw ? '' : 'unlocked'}">${hasPw ? 'Có mật khẩu' : 'Không mật khẩu'}</span>
+    </div>`;
+    const pwActions = isOwner
+        ? `<div class="group-setting-actions">${(hasPw && !unlocked)
+            ? `<button class="btn btn-sm btn-outline" onclick="openUnlockGroupModal('${escapeJsAttr(group.id)}')">Mở khoá để chỉnh</button>`
+            : `<button class="btn btn-sm btn-primary" onclick="openGroupPasswordModal('${escapeJsAttr(group.id)}')">${hasPw ? 'Đổi mật khẩu' : 'Đặt mật khẩu'}</button>${hasPw ? `<button class="btn btn-sm btn-danger-outline" onclick="handleRemoveGroupPassword('${escapeJsAttr(group.id)}')">Gỡ mật khẩu</button>` : ''}`}</div>`
+        : `<div class="group-setting-hint">Chỉ chủ nhóm mới chỉnh được mật khẩu chung.</div>`;
+    const manageBlock = isOwner
+        ? `<div class="group-setting-divider"></div>
+        <div class="group-setting-item">
+            <div class="group-setting-info">
+                <div class="group-setting-title">Quản lý nhóm</div>
+                <div class="group-setting-desc">Đổi tên hiển thị của nhóm hoặc xoá nhóm vĩnh viễn.</div>
+            </div>
+        </div>
+        <div class="group-setting-actions">
+            <button class="btn btn-sm btn-outline" onclick="handleRenameGroup('${escapeJsAttr(group.id)}')">Đổi tên nhóm</button>
+            <button class="btn btn-sm btn-danger-outline" onclick="handleDeleteGroup('${escapeJsAttr(group.id)}')">Xoá nhóm</button>
+        </div>`
+        : '';
+    return `<div class="group-panel group-settings-panel group-tab-panel anim-fade-in-up">
+        <div class="group-panel-head"><div class="section-title">Cài đặt nhóm</div></div>
+        ${lockRow}
+        ${pwActions}
+        ${manageBlock}
+    </div>`;
+}
+
 function renderGroupDetail(groupId) {
     const group = getGroupById?.(groupId);
     if (!group) {
@@ -1896,14 +1939,16 @@ function renderGroupDetail(groupId) {
         ? renderGroupMembers(group)
         : activeTab === 'accounts'
             ? renderGroupAccountsTab(group)
-            : renderGroupBoard(group);
+            : activeTab === 'settings'
+                ? renderGroupSettings(group)
+                : renderGroupBoard(group);
     document.getElementById('page-content').innerHTML = `
         <button class="back-btn" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15,18 9,12 15,6"/></svg> Nhóm</button>
         <div class="group-detail-head anim-fade-in-up">
             <div class="group-detail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
             <div class="group-detail-main"><div class="group-detail-title">${escapeHtml(group.name || 'Nhóm')}</div><div class="group-card-meta">${escapeHtml(getGroupRoleLabel(group))} · ${(group.memberEmails || []).length} thành viên · ${accountCount} tài khoản</div></div>
+            <button class="icon-btn group-detail-settings-btn" title="Cài đặt nhóm" onclick="setGroupDetailTab('settings')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" width="18" height="18"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
         </div>
-        ${isOwner ? `<div class="group-detail-actions-inline"><button class="btn btn-sm btn-outline" onclick="handleRenameGroup('${escapeJsAttr(group.id)}')">Đổi tên</button><button class="btn btn-sm btn-danger-outline" onclick="handleDeleteGroup('${escapeJsAttr(group.id)}')">Xoá</button></div>` : ''}
         ${renderGroupTabs(group)}
         ${tabContent}
     `;
@@ -1984,7 +2029,7 @@ function renderUpdateSection() {
     const version = escapeHtml(
         window.appState.appVersion
         || window.TingMobileUpdater?.INSTALLED_VERSION_NAME
-        || '1.3.8'
+        || '1.3.9'
     );
     const platform = getMobileUpdatePlatform();
     const cap = getMobileUpdateCapability(platform);
@@ -2097,7 +2142,7 @@ function renderSettings() {
             <div class="settings-item" onclick="signOut()"><div class="settings-item-icon" style="background:var(--danger-bg)">🚪</div><div class="settings-item-content"><div class="settings-item-title" style="color:var(--danger)">Đăng xuất</div></div></div>
         </div>
     </div></div>
-    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.3.8')}</p>`;
+    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.3.9')}</p>`;
     switchSettingsTab(window._settingsActiveTab || 'general');
 }
 
