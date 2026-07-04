@@ -2137,6 +2137,10 @@ function renderGroupMembers(group) {
     </div>`;
 }
 
+// Signature of the last painted group-detail body. Lets quiet (data-driven)
+// refreshes bail out when nothing visible changed, avoiding the 2-3 blink jitter.
+let _lastGroupDetailSignature = null;
+
 function renderGroupDetail(groupId, options = {}) {
     const group = getGroupById?.(groupId);
     if (!group) {
@@ -2153,15 +2157,13 @@ function renderGroupDetail(groupId, options = {}) {
             ? renderGroupAccountsTab(group)
             : renderGroupBoard(group);
     const pageContent = document.getElementById('page-content');
-    // On data-driven refresh (Firestore snapshot) don't replay entrance animations,
-    // otherwise every update makes the whole board fade in again and looks like a jitter.
-    // The quiet marker lives on a wrapper inside the rendered HTML so it never leaks to other pages.
-    const quietClass = options.quiet ? ' group-detail-quiet' : '';
-    const headAnim = options.quiet ? '' : ' anim-fade-in-up';
-    pageContent.innerHTML = `
-        <div class="group-detail-root${quietClass}">
+    // Body without the entrance-animation markers, used both as the render source
+    // and as a change signature. `@@HEAD@@` is a placeholder swapped for the head
+    // animation class only when we actually paint, so the signature stays stable
+    // whether the render is animated (user navigation) or quiet (data refresh).
+    const bodyHtml = `
         <button class="back-btn" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polyline points="15,18 9,12 15,6"/></svg> Nhóm</button>
-        <div class="group-detail-head${headAnim}">
+        <div class="group-detail-head@@HEAD@@">
             <div class="group-detail-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
             </div>
@@ -2175,7 +2177,21 @@ function renderGroupDetail(groupId, options = {}) {
         </div>
         ${renderGroupTabs(group)}
         ${tabContent}
-        </div>
+    `;
+    // Firestore fires several snapshots per open (cache → server → metadata),
+    // each landing as a separate quiet refresh. If the resulting DOM is identical
+    // we skip the innerHTML swap entirely so the tab doesn't blink/jitter 2-3 times.
+    const signature = `${groupId}|${activeTab}|${bodyHtml}`;
+    if (options.quiet && signature === _lastGroupDetailSignature) return;
+    _lastGroupDetailSignature = signature;
+
+    // On data-driven refresh (Firestore snapshot) don't replay entrance animations,
+    // otherwise every update makes the whole board fade in again and looks like a jitter.
+    // The quiet marker lives on a wrapper inside the rendered HTML so it never leaks to other pages.
+    const quietClass = options.quiet ? ' group-detail-quiet' : '';
+    const headAnim = options.quiet ? '' : ' anim-fade-in-up';
+    pageContent.innerHTML = `
+        <div class="group-detail-root${quietClass}">${bodyHtml.replace('@@HEAD@@', headAnim)}</div>
     `;
 }
 
@@ -2632,7 +2648,7 @@ function renderMinSupportedWarning(platform, status) {
 // hiệu hoá "Kiểm tra" theo Platform_Detector, định tuyến hành động theo nền tảng, và
 // khoá hành động khi đang tải (Requirements 1.1-1.6, 3.4/3.5/3.7, 4.4/4.6/4.8, 10.1-10.4).
 function renderUpdateSection() {
-    const version = escapeHtml(window.appState.appVersion || '1.3.7');
+    const version = escapeHtml(window.appState.appVersion || '1.3.8');
     const platform = getUpdatePlatform();
     const cap = getUpdateCapability(platform);
     const status = window.appState.updateStatus;
@@ -2716,14 +2732,21 @@ function renderSettings() {
     const isElectron = Boolean(window.electronAPI?.isElectron);
     const autoLock = Number(settings.autoLockMinutes ?? 5);
     document.getElementById('page-content').innerHTML = `
-    <div class="d-settings-layout">
-        <div class="settings-group"><div class="settings-group-title">Bảo mật</div><div class="settings-card">
+    <div class="settings-tabbar" role="tablist">
+        <button class="settings-tab" data-tab="security" onclick="switchSettingsTab('security')"><span class="settings-tab-ico">🔒</span> Bảo mật</button>
+        <button class="settings-tab" data-tab="desktop" onclick="switchSettingsTab('desktop')"><span class="settings-tab-ico">🖥️</span> Desktop</button>
+        <button class="settings-tab" data-tab="notifications" onclick="switchSettingsTab('notifications')"><span class="settings-tab-ico">🔔</span> Thông báo</button>
+        <button class="settings-tab" data-tab="update" onclick="switchSettingsTab('update')"><span class="settings-tab-ico">🔄</span> Cập nhật</button>
+        <button class="settings-tab" data-tab="data" onclick="switchSettingsTab('data')"><span class="settings-tab-ico">💾</span> Dữ liệu</button>
+    </div>
+    <div class="d-settings-panels">
+        <div class="settings-panel" data-panel="security"><div class="settings-group"><div class="settings-group-title">Bảo mật</div><div class="settings-card">
             <div class="settings-item" onclick="handleChangeMasterPassword()"><div class="settings-item-icon" style="background:var(--accent-bg)">🔑</div><div class="settings-item-content"><div class="settings-item-title">Đổi Master PIN</div><div class="settings-item-desc">Xác thực lại tài khoản rồi đặt PIN mới 4 hoặc 6 số</div></div><svg class="settings-item-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg></div>
             <label class="settings-item settings-control ${isElectron ? '' : 'disabled'}"><div class="settings-item-icon" style="background:var(--warning-bg)">🔒</div><div class="settings-item-content"><div class="settings-item-title">Tự khoá sau</div><div class="settings-item-desc">${isElectron ? 'Khoá Master Password khi máy không hoạt động' : 'Chỉ khả dụng trên bản desktop'}</div></div><select class="settings-select" onchange="handleAutoLockChange(this.value)" ${isElectron ? '' : 'disabled'}><option value="1" ${autoLock===1?'selected':''}>1 phút</option><option value="5" ${autoLock===5?'selected':''}>5 phút</option><option value="15" ${autoLock===15?'selected':''}>15 phút</option><option value="30" ${autoLock===30?'selected':''}>30 phút</option><option value="0" ${autoLock===0?'selected':''}>Tắt</option></select></label>
             <label class="settings-item settings-control"><div class="settings-item-icon" style="background:var(--accent-bg)">🛒</div><div class="settings-item-content"><div class="settings-item-title">Khoá TK Mua bằng Master Password</div><div class="settings-item-desc">Tắt để xem/copy TK Mua nhanh, bật nếu muốn bảo vệ như mục Cá nhân</div></div><input class="settings-toggle" type="checkbox" onchange="handleProtectBoughtToggle(this)" ${settings.protectBoughtAccounts ? 'checked' : ''}></label>
             <label class="settings-item settings-control"><div class="settings-item-icon" style="background:var(--danger-bg)">🧹</div><div class="settings-item-content"><div class="settings-item-title">Tự xoá clipboard sau 30s</div><div class="settings-item-desc">Áp dụng khi copy mật khẩu, 2FA hoặc mã</div></div><input class="settings-toggle" type="checkbox" onchange="handleClipboardAutoClearToggle(this)" ${settings.clipboardAutoClear ? 'checked' : ''}></label>
-        </div></div>
-        <div class="settings-group"><div class="settings-group-title">Desktop</div><div class="settings-card">
+        </div></div></div>
+        <div class="settings-panel" data-panel="desktop"><div class="settings-group"><div class="settings-group-title">Desktop</div><div class="settings-card">
             <label class="settings-item settings-control ${isElectron ? '' : 'disabled'}"><div class="settings-item-icon" style="background:var(--success-bg)">🚀</div><div class="settings-item-content"><div class="settings-item-title">Tự khởi động cùng Windows</div><div class="settings-item-desc">${isElectron ? 'Mở Ting! khi đăng nhập Windows' : 'Chỉ khả dụng trên bản desktop'}</div></div><input class="settings-toggle" type="checkbox" onchange="handleAutoStartToggle(this)" ${settings.autoStart ? 'checked' : ''} ${isElectron ? '' : 'disabled'}></label>
             <label class="settings-item settings-control"><div class="settings-item-icon" style="background:var(--accent-bg)">🌗</div><div class="settings-item-content"><div class="settings-item-title">Giao diện</div><div class="settings-item-desc">Theo hệ thống, sáng hoặc tối</div></div><select class="settings-select" onchange="handleThemeChange(this.value)"><option value="system" ${settings.theme==='system'?'selected':''}>Hệ thống</option><option value="light" ${settings.theme==='light'?'selected':''}>Sáng</option><option value="dark" ${settings.theme==='dark'?'selected':''}>Tối</option></select></label>
             <label class="settings-item settings-control"><div class="settings-item-icon" style="background:var(--accent-bg)">🪪</div><div class="settings-item-content"><div class="settings-item-title">Ghi nhớ đăng nhập</div><div class="settings-item-desc">Giữ phiên Google/Email trên thiết bị này</div></div><select class="settings-select" onchange="handleRememberSignInChange(this.value)"><option value="forever" ${(typeof getAuthRememberMode === 'function' ? getAuthRememberMode() : 'forever') === 'forever' ? 'selected' : ''}>Vĩnh viễn</option><option value="30d" ${(typeof getAuthRememberMode === 'function' ? getAuthRememberMode() : 'forever') === '30d' ? 'selected' : ''}>30 ngày</option></select></label>
@@ -2731,8 +2754,8 @@ function renderSettings() {
                 <div class="shortcut-row"><span class="shortcut-label">Mở Ting!</span><button type="button" class="shortcut-record-btn" id="shortcut-btn-openApp" onclick="startRecordingShortcut('openApp')" onkeydown="handleShortcutKeydown(event)" tabindex="0"><span class="shortcut-key-display">${typeof formatAcceleratorDisplay === 'function' ? formatAcceleratorDisplay(settings.shortcuts?.openApp || '') : (settings.shortcuts?.openApp || 'Ctrl + Shift + T')}</span></button>${settings.shortcuts?.openApp ? `<button type="button" class="shortcut-clear-btn" onclick="clearShortcut('openApp')" title="Xóa phím tắt">✕</button>` : ''}</div>
                 <div class="shortcut-row"><span class="shortcut-label">Thêm nhanh</span><button type="button" class="shortcut-record-btn" id="shortcut-btn-quickAdd" onclick="startRecordingShortcut('quickAdd')" onkeydown="handleShortcutKeydown(event)" tabindex="0"><span class="shortcut-key-display">${typeof formatAcceleratorDisplay === 'function' ? formatAcceleratorDisplay(settings.shortcuts?.quickAdd || '') : (settings.shortcuts?.quickAdd || 'Ctrl + Shift + S')}</span></button>${settings.shortcuts?.quickAdd ? `<button type="button" class="shortcut-clear-btn" onclick="clearShortcut('quickAdd')" title="Xóa phím tắt">✕</button>` : ''}</div>
             </div><button type="button" class="btn btn-sm btn-outline settings-shortcut-reset" onclick="resetShortcuts()">Khôi phục mặc định</button>` : ''}</div></div>
-        </div></div>
-        <div class="settings-group"><div class="settings-group-title">Thông báo</div><div class="settings-card">
+        </div></div></div>
+        <div class="settings-panel" data-panel="notifications"><div class="settings-group"><div class="settings-group-title">Thông báo</div><div class="settings-card">
             <label class="settings-item settings-control"><div class="settings-item-icon" style="background:var(--warning-bg)">🔔</div><div class="settings-item-content"><div class="settings-item-title">Bật nhắc hạn</div><div class="settings-item-desc">Quét tài khoản sắp hoặc đã hết hạn</div></div><input class="settings-toggle" type="checkbox" onchange="handleNotificationsEnabledToggle(this)" ${notificationSettings.enabled ? 'checked' : ''}></label>
             <label class="settings-item settings-control ${isElectron ? '' : 'disabled'}"><div class="settings-item-icon" style="background:var(--accent-bg)">🪟</div><div class="settings-item-content"><div class="settings-item-title">Toast Windows</div><div class="settings-item-desc">${isElectron ? 'Hiện thông báo hệ thống Windows' : 'Trình duyệt sẽ dùng quyền Notification nếu có'}</div></div><input class="settings-toggle" type="checkbox" onchange="handleNativeNotificationsToggle(this)" ${notificationSettings.nativeEnabled ? 'checked' : ''}></label>
             <label class="settings-item settings-control"><div class="settings-item-icon" style="background:var(--success-bg)">🔔</div><div class="settings-item-content"><div class="settings-item-title">Chuông trong app</div><div class="settings-item-desc">Hiện badge và danh sách khi bấm icon chuông</div></div><input class="settings-toggle" type="checkbox" onchange="handleInAppNotificationsToggle(this)" ${notificationSettings.inAppEnabled ? 'checked' : ''}></label>
@@ -2743,13 +2766,28 @@ function renderSettings() {
             <div class="settings-item"><div class="settings-item-icon" style="background:var(--success-bg)">✅</div><div class="settings-item-content"><div class="settings-item-title">Gửi thử thông báo</div><div class="settings-item-desc">Kiểm tra quyền thông báo của Windows/trình duyệt</div></div><button class="btn btn-sm btn-outline settings-inline-btn" onclick="sendTestNotification()">Gửi thử</button></div>
             <div class="settings-item"><div class="settings-item-icon" style="background:var(--accent-bg)">⚙️</div><div class="settings-item-content"><div class="settings-item-title">Cài đặt thông báo Windows</div><div class="settings-item-desc">Bật banner, âm thanh và tắt Không làm phiền</div></div><button class="btn btn-sm btn-outline settings-inline-btn" onclick="openNotificationSettingsFromApp()">Mở</button></div>
             <div class="settings-item"><div class="settings-item-icon" style="background:var(--success-bg)">📅</div><div class="settings-item-content"><div class="settings-item-title">Gia hạn mặc định</div><div class="settings-item-desc">30 ngày</div></div></div>
-        </div></div>
-        ${renderUpdateSection()}
-        <div class="settings-group"><div class="settings-group-title">Dữ liệu</div><div class="settings-card">
-            <div class="settings-item"><div class="settings-item-icon" style="background:#E0F2FE">📤</div><div class="settings-item-content"><div class="settings-item-title">Xuất dữ liệu (JSON)</div><div class="settings-item-desc">Sao lưu mã hoá</div></div><svg class="settings-item-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg></div>
-            <div class="settings-item"><div class="settings-item-icon" style="background:#E0F2FE">📥</div><div class="settings-item-content"><div class="settings-item-title">Nhập dữ liệu</div><div class="settings-item-desc">Khôi phục từ JSON</div></div><svg class="settings-item-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg></div>
-        </div></div>
+        </div></div></div>
+        <div class="settings-panel" data-panel="update">${renderUpdateSection()}</div>
+        <div class="settings-panel" data-panel="data"><div class="settings-group"><div class="settings-group-title">Dữ liệu</div><div class="settings-card">
+            <div class="settings-item" onclick="exportBackup()"><div class="settings-item-icon" style="background:#E0F2FE">📤</div><div class="settings-item-content"><div class="settings-item-title">Sao lưu ra file (.ting)</div><div class="settings-item-desc">Mã hoá bằng Master Password — lưu Google Drive, USB...</div></div><svg class="settings-item-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg></div>
+            <div class="settings-item" onclick="importBackup()"><div class="settings-item-icon" style="background:#E0F2FE">📥</div><div class="settings-item-content"><div class="settings-item-title">Phục hồi từ file</div><div class="settings-item-desc">Khôi phục tài khoản từ file .ting đã sao lưu</div></div><svg class="settings-item-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg></div>
+        </div></div></div>
     </div>`;
+    switchSettingsTab(window._settingsActiveTab || 'security');
+}
+
+function switchSettingsTab(tab) {
+    const root = document.getElementById('page-content');
+    if (!root || typeof root.querySelectorAll !== 'function') return;
+    const tabs = Array.from(root.querySelectorAll('.settings-tab'));
+    if (!tabs.length) return;
+    const available = tabs.map(btn => btn.dataset.tab);
+    if (!available.includes(tab)) tab = available[0];
+    window._settingsActiveTab = tab;
+    tabs.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
+    root.querySelectorAll('.settings-panel').forEach(panel => {
+        panel.classList.toggle('active', panel.dataset.panel === tab);
+    });
 }
 
 // ===== NOTIFICATIONS =====

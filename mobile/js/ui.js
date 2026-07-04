@@ -473,7 +473,7 @@ function renderSettings() {
         </div>
     </div>
 
-    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.3.7')}</p>`;
+    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.3.8')}</p>`;
 }
 
 // ===== MOBILE DESKTOP-PARITY RENDERERS =====
@@ -1984,7 +1984,7 @@ function renderUpdateSection() {
     const version = escapeHtml(
         window.appState.appVersion
         || window.TingMobileUpdater?.INSTALLED_VERSION_NAME
-        || '1.3.7'
+        || '1.3.8'
     );
     const platform = getMobileUpdatePlatform();
     const cap = getMobileUpdateCapability(platform);
@@ -2039,29 +2039,44 @@ function renderSettings() {
     const categoryCount = window.appState.customCategories?.length || 0;
     document.getElementById('page-content').innerHTML = `
     <div class="section-header"><span class="section-title">Cài đặt</span></div>
-    <div class="settings-group">
+    <div class="settings-tabbar" role="tablist">
+        <button class="settings-tab" data-tab="general" onclick="switchSettingsTab('general')"><span class="settings-tab-ico">📁</span> Chung</button>
+        <button class="settings-tab" data-tab="security" onclick="switchSettingsTab('security')"><span class="settings-tab-ico">🔒</span> Bảo mật</button>
+        <button class="settings-tab" data-tab="notifications" onclick="switchSettingsTab('notifications')"><span class="settings-tab-ico">🔔</span> Thông báo</button>
+        <button class="settings-tab" data-tab="data" onclick="switchSettingsTab('data')"><span class="settings-tab-ico">💾</span> Dữ liệu</button>
+        <button class="settings-tab" data-tab="account" onclick="switchSettingsTab('account')"><span class="settings-tab-ico">👤</span> Tài khoản</button>
+    </div>
+    <div class="settings-panel" data-panel="general"><div class="settings-group">
         <div class="settings-group-title">Tổ chức</div>
         <div class="settings-card">
             <div class="settings-item" onclick="navigateTo('categories')"><div class="settings-item-icon" style="background:var(--accent-bg)">📁</div><div class="settings-item-content"><div class="settings-item-title">Danh mục</div><div class="settings-item-desc">${categoryCount} danh mục đang dùng</div></div><span class="section-badge">${categoryCount}</span></div>
             <div class="settings-item" onclick="navigateTo('trash')"><div class="settings-item-icon" style="background:var(--danger-bg)">🗑️</div><div class="settings-item-content"><div class="settings-item-title">Thùng rác</div><div class="settings-item-desc">Khôi phục tài khoản đã xoá mềm</div></div><span class="section-badge">${trashCount}</span></div>
         </div>
-    </div>
-    <div class="settings-group">
+    </div></div>
+    <div class="settings-panel" data-panel="security"><div class="settings-group">
         <div class="settings-group-title">Bảo mật</div>
         <div class="settings-card">
             <div class="settings-item" onclick="handleChangeMasterPassword()"><div class="settings-item-icon" style="background:var(--accent-bg)">🔑</div><div class="settings-item-content"><div class="settings-item-title">Đổi Master PIN</div><div class="settings-item-desc">Xác thực lại tài khoản rồi đặt PIN mới 4 hoặc 6 số</div></div></div>
+            ${(window.Capacitor?.isNativePlatform?.()) ? `<label class="settings-item settings-control"><div class="settings-item-icon" style="background:var(--success-bg)">🫆</div><div class="settings-item-content"><div class="settings-item-title">Mở khoá bằng vân tay/khuôn mặt</div><div class="settings-item-desc">Dùng sinh trắc học thay cho nhập Master PIN</div></div><input class="settings-toggle" type="checkbox" onchange="handleBiometricToggle(this)" ${window.TingBiometric?.isEnabled?.() ? 'checked' : ''}></label>` : ''}
             <label class="settings-item settings-control"><div class="settings-item-icon" style="background:var(--accent-bg)">🛒</div><div class="settings-item-content"><div class="settings-item-title">Khoá TK Mua bằng Master Password</div><div class="settings-item-desc">Bật nếu muốn bảo vệ TK Mua như mục Cá nhân</div></div><input class="settings-toggle" type="checkbox" onchange="handleProtectBoughtToggle(this)" ${settings.protectBoughtAccounts ? 'checked' : ''}></label>
             <label class="settings-item settings-control"><div class="settings-item-icon" style="background:var(--danger-bg)">🧹</div><div class="settings-item-content"><div class="settings-item-title">Tự xoá clipboard sau 30s</div><div class="settings-item-desc">Áp dụng khi copy mật khẩu, 2FA hoặc mã</div></div><input class="settings-toggle" type="checkbox" onchange="handleClipboardAutoClearToggle(this)" ${settings.clipboardAutoClear ? 'checked' : ''}></label>
         </div>
-    </div>
-    <div class="settings-group">
+    </div></div>
+    <div class="settings-panel" data-panel="data"><div class="settings-group">
+        <div class="settings-group-title">Dữ liệu</div>
+        <div class="settings-card">
+            <div class="settings-item" onclick="exportBackup()"><div class="settings-item-icon" style="background:#E0F2FE">📤</div><div class="settings-item-content"><div class="settings-item-title">Sao lưu ra file (.ting)</div><div class="settings-item-desc">Mã hoá bằng Master Password — lưu Google Drive, Zalo...</div></div><svg class="settings-item-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg></div>
+            <div class="settings-item" onclick="importBackup()"><div class="settings-item-icon" style="background:#E0F2FE">📥</div><div class="settings-item-content"><div class="settings-item-title">Phục hồi từ file</div><div class="settings-item-desc">Khôi phục tài khoản từ file .ting đã sao lưu</div></div><svg class="settings-item-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg></div>
+        </div>
+    </div></div>
+    <div class="settings-panel" data-panel="general"><div class="settings-group">
         <div class="settings-group-title">Giao diện</div>
         <div class="settings-card">
             <label class="settings-item settings-control"><div class="settings-item-icon" style="background:var(--accent-bg)">🌗</div><div class="settings-item-content"><div class="settings-item-title">Theme</div><div class="settings-item-desc">Theo hệ thống, sáng hoặc tối</div></div><select class="settings-select" onchange="handleThemeChange(this.value)"><option value="system" ${settings.theme==='system'?'selected':''}>Hệ thống</option><option value="light" ${settings.theme==='light'?'selected':''}>Sáng</option><option value="dark" ${settings.theme==='dark'?'selected':''}>Tối</option></select></label>
         </div>
-    </div>
-    ${renderUpdateSection()}
-    <div class="settings-group">
+    </div></div>
+    <div class="settings-panel" data-panel="data">${renderUpdateSection()}</div>
+    <div class="settings-panel" data-panel="notifications"><div class="settings-group">
         <div class="settings-group-title">Thông báo</div>
         <div class="settings-card">
             <label class="settings-item settings-control"><div class="settings-item-icon" style="background:var(--warning-bg)">🔔</div><div class="settings-item-content"><div class="settings-item-title">Bật nhắc hạn</div><div class="settings-item-desc">Quét tài khoản sắp hoặc đã hết hạn</div></div><input class="settings-toggle" type="checkbox" onchange="handleNotificationsEnabledToggle(this)" ${notificationSettings.enabled ? 'checked' : ''}></label>
@@ -2074,15 +2089,30 @@ function renderSettings() {
             <div class="settings-item"><div class="settings-item-icon" style="background:var(--success-bg)">✅</div><div class="settings-item-content"><div class="settings-item-title">Gửi thử thông báo</div><div class="settings-item-desc">Kiểm tra quyền thông báo của thiết bị</div></div><button class="btn btn-sm btn-outline settings-inline-btn" onclick="sendTestNotification()">Gửi thử</button></div>
             <div class="settings-item"><div class="settings-item-icon" style="background:var(--accent-bg)">⚙️</div><div class="settings-item-content"><div class="settings-item-title">Cài đặt thông báo điện thoại</div><div class="settings-item-desc">Mở quyền thông báo của Ting! trong Android</div></div><button class="btn btn-sm btn-outline settings-inline-btn" onclick="openNotificationSettingsFromApp()">Mở</button></div>
         </div>
-    </div>
-    <div class="settings-group">
+    </div></div>
+    <div class="settings-panel" data-panel="account"><div class="settings-group">
         <div class="settings-group-title">Tài khoản</div>
         <div class="settings-card">
             <label class="settings-item settings-control"><div class="settings-item-icon" style="background:var(--accent-bg)">🪪</div><div class="settings-item-content"><div class="settings-item-title">Ghi nhớ đăng nhập</div><div class="settings-item-desc">Giữ tài khoản Google/Email trên thiết bị này</div></div><select class="settings-select settings-select-wide" onchange="handleRememberSignInChange(this.value)"><option value="forever" ${(typeof getAuthRememberMode === 'function' ? getAuthRememberMode() : 'forever') === 'forever' ? 'selected' : ''}>Vĩnh viễn</option><option value="30d" ${(typeof getAuthRememberMode === 'function' ? getAuthRememberMode() : 'forever') === '30d' ? 'selected' : ''}>30 ngày</option></select></label>
             <div class="settings-item" onclick="signOut()"><div class="settings-item-icon" style="background:var(--danger-bg)">🚪</div><div class="settings-item-content"><div class="settings-item-title" style="color:var(--danger)">Đăng xuất</div></div></div>
         </div>
-    </div>
-    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.3.7')}</p>`;
+    </div></div>
+    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.3.8')}</p>`;
+    switchSettingsTab(window._settingsActiveTab || 'general');
+}
+
+function switchSettingsTab(tab) {
+    const root = document.getElementById('page-content');
+    if (!root || typeof root.querySelectorAll !== 'function') return;
+    const tabs = Array.from(root.querySelectorAll('.settings-tab'));
+    if (!tabs.length) return;
+    const available = tabs.map(btn => btn.dataset.tab);
+    if (!available.includes(tab)) tab = available[0];
+    window._settingsActiveTab = tab;
+    tabs.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
+    root.querySelectorAll('.settings-panel').forEach(panel => {
+        panel.classList.toggle('active', panel.dataset.panel === tab);
+    });
 }
 
 function renderNotificationPanel(items = (typeof getNotificationList === 'function' ? getNotificationList(window.appState.accounts) : [])) {

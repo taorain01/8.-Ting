@@ -214,3 +214,55 @@ input, textarea, select {
     padding: 0; margin: -1px; overflow: hidden;
     clip: rect(0,0,0,0); border: 0;
 }
+
+/* =============================================
+   Smooth UX — cuộn mượt & đổ bóng nổi
+   ============================================= */
+:root {
+    /* Bóng nổi nhiều lớp, mềm — dùng khi hover card */
+    --shadow-float:
+        0 1px 2px rgba(16, 24, 40, 0.04),
+        0 4px 8px rgba(16, 24, 40, 0.05),
+        0 12px 24px rgba(108, 92, 231, 0.10),
+        0 24px 48px rgba(108, 92, 231, 0.08);
+}
+[data-theme="dark"] {
+    --shadow-float:
+        0 2px 6px rgba(0, 0, 0, 0.30),
+        0 12px 28px rgba(0, 0, 0, 0.34),
+        0 24px 52px rgba(34, 211, 238, 0.10);
+}
+
+/* Cuộn mượt toàn cục + quán tính trên mobile */
+html { scroll-behavior: smooth; }
+body {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+}
+.d-content,
+.page-content,
+.notification-list,
+.quick-platform-panel {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    scroll-behavior: smooth;
+}
+
+/* Scrollbar đẹp hơn, phản hồi khi hover */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: var(--radius-full);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    transition: background var(--duration-normal);
+}
+::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-light);
+    background-clip: padding-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .d-content, .page-content { scroll-behavior: auto; }
+}

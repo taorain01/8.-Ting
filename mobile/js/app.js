@@ -28,7 +28,7 @@ window.appState = {
     isOnline: typeof navigator === 'undefined' ? true : navigator.onLine !== false,
     firestoreFromCache: false,
     pendingSyncCount: 0,
-    appVersion: '1.3.7',
+    appVersion: '1.3.8',
     updateStatus: null,
     updateLog: [],
     expandedGroups: {},
@@ -4478,10 +4478,44 @@ async function showMasterPasswordDialog(reason = 'Để giải mã dữ liệu')
 async function requireMasterPassword(reason = 'Để giải mã dữ liệu') {
     if (window.appState.isDemo) return true;
     if (window.appState.masterUnlocked && window.appState.masterPassword) return true;
+    // Thử mở khoá bằng vân tay / khuôn mặt trước (nếu đã bật & thiết bị hỗ trợ)
+    try {
+        if (window.TingBiometric && await window.TingBiometric.isReady()) {
+            const pw = await window.TingBiometric.tryUnlock(reason);
+            if (pw) {
+                const security = window.appState.masterSecurity || await getMasterPasswordHash();
+                if (security?.masterPasswordHash && security?.masterPasswordSalt
+                    && await TingCrypto.verifyMasterPassword(pw, security.masterPasswordHash, security.masterPasswordSalt)) {
+                    window.appState.masterUnlocked = true;
+                    window.appState.masterPassword = pw;
+                    clearMasterLockState?.();
+                    return true;
+                }
+            }
+        }
+    } catch (e) { /* thất bại → chuyển sang nhập PIN */ }
     return new Promise((resolve) => {
         window.appState.masterPasswordResolver = resolve;
         showMasterPasswordDialog(reason);
     });
+}
+
+async function handleBiometricToggle(el) {
+    if (!window.TingBiometric) { if (el) el.checked = false; return; }
+    if (el && el.checked) {
+        const unlocked = await requireMasterPassword('Để bật mở khoá bằng sinh trắc học');
+        if (!unlocked || !window.appState.masterPassword) { el.checked = false; return; }
+        try {
+            await window.TingBiometric.enable(window.appState.masterPassword);
+            showToast('Đã bật mở khoá bằng vân tay/khuôn mặt', 'success');
+        } catch (error) {
+            el.checked = false;
+            showToast(error.message || 'Không bật được sinh trắc học', 'error');
+        }
+    } else {
+        await window.TingBiometric.disable();
+        showToast('Đã tắt mở khoá bằng sinh trắc học', 'success');
+    }
 }
 
 function finishMasterPasswordDialog(success, value = null) {
@@ -4625,6 +4659,7 @@ async function verifyMasterPassword() {
         window.appState.masterUnlocked = true;
         window.appState.masterPassword = masterPassword;
         clearMasterLockState();
+        window.TingBiometric?.onMasterUnlocked?.(masterPassword);
         finishMasterPasswordDialog(true);
         showToast('Đã mở khoá dữ liệu', 'success');
     } catch (error) {

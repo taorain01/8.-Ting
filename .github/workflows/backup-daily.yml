@@ -19,14 +19,20 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
-      # Script chỉ cần firebase-admin + module có sẵn của Node → cài gọn, không cần cả dự án.
-      - name: Cài firebase-admin
-        run: npm install firebase-admin --no-save --no-package-lock
+      # Script chỉ cần firebase-admin. Cài trong thư mục TẠM biệt lập để KHÔNG đụng
+      # tới package.json của cả dự án (tránh xung đột peer-deps của electron/capacitor).
+      - name: Cài firebase-admin (biệt lập)
+        run: |
+          mkdir -p "$RUNNER_TEMP/backup-deps"
+          cd "$RUNNER_TEMP/backup-deps"
+          npm init -y >/dev/null 2>&1
+          npm install firebase-admin@^14.1.0 --no-audit --no-fund
 
       - name: Chạy backup
         env:
+          NODE_PATH: ${{ runner.temp }}/backup-deps/node_modules
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           BACKUP_KEY: ${{ secrets.BACKUP_KEY }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}

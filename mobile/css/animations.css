@@ -110,3 +110,102 @@
         animation-duration:0.01ms !important; transition-duration:0.01ms !important;
     }
 }
+
+/* =============================================
+   Smooth UX — reveal, page transition, 3D depth
+   (bổ sung bởi smooth-ux layer)
+   ============================================= */
+
+/* Hé lộ khi cuộn tới */
+.reveal-init {
+    opacity: 0;
+    transform: translateY(18px) scale(0.985);
+    will-change: opacity, transform;
+}
+.reveal-init.in-view {
+    opacity: 1;
+    transform: none;
+    transition: opacity 0.5s var(--ease-out), transform 0.55s var(--ease-out);
+}
+.reveal-init.in-view {
+    will-change: auto;
+}
+
+/* content-visibility: bỏ qua render phần ngoài màn hình khi list dài */
+.cv-auto {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 132px;
+}
+
+/* Chuyển trang mượt */
+@keyframes pageEnter {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.page-enter {
+    animation: pageEnter 0.38s var(--ease-out);
+}
+
+/* Topbar/header đổ bóng nhẹ + co lại khi cuộn */
+.d-topbar, .app-header {
+    transition: box-shadow var(--duration-normal) var(--ease-out),
+                background var(--duration-normal) var(--ease-out);
+}
+.d-topbar.is-scrolled {
+    box-shadow: 0 6px 20px rgba(15, 23, 42, 0.06);
+}
+.app-header.is-scrolled {
+    box-shadow: 0 4px 18px rgba(15, 23, 42, 0.08);
+}
+
+/* Chiều sâu 3D nhẹ nhàng cho card khi hover/chạm */
+.account-card, .d-account-card, .summary-card, .d-summary-card {
+    transform: translateZ(0);
+    transition: transform var(--duration-normal) var(--ease-spring),
+                box-shadow var(--duration-normal) var(--ease-out),
+                border-color var(--duration-normal) var(--ease-out),
+                background-color var(--duration-normal) var(--ease-out),
+                color var(--duration-normal) var(--ease-out);
+}
+.account-card::after, .d-account-card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    opacity: 0.6;
+    transition: opacity var(--duration-normal) var(--ease-out);
+}
+.account-card:hover, .d-account-card:hover {
+    transform: translateY(-3px) scale(1.006);
+    box-shadow: var(--shadow-float, var(--shadow-card-hover));
+    border-color: var(--border-light);
+}
+.account-card:hover::after, .d-account-card:hover::after {
+    opacity: 1;
+}
+.account-card:active, .d-account-card:active {
+    transform: translateY(-1px) scale(0.997);
+    transition: transform 0.09s var(--ease-out);
+}
+[data-theme="dark"] .account-card::after,
+[data-theme="dark"] .d-account-card::after {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* Chuyển màu mượt khi đổi theme (light/dark) */
+body,
+.detail-section, .account-group,
+.d-topbar, .app-header {
+    transition: background-color var(--duration-normal) var(--ease-out),
+                color var(--duration-normal) var(--ease-out),
+                border-color var(--duration-normal) var(--ease-out);
+}
+
+/* Tôn trọng người dùng giảm chuyển động */
+@media (prefers-reduced-motion: reduce) {
+    .reveal-init { opacity: 1 !important; transform: none !important; }
+    .page-enter { animation: none !important; }
+    .account-card:hover, .d-account-card:hover { transform: none !important; }
+}

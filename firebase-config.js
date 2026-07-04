@@ -48,12 +48,24 @@ function loadFirebaseScript(src) {
 }
 
 async function initFirebase() {
-    if (typeof updateSplashStatus === 'function') updateSplashStatus('Đang tải Firebase...');
-    await loadFirebaseScript('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js');
-    if (typeof updateSplashStatus === 'function') updateSplashStatus('Đang tải Auth...');
-    await loadFirebaseScript('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js');
-    if (typeof updateSplashStatus === 'function') updateSplashStatus('Đang tải Firestore...');
-    await loadFirebaseScript('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js');
+    // Nạp SDK local trước (nhanh + chạy offline), fallback CDN nếu thiếu file.
+    const V = '10.12.0';
+    const localBase = 'js/vendor/firebase';
+    const cdnBase = `https://www.gstatic.com/firebasejs/${V}`;
+
+    async function loadModule(fileName, statusText) {
+        if (typeof updateSplashStatus === 'function') updateSplashStatus(statusText);
+        try {
+            await loadFirebaseScript(`${localBase}/${fileName}`);
+        } catch (localError) {
+            console.warn(`⚠️ Không nạp được ${fileName} từ local, thử CDN:`, localError?.message || localError);
+            await loadFirebaseScript(`${cdnBase}/${fileName}`);
+        }
+    }
+
+    await loadModule('firebase-app-compat.js', 'Đang tải Firebase...');
+    await loadModule('firebase-auth-compat.js', 'Đang tải Auth...');
+    await loadModule('firebase-firestore-compat.js', 'Đang tải Firestore...');
 
     if (!firebase.apps?.length) {
         firebase.initializeApp(firebaseConfig);

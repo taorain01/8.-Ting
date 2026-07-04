@@ -300,6 +300,27 @@
 /* Settings desktop */
 .d-settings-layout { display:grid; grid-template-columns:repeat(auto-fill, minmax(340px, 1fr)); gap:20px; max-width:900px; }
 
+/* Settings tabs (desktop) */
+.settings-tabbar {
+    display:flex; gap:4px; flex-wrap:wrap; margin-bottom:24px;
+    border-bottom:1px solid var(--border-light);
+}
+.settings-tab {
+    display:inline-flex; align-items:center; gap:7px;
+    padding:10px 16px; border:none; background:transparent;
+    color:var(--text-secondary); font-size:14px; font-weight:600;
+    cursor:pointer; border-radius:var(--radius-md) var(--radius-md) 0 0;
+    border-bottom:2px solid transparent; margin-bottom:-1px;
+    transition:color var(--duration-fast), background var(--duration-fast), border-color var(--duration-fast);
+}
+.settings-tab:hover { color:var(--text-primary); background:var(--bg-secondary); }
+.settings-tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+.settings-tab-ico { font-size:16px; line-height:1; }
+.d-settings-panels { max-width:640px; }
+.settings-panel { display:none; }
+.settings-panel.active { display:block; animation:fadeIn var(--duration-normal) ease; }
+.settings-panel .settings-group:last-child { margin-bottom:0; }
+
 /* Modal desktop */
 .d-modal { max-width:520px; border-radius:var(--radius-2xl); margin:auto; }
 .modal-overlay.open .d-modal { animation:scaleIn var(--duration-normal) var(--ease-spring); }
