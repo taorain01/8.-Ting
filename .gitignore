@@ -20,7 +20,8 @@ DongGoi/dist-electron/
 tmp_icon_check/
 www/
 ios/
-output/
+output/*
+!output/RELEASE_GUIDE.md
 *.apk
 *.exe
 
@@ -45,6 +46,14 @@ android/app/src/main/res/xml/config.xml
 google-services.json
 android/app/google-services.json
 android/app/src/google-services.json
+
+# Backup system secrets — KHÔNG commit
+scripts/.backup-secrets
+scripts/.backup-secrets.*
+!scripts/.backup-secrets.example
+*service-account*.json
+serviceAccount*.json
+firebase-service-account*.json
 
 # Local workflow notes and private setup files
 workflow/

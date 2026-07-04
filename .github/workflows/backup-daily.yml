@@ -1,0 +1,33 @@
+name: Daily Firestore Backup
+
+# Sao lưu toàn bộ Firestore mỗi ngày → gửi lên Discord webhook (đã mã hoá).
+# Secrets cần đặt trong repo Settings → Secrets and variables → Actions:
+#   - DISCORD_WEBHOOK_URL
+#   - BACKUP_KEY
+#   - FIREBASE_SERVICE_ACCOUNT  (dán NGUYÊN nội dung file service account .json)
+
+on:
+  schedule:
+    - cron: '0 19 * * *'   # 19:00 UTC = 02:00 giờ Việt Nam (UTC+7)
+  workflow_dispatch: {}      # cho phép bấm chạy tay
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Script chỉ cần firebase-admin + module có sẵn của Node → cài gọn, không cần cả dự án.
+      - name: Cài firebase-admin
+        run: npm install firebase-admin --no-save --no-package-lock
+
+      - name: Chạy backup
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          BACKUP_KEY: ${{ secrets.BACKUP_KEY }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node scripts/backup-to-discord.cjs
