@@ -55,7 +55,7 @@ window.appState = {
         notifyOverdueDays: 3,
         shortcuts: { openApp: 'Control+Shift+T', quickAdd: 'Control+Shift+S' },
     },
-    appVersion: '1.4.1',
+    appVersion: '1.4.2',
     updateStatus: null,
     updateLog: [],
 };
@@ -361,8 +361,8 @@ function initSmartNavigationInputs() {
 
 // ===== HEADER / SIDEBAR =====
 function formatSidebarVersion(version) {
-    const raw = String(version || '1.4.1').trim().replace(/^v/i, '');
-    return raw ? `v${raw}` : 'v1.4.1';
+    const raw = String(version || '1.4.2').trim().replace(/^v/i, '');
+    return raw ? `v${raw}` : 'v1.4.2';
 }
 
 function updateSidebarVersion() {
@@ -1761,6 +1761,37 @@ function setGroupDetailTab(tab = 'board') {
     const allowed = new Set(['board', 'accounts', 'members', 'settings']);
     window.appState.currentGroupTab = allowed.has(tab) ? tab : 'board';
     renderGroupDetail(window.appState.currentGroupId);
+}
+
+function getGroupAccountTargetId(groupId, accountId) {
+    return `group-account-target-${encodeURIComponent(String(groupId || ''))}-${encodeURIComponent(String(accountId || ''))}`;
+}
+
+function scrollToGroupAccountTarget(groupId, accountId) {
+    const target = document.getElementById(getGroupAccountTargetId(groupId, accountId));
+    if (!target) return false;
+    const run = () => {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        target.classList.add('group-account-highlight');
+        window.setTimeout(() => target.classList.remove('group-account-highlight'), 1800);
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+    else run();
+    return true;
+}
+
+// Click vào tài khoản ở tab Bảng ⇒ chuyển sang tab Tài khoản và cuộn tới đúng card.
+function openGroupAccountInAccountsTab(groupId, accountId) {
+    const group = getGroupById?.(groupId);
+    if (!group) return false;
+    window.appState.currentGroupTab = 'accounts';
+    renderGroupDetail(groupId);
+    requestAnimationFrame(() => {
+        if (!scrollToGroupAccountTarget(groupId, accountId)) {
+            setTimeout(() => scrollToGroupAccountTarget(groupId, accountId), 120);
+        }
+    });
+    return true;
 }
 
 function openGroupPasswordModal(groupId) {

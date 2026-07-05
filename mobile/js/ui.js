@@ -473,7 +473,7 @@ function renderSettings() {
         </div>
     </div>
 
-    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.4.1')}</p>`;
+    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.4.2')}</p>`;
 }
 
 // ===== MOBILE DESKTOP-PARITY RENDERERS =====
@@ -2152,6 +2152,32 @@ function formatMobileUpdateLogStatus(status) {
     return MOBILE_UPDATE_LOG_STATUS_LABELS[key] || status || '';
 }
 
+function formatMobileUpdateReleaseNotes(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    const looksLikeHtml = /<\/?[a-z][\s\S]*>/i.test(raw);
+    let text = raw;
+
+    if (looksLikeHtml) {
+        text = raw
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
+            .replace(/<[^>]+>/g, '');
+    }
+
+    return text
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, "'")
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
 function renderMobileUpdateProgress(status) {
     if (status?.status !== 'downloading') return '';
     const percent = clampMobileUpdatePercent(status.progress?.percent ?? status.percent);
@@ -2181,7 +2207,7 @@ function renderUpdateSection() {
     const version = escapeHtml(
         window.appState.appVersion
         || window.TingMobileUpdater?.INSTALLED_VERSION_NAME
-        || '1.4.1'
+        || '1.4.2'
     );
     const platform = getMobileUpdatePlatform();
     const cap = getMobileUpdateCapability(platform);
@@ -2193,7 +2219,7 @@ function renderUpdateSection() {
     const downloaded = kind === 'downloaded';
     const checkDisabled = !cap.canCheck || checking || downloading;
     const latest = escapeHtml(status?.info?.latestVersion || status?.info?.manifest?.latestVersion || '');
-    const notes = escapeHtml(status?.info?.releaseNotes || status?.info?.manifest?.releaseNotes || '');
+    const notes = escapeHtml(formatMobileUpdateReleaseNotes(status?.info?.releaseNotes || status?.info?.manifest?.releaseNotes || ''));
     const statusMessage = escapeHtml(getMobileUpdateStatusMessage(status));
     const statusClass = kind ? ` is-${String(kind).replace(/[^a-z0-9-]/gi, '-')}` : ' is-idle';
 
@@ -2211,8 +2237,9 @@ function renderUpdateSection() {
             <span>Nền tảng này không hỗ trợ cập nhật trong app.</span>
         </div>`
         : '';
-    const latestHtml = latest ? `<div class="settings-update-latest" aria-label="Phiên bản mới ${latest}">Phiên bản mới: <strong>${latest}</strong></div>` : '';
-    const notesHtml = notes ? `<div class="settings-update-notes">${notes}</div>` : '';
+    const showReleaseInfo = available || downloading || downloaded;
+    const latestHtml = showReleaseInfo && latest ? `<div class="settings-update-latest" aria-label="Phiên bản mới ${latest}">Phiên bản mới: <strong>${latest}</strong></div>` : '';
+    const notesHtml = showReleaseInfo && notes ? `<div class="settings-update-notes">${notes}</div>` : '';
     const downloadedHtml = downloaded
         ? `<div class="settings-update-notice is-success"><strong>Trình cài đặt đã được mở</strong><span>Hoàn tất các bước trên màn hình Android để cập nhật.</span></div>`
         : '';
@@ -2308,7 +2335,7 @@ function renderSettings() {
             <div class="settings-item" onclick="signOut()"><div class="settings-item-icon" style="background:var(--danger-bg)">🚪</div><div class="settings-item-content"><div class="settings-item-title" style="color:var(--danger)">Đăng xuất</div></div></div>
         </div>
     </div></div>
-    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.4.1')}</p>`;
+    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.4.2')}</p>`;
     switchSettingsTab(window._settingsActiveTab || 'update');
 }
 

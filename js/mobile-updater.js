@@ -56,10 +56,10 @@
 
   /**
    * Phiên bản đang cài trên Android (khớp `versionName`/`versionCode` trong
-   * cấu hình Capacitor: versionName "1.4.1", versionCode 10401).
+   * cấu hình Capacitor: versionName "1.4.2", versionCode 10402).
    */
-  const INSTALLED_VERSION_NAME = '1.4.1';
-  const INSTALLED_VERSION_CODE = 10401;
+  const INSTALLED_VERSION_NAME = '1.4.2';
+  const INSTALLED_VERSION_CODE = 10402;
 
   /** Khóa localStorage cho nhật ký cập nhật và mốc Background_Check. */
   const STORAGE_KEY_UPDATE_LOG = 'ting.update.log';
@@ -568,6 +568,8 @@
 
       downloadInProgress = true;
       try {
+        // Remove any leftover APK from a previous update before writing a new one.
+        await safeCleanup(plugin);
         await ensureProgressListener(plugin);
 
         // 6) Bảo đảm quyền cài gói (5.3) — best effort; native tự mở màn hình cấp quyền.

@@ -41,7 +41,7 @@ function loadMobileUi(windowOverrides = {}) {
   const pageContent = makeStubElement();
   const windowObj = Object.assign({
     appState: {
-      appVersion: '1.4.1',
+      appVersion: '1.4.2',
       updateStatus: null,
       updateLog: [],
       settings: { theme: 'system' },
@@ -89,14 +89,14 @@ describe('mobile Settings update section', () => {
     exports.renderSettings();
 
     expect(pageContent.innerHTML).toContain('Phiên bản');
-    expect(pageContent.innerHTML).toContain('Ting! v1.4.1');
+    expect(pageContent.innerHTML).toContain('Ting! v1.4.2');
     expect(pageContent.innerHTML).toContain('Kiểm tra');
   });
 
   it('shows Update button when Android update is available', () => {
     const { exports } = loadMobileUi({
       appState: {
-        appVersion: '1.4.1',
+        appVersion: '1.4.2',
         updateStatus: { status: 'update-available', info: { latestVersion: '1.3.10', releaseNotes: 'Fix' } },
         updateLog: [],
         settings: { theme: 'system' },
@@ -108,5 +108,46 @@ describe('mobile Settings update section', () => {
     const html = exports.renderUpdateSection();
     expect(html).toContain('Phiên bản mới 1.3.10');
     expect(html).toContain('startUpdateDownload()');
+  });
+
+  it('hides same-version release info when already up to date', () => {
+    const { exports } = loadMobileUi({
+      appState: {
+        appVersion: '1.4.2',
+        updateStatus: {
+          status: 'up-to-date',
+          info: { latestVersion: '1.4.2', releaseNotes: '<p>Current release notes</p>' },
+        },
+        updateLog: [],
+        settings: { theme: 'system' },
+        trashAccounts: [],
+        customCategories: [],
+      },
+    });
+
+    const html = exports.renderUpdateSection();
+    expect(html).not.toContain('settings-update-latest');
+    expect(html).not.toContain('settings-update-notes');
+  });
+
+  it('renders HTML release notes as clean text for available updates', () => {
+    const { exports } = loadMobileUi({
+      appState: {
+        appVersion: '1.4.0',
+        updateStatus: {
+          status: 'update-available',
+          info: { latestVersion: '1.4.2', releaseNotes: '<p>Fix html notes</p>' },
+        },
+        updateLog: [],
+        settings: { theme: 'system' },
+        trashAccounts: [],
+        customCategories: [],
+      },
+    });
+
+    const html = exports.renderUpdateSection();
+    expect(html).toContain('Fix html notes');
+    expect(html).not.toContain('&lt;p&gt;');
+    expect(html).not.toContain('<p>Fix html notes</p>');
   });
 });

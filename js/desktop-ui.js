@@ -1966,11 +1966,14 @@ function renderGroupBoardAccount(group, account, categoryId, index, total) {
     const meta = renderSharedAccountMeta(account);
     const canManage = typeof canManageSharedAccountForUi === 'function' ? canManageSharedAccountForUi(group, account) : false;
     return `<div class="group-board-account">
-        <div class="account-logo" style="${meta.logoStyle}">${meta.logoMark}</div>
-        <div class="group-board-account-main">
-            <div class="account-name">${escapeHtml(account.name || account.serviceName || 'Tài khoản')}</div>
-            <div class="shared-account-meta">${escapeHtml(account.displayUsername || '')}${account.groupNote ? ` · ${escapeHtml(account.groupNote)}` : ''}</div>
-        </div>
+        <button type="button" class="group-board-account-hit" onclick="openGroupAccountInAccountsTab('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}')" title="Xem tài khoản">
+            <div class="account-logo" style="${meta.logoStyle}">${meta.logoMark}</div>
+            <div class="group-board-account-main">
+                <div class="account-name">${escapeHtml(account.name || account.serviceName || 'Tài khoản')}</div>
+                <div class="shared-account-meta">${escapeHtml(account.displayUsername || '')}${account.groupNote ? ` · ${escapeHtml(account.groupNote)}` : ''}</div>
+            </div>
+            <span class="group-board-jump" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M9 18l6-6-6-6"/></svg></span>
+        </button>
         ${renderGroupAccountCategorySelect(group, account)}
         ${canManage ? `<div class="group-board-account-actions">
             <button type="button" class="copy-btn" onclick="handleMoveSharedAccount('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','up','${escapeJsAttr(categoryId || '')}')" title="Đưa lên" ${index <= 0 ? 'disabled' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18,15 12,9 6,15"/></svg></button>
@@ -2015,7 +2018,10 @@ function renderGroupBoard(group) {
         accounts: accounts.filter(account => account.groupCategoryId === category.id),
     }));
     const uncategorized = accounts.filter(account => !account.groupCategoryId || !categories.some(category => category.id === account.groupCategoryId));
-    sections.push({ id: '', name: 'Chưa phân loại', note: '', icon: 'folder', color: '#6B7280', order: 9999, accounts: uncategorized });
+    // Chỉ hiện mục "Chưa phân loại" khi thực sự có tài khoản chưa xếp danh mục.
+    if (uncategorized.length) {
+        sections.push({ id: '', name: 'Chưa phân loại', note: '', icon: 'folder', color: '#6B7280', order: 9999, accounts: uncategorized });
+    }
     return `<div class="group-board">
         <div class="group-board-head">
             <div>
@@ -2065,7 +2071,10 @@ function renderSharedAccountCard(group, account) {
             });
         }
     }
-    return `<div class="d-account-card group-account-card shared-account-card anim-fade-in-up">
+    const targetId = typeof getGroupAccountTargetId === 'function'
+        ? getGroupAccountTargetId(group.id, account.id)
+        : `group-account-${group.id}-${account.id}`;
+    return `<div id="${escapeHtml(targetId)}" class="d-account-card group-account-card shared-account-card anim-fade-in-up" data-shared-account-id="${escapeHtml(account.id)}">
         <div class="d-account-card-top shared-account-top">
             <div class="account-logo" style="${meta.logoStyle}">${meta.logoMark}</div>
             <div class="shared-account-info">
@@ -2616,6 +2625,32 @@ function formatUpdateLogStatus(status) {
     return UPDATE_LOG_STATUS_LABELS[key] || status || '';
 }
 
+function formatUpdateReleaseNotes(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    const looksLikeHtml = /<\/?[a-z][\s\S]*>/i.test(raw);
+    let text = raw;
+
+    if (looksLikeHtml) {
+        text = raw
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
+            .replace(/<[^>]+>/g, '');
+    }
+
+    return text
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, "'")
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
 function renderUpdateProgress(status) {
     if (status?.status !== 'downloading') return '';
     const percent = clampUpdatePercent(status.progress?.percent ?? status.percent);
@@ -2658,7 +2693,7 @@ function showUpdateNotification(payload) {
     }
 
     // Dialog nổi (7.6/7.8): khuyến nghị cập nhật, kèm nút "Cập nhật ngay" và "Bỏ qua".
-    const notes = info?.releaseNotes || (info?.manifest && info.manifest.releaseNotes) || '';
+    const notes = formatUpdateReleaseNotes(info?.releaseNotes || (info?.manifest && info.manifest.releaseNotes) || '');
     const notesHtml = notes
         ? `<div class="update-dialog-notes" style="margin:12px 0;white-space:pre-wrap">${escapeHtml(notes)}</div>`
         : '';
@@ -2735,7 +2770,7 @@ function renderMinSupportedWarning(platform, status) {
 // hiệu hoá "Kiểm tra" theo Platform_Detector, định tuyến hành động theo nền tảng, và
 // khoá hành động khi đang tải (Requirements 1.1-1.6, 3.4/3.5/3.7, 4.4/4.6/4.8, 10.1-10.4).
 function renderUpdateSection() {
-    const version = escapeHtml(window.appState.appVersion || '1.4.1');
+    const version = escapeHtml(window.appState.appVersion || '1.4.2');
     const platform = getUpdatePlatform();
     const cap = getUpdateCapability(platform);
     const status = window.appState.updateStatus;
@@ -2747,7 +2782,7 @@ function renderUpdateSection() {
     const busy = checking || downloading;
     const info = status?.info || {};
     const latest = escapeHtml(info.latestVersion || info.version || info.manifest?.latestVersion || '');
-    const notes = escapeHtml(info.releaseNotes || info.manifest?.releaseNotes || info.releaseName || '');
+    const notes = escapeHtml(formatUpdateReleaseNotes(info.releaseNotes || info.manifest?.releaseNotes || info.releaseName || ''));
     const checkDisabled = !cap.canCheck || busy;
     const checkLabel = checking ? 'Đang kiểm tra' : 'Kiểm tra';
     const statusMessage = escapeHtml(getUpdateStatusMessage(status));
@@ -2773,10 +2808,11 @@ function renderUpdateSection() {
         </div>`
         : '';
 
-    const latestHtml = latest
+    const showReleaseInfo = available || downloading || ready;
+    const latestHtml = showReleaseInfo && latest
         ? `<div class="settings-update-latest" aria-label="Phiên bản mới ${latest}">Phiên bản mới: <strong>${latest}</strong></div>`
         : '';
-    const notesHtml = notes
+    const notesHtml = showReleaseInfo && notes
         ? `<div class="settings-update-notes">${notes}</div>`
         : '';
 

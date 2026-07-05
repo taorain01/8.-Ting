@@ -308,6 +308,41 @@ describe('renderUpdateSection: hiển thị Installed_Version + định tuyến 
     expect(html).toContain('Phiên bản mới 1.4.0');
     expect(html).toContain('startUpdateDownload()');
   });
+
+  it('up-to-date: does not show same-version latest card or stale release notes', () => {
+    const { exports } = loadDesktopUi(makeWindow({
+      electronAPI: { isElectron: true },
+      appState: {
+        appVersion: '1.4.2',
+        updateStatus: {
+          status: 'not-available',
+          info: { latestVersion: '1.4.2', releaseNotes: '<p>Current release notes</p>' },
+        },
+        updateLog: [],
+      },
+    }));
+    const html = exports.renderUpdateSection();
+    expect(html).not.toContain('settings-update-latest');
+    expect(html).not.toContain('settings-update-notes');
+  });
+
+  it('available update: renders HTML release notes as clean text', () => {
+    const { exports } = loadDesktopUi(makeWindow({
+      electronAPI: { isElectron: true },
+      appState: {
+        appVersion: '1.4.0',
+        updateStatus: {
+          status: 'available',
+          info: { latestVersion: '1.4.2', releaseNotes: '<p>Fix html notes</p>' },
+        },
+        updateLog: [],
+      },
+    }));
+    const html = exports.renderUpdateSection();
+    expect(html).toContain('Fix html notes');
+    expect(html).not.toContain('&lt;p&gt;');
+    expect(html).not.toContain('<p>Fix html notes</p>');
+  });
 });
 
 // ---------------------------------------------------------------------------

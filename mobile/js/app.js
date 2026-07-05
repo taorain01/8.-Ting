@@ -28,7 +28,7 @@ window.appState = {
     isOnline: typeof navigator === 'undefined' ? true : navigator.onLine !== false,
     firestoreFromCache: false,
     pendingSyncCount: 0,
-    appVersion: '1.4.1',
+    appVersion: '1.4.2',
     updateStatus: null,
     updateLog: [],
     expandedGroups: {},
@@ -974,6 +974,7 @@ document.addEventListener('DOMContentLoaded', () => {
     schedulePeriodicCheck();
     initHardwareBackButton();
     initSmartNavigationInputs();
+    initUpdateArtifactCleanup();
     setTimeout(async () => {
         await ensureNotificationPermissionOnStartup?.();
         await startBackgroundNotificationCheck?.();
@@ -1515,6 +1516,39 @@ function syncMobileUpdateLog(updater = window.TingMobileUpdater) {
     if (Array.isArray(log)) window.appState.updateLog = log;
 }
 
+async function cleanupOldUpdateApk(options = {}) {
+    const updater = window.TingMobileUpdater;
+    if (!updater?.cleanupDownloadedApk) return false;
+    if (!options.force && window.appState.updateDownloadActive) return false;
+    if (window.appState.updateCleanupInProgress) return false;
+    window.appState.updateCleanupInProgress = true;
+    try {
+        await updater.cleanupDownloadedApk();
+        return true;
+    } catch (_error) {
+        return false;
+    } finally {
+        window.appState.updateCleanupInProgress = false;
+    }
+}
+
+function initUpdateArtifactCleanup() {
+    if (window.appState.updateArtifactCleanupReady) return;
+    window.appState.updateArtifactCleanupReady = true;
+
+    setTimeout(() => cleanupOldUpdateApk(), 800);
+
+    const appPlugin = window.Capacitor?.Plugins?.App;
+    appPlugin?.addListener?.('appStateChange', state => {
+        if (state?.isActive) cleanupOldUpdateApk();
+    });
+    appPlugin?.addListener?.('resume', () => cleanupOldUpdateApk());
+
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) cleanupOldUpdateApk();
+    });
+}
+
 async function checkForUpdates() {
     const updater = window.TingMobileUpdater;
     if (!updater?.checkForUpdate) {
@@ -1549,6 +1583,7 @@ async function startUpdateDownload() {
         return;
     }
     const info = window.appState.updateStatus?.info || null;
+    await cleanupOldUpdateApk({ force: true });
     const setDownloading = percent => {
         window.appState.updateStatus = {
             ...(window.appState.updateStatus || {}),
@@ -1560,6 +1595,7 @@ async function startUpdateDownload() {
     };
     setDownloading(0);
     const offProgress = updater.onProgress?.(percent => setDownloading(Number(percent)));
+    window.appState.updateDownloadActive = true;
     try {
         const result = await updater.downloadAndInstall(info);
         window.appState.updateStatus = result;
@@ -1576,6 +1612,7 @@ async function startUpdateDownload() {
         };
         renderSettings();
     } finally {
+        window.appState.updateDownloadActive = false;
         if (typeof offProgress === 'function') offProgress();
     }
 }
