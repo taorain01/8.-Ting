@@ -151,6 +151,9 @@ function runGroupsChangedRender() {
         // Data-driven refresh: render without replaying entrance animations to avoid flicker.
         renderGroupDetail(window.appState.currentGroupId || groupId, { quiet: true });
     }
+    if (page === 'group-design' && (!groupId || window.appState.currentGroupId === groupId) && typeof renderGroupDesign === 'function') {
+        renderGroupDesign(window.appState.currentGroupId || groupId);
+    }
 }
 
 // Firestore snapshots (with includeMetadataChanges) + the group doc "updatedAt" write

@@ -28,7 +28,7 @@ window.appState = {
     isOnline: typeof navigator === 'undefined' ? true : navigator.onLine !== false,
     firestoreFromCache: false,
     pendingSyncCount: 0,
-    appVersion: '1.3.9',
+    appVersion: '1.4.0',
     updateStatus: null,
     updateLog: [],
     expandedGroups: {},
@@ -117,7 +117,7 @@ function createNavEntry() {
     return {
         page,
         accountId: page === 'detail' ? (window.appState.currentDetailId || null) : null,
-        groupId: page === 'group-detail' ? (window.appState.currentGroupId || null) : null,
+        groupId: (page === 'group-detail' || page === 'group-design') ? (window.appState.currentGroupId || null) : null,
         currentFilter: window.appState.currentFilter || 'all',
         currentTagFilter: window.appState.currentTagFilter || '',
         currentPlatformFilter: window.appState.currentPlatformFilter || '',
@@ -188,6 +188,9 @@ async function restoreNavEntry(entry) {
         if (ok === false) return false;
     } else if (entry.page === 'group-detail' && entry.groupId) {
         const ok = openGroupDetail(entry.groupId, true);
+        if (ok === false) return false;
+    } else if (entry.page === 'group-design' && entry.groupId) {
+        const ok = openGroupDesign(entry.groupId, true);
         if (ok === false) return false;
     } else {
         navigateTo(entry.page, true);
@@ -993,7 +996,7 @@ function navigateTo(page, isBack = false) {
     }
     resetBackExitPrompt();
 
-    const navPage = page === 'group-detail'
+    const navPage = (page === 'group-detail' || page === 'group-design')
         ? 'groups'
         : (page === 'categories' || page === 'trash' || page.startsWith('category:')) ? 'settings' : page;
     document.querySelectorAll('.nav-item').forEach(item => {
@@ -1004,13 +1007,14 @@ function navigateTo(page, isBack = false) {
     if (searchInput && !isRestoring) searchInput.value = '';
 
     const fab = document.getElementById('fab-add');
-    if (fab) fab.style.display = (page === 'settings' || page === 'detail' || page === 'trash' || page === 'categories' || page === 'groups' || page === 'group-detail') ? 'none' : '';
+    if (fab) fab.style.display = (page === 'settings' || page === 'detail' || page === 'trash' || page === 'categories' || page === 'groups' || page === 'group-detail' || page === 'group-design') ? 'none' : '';
 
     if (page === 'dashboard') renderDashboard();
     else if (page === 'bought') renderAccountList('bought');
     else if (page === 'personal') handlePersonalPage();
     else if (page === 'groups') renderGroupList();
     else if (page === 'group-detail') renderGroupDetail(window.appState.currentGroupId);
+    else if (page === 'group-design') renderGroupDesign(window.appState.currentGroupId);
     else if (page === 'settings') renderSettings();
     else if (page === 'categories') renderCategoriesPage();
     else if (page === 'trash') renderTrashList();
@@ -1027,6 +1031,7 @@ function handleSearch(value) {
     else if (page === 'personal') renderAccountList('personal');
     else if (page === 'groups') renderGroupList();
     else if (page === 'group-detail') renderGroupDetail(window.appState.currentGroupId);
+    else if (page === 'group-design') renderGroupDesign(window.appState.currentGroupId);
     else if (page === 'trash') renderTrashList();
     else if (page === 'categories') renderCategoriesPage();
     else if (page.startsWith('category:')) renderCategoryDetail(page.slice('category:'.length));
@@ -1127,6 +1132,7 @@ function rerenderCurrentView(accountId) {
     else if (page === 'personal') renderAccountList('personal');
     else if (page === 'groups') renderGroupList();
     else if (page === 'group-detail') renderGroupDetail(window.appState.currentGroupId);
+    else if (page === 'group-design') renderGroupDesign(window.appState.currentGroupId);
     else if (page === 'trash') renderTrashList();
     else if (page === 'categories') renderCategoriesPage();
     else if (page.startsWith('category:')) renderCategoryDetail(page.slice('category:'.length));
@@ -1950,6 +1956,62 @@ function openGroupDetail(groupId, isBack = false) {
     return true;
 }
 
+function openGroupDesign(groupId, isBack = false) {
+    const group = getGroupById?.(groupId);
+    if (!group) {
+        showToast('Không tìm thấy nhóm', 'error');
+        return false;
+    }
+    if (group.role !== 'owner') {
+        showToast('Chỉ chủ nhóm được thiết kế danh mục', 'error');
+        return false;
+    }
+    if (!isBack) recordNavHistory();
+    window.appState.previousPage = window.appState.currentPage;
+    window.appState.currentPage = 'group-design';
+    window.appState.currentGroupId = groupId;
+    document.querySelectorAll('.nav-item').forEach(item => item.classList.toggle('active', item.dataset.page === 'groups'));
+    const fab = document.getElementById('fab-add');
+    if (fab) fab.style.display = 'none';
+    loadSharedAccountsRealtime?.(groupId);
+    loadSharedEditRequestsRealtime?.(groupId);
+    renderGroupDesign(groupId);
+    if (!isBack) resetNavScroll();
+    return true;
+}
+
+function getGroupAccountTargetId(groupId, accountId) {
+    return `group-account-target-${encodeURIComponent(String(groupId || ''))}-${encodeURIComponent(String(accountId || ''))}`;
+}
+
+function scrollToGroupAccountTarget(groupId, accountId) {
+    const target = document.getElementById(getGroupAccountTargetId(groupId, accountId));
+    if (!target) return false;
+    const run = () => {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        target.classList.add('group-account-highlight');
+        window.setTimeout(() => target.classList.remove('group-account-highlight'), 1800);
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+    else run();
+    return true;
+}
+
+function openGroupAccountInAccountsTab(groupId, accountId) {
+    const group = getGroupById?.(groupId);
+    if (!group) return false;
+    window.appState.currentPage = 'group-detail';
+    window.appState.currentGroupId = groupId;
+    window.appState.currentGroupTab = 'accounts';
+    renderGroupDetail(groupId);
+    requestAnimationFrame(() => {
+        if (!scrollToGroupAccountTarget(groupId, accountId)) {
+            setTimeout(() => scrollToGroupAccountTarget(groupId, accountId), 120);
+        }
+    });
+    return true;
+}
+
 function openUnlockGroupModal(groupId) {
     const group = getGroupById?.(groupId);
     if (!group) return;
@@ -2145,21 +2207,69 @@ function createUniqueGroupCategoryId(name, categories = []) {
     return id;
 }
 
+const GROUP_CATEGORY_ICON_CHOICES = ['folder', 'star', 'work', 'ai', 'music', 'video', 'mail', 'team'];
+
+function getGroupCategoryIconLabel(iconId) {
+    const labels = {
+        folder: 'Folder',
+        star: 'Star',
+        work: 'Work',
+        ai: 'AI',
+        music: 'Music',
+        video: 'Video',
+        mail: 'Mail',
+        team: 'Team',
+    };
+    return labels[iconId] || iconId;
+}
+
+function renderGroupCategoryIconPicker(activeIcon = 'folder', color = '#6C5CE7') {
+    return `<div class="group-category-icon-picker" style="--category-color:${escapeHtml(color || '#6C5CE7')}">
+        ${GROUP_CATEGORY_ICON_CHOICES.map(iconId => {
+            const category = { icon: iconId, color };
+            return `<button type="button" class="group-category-icon-choice ${iconId === activeIcon ? 'active' : ''}" data-icon="${escapeJsAttr(iconId)}" onclick="selectGroupCategoryIcon('${escapeJsAttr(iconId)}')" title="${escapeHtml(getGroupCategoryIconLabel(iconId))}">
+                ${typeof renderGroupCategoryIcon === 'function' ? renderGroupCategoryIcon(category) : escapeHtml(iconId.slice(0, 2).toUpperCase())}
+            </button>`;
+        }).join('')}
+    </div>`;
+}
+
+function selectGroupCategoryIcon(iconId) {
+    const input = document.getElementById('group-category-icon');
+    if (input) input.value = iconId;
+    document.querySelectorAll('.group-category-icon-choice').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.icon === iconId);
+    });
+}
+
+function applyGroupCategoriesLocal(groupId, categories = []) {
+    const group = getGroupById?.(groupId);
+    if (!group) return;
+    group.accountCategories = typeof normalizeGroupAccountCategories === 'function'
+        ? normalizeGroupAccountCategories(categories)
+        : categories.map((category, order) => ({ ...category, order }));
+}
+
 function openGroupCategoryModal(groupId, categoryId = '') {
     const group = getGroupById?.(groupId);
     if (!group || group.role !== 'owner') return;
     const categories = getGroupAccountCategories?.(group) || [];
     const category = categories.find(item => item.id === categoryId) || null;
+    const icon = String(category?.icon || 'folder').trim() || 'folder';
+    const color = String(category?.color || '#6C5CE7').trim() || '#6C5CE7';
     openModal(category ? 'Sửa danh mục nhóm' : 'Thêm danh mục nhóm', `
-        <div class="form-section-title">Tên danh mục</div>
-        <input type="text" id="group-category-name" class="input" value="${escapeHtml(category?.name || '')}" placeholder="VD: AI, Giải trí, Team YouTube" style="padding-left:16px">
-        <div class="form-section-title">Icon</div>
-        <input type="text" id="group-category-icon" class="input" value="${escapeHtml(category?.icon || 'folder')}" placeholder="folder, star, work..." style="padding-left:16px">
-        <div class="form-section-title">Màu</div>
-        <input type="color" id="group-category-color" class="input" value="${escapeHtml(category?.color || '#6C5CE7')}" style="height:44px;padding:8px 16px">
-        <div class="form-section-title">Ghi chú danh mục</div>
-        <textarea id="group-category-note" class="textarea-paste" style="min-height:96px" placeholder="Ghi chú dùng chung cho danh mục này">${escapeHtml(category?.note || '')}</textarea>
-        <button class="btn btn-primary" style="margin-top:18px" onclick="submitGroupCategory('${escapeJsAttr(groupId)}','${escapeJsAttr(categoryId)}')">${category ? 'Lưu danh mục' : 'Thêm danh mục'}</button>
+        <div class="group-category-editor">
+            <div class="form-section-title">Tên danh mục</div>
+            <input type="text" id="group-category-name" class="input" value="${escapeHtml(category?.name || '')}" placeholder="VD: Korean RnB, Team YouTube" style="padding-left:16px">
+            <input type="hidden" id="group-category-icon" value="${escapeHtml(icon)}">
+            <div class="form-section-title">Icon</div>
+            ${renderGroupCategoryIconPicker(icon, color)}
+            <div class="form-section-title">Màu</div>
+            <input type="color" id="group-category-color" class="input category-color-input" value="${escapeHtml(color)}" onchange="document.querySelector('.group-category-icon-picker')?.style.setProperty('--category-color', this.value)">
+            <div class="form-section-title">Ghi chú danh mục</div>
+            <textarea id="group-category-note" class="textarea-paste" style="min-height:96px" placeholder="Ghi chú hiển thị dưới tên danh mục">${escapeHtml(category?.note || '')}</textarea>
+            <button class="btn btn-primary" style="margin-top:18px" onclick="submitGroupCategory('${escapeJsAttr(groupId)}','${escapeJsAttr(categoryId)}')">${category ? 'Lưu danh mục' : 'Thêm danh mục'}</button>
+        </div>
     `);
     setTimeout(() => document.getElementById('group-category-name')?.focus(), 50);
 }
@@ -2187,8 +2297,11 @@ async function submitGroupCategory(groupId, categoryId = '') {
         : [...categories, nextCategory];
     try {
         await updateGroupAccountCategories(groupId, next);
+        applyGroupCategoriesLocal(groupId, next);
         closeModal();
         showToast(existing ? 'Đã cập nhật danh mục nhóm' : 'Đã thêm danh mục nhóm', 'success');
+        if (window.appState.currentPage === 'group-design') renderGroupDesign(groupId);
+        else if (window.appState.currentPage === 'group-detail') renderGroupDetail(groupId);
     } catch (error) {
         showToast(error.message || 'Không lưu được danh mục nhóm', 'error');
     }
@@ -2204,8 +2317,11 @@ async function handleMoveGroupCategory(groupId, categoryId, direction) {
     const next = [...categories];
     [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
     try {
-        await updateGroupAccountCategories(groupId, next.map((item, order) => ({ ...item, order })));
+        const ordered = next.map((item, order) => ({ ...item, order }));
+        await updateGroupAccountCategories(groupId, ordered);
+        applyGroupCategoriesLocal(groupId, ordered);
         showToast('Đã sắp xếp danh mục', 'success');
+        if (window.appState.currentPage === 'group-design') renderGroupDesign(groupId);
     } catch (error) {
         showToast(error.message || 'Không sắp xếp được danh mục', 'error');
     }
@@ -2218,11 +2334,19 @@ async function handleDeleteGroupCategory(groupId, categoryId) {
     const category = categories.find(item => item.id === categoryId);
     if (!category) return;
     const affected = (window.appState.sharedAccounts?.[groupId] || []).filter(account => account.groupCategoryId === categoryId);
-    if (!confirm(`Xoá danh mục "${category.name}"?${affected.length ? ` ${affected.length} tài khoản sẽ về Chưa phân loại.` : ''}`)) return;
+    if (!confirm(`Xoá danh mục "${category.name}"?${affected.length ? ` ${affected.length} tài khoản sẽ về Tài khoản chưa xếp.` : ''}`)) return;
     try {
-        await updateGroupAccountCategories(groupId, categories.filter(item => item.id !== categoryId).map((item, order) => ({ ...item, order })));
+        const nextCategories = categories.filter(item => item.id !== categoryId).map((item, order) => ({ ...item, order }));
+        await updateGroupAccountCategories(groupId, nextCategories);
         await Promise.all(affected.map(account => updateSharedAccountGroupMeta(groupId, account.id, { groupCategoryId: null })));
+        applyGroupCategoriesLocal(groupId, nextCategories);
+        affected.forEach(account => {
+            account.groupCategoryId = null;
+            account.groupSortOrder = null;
+        });
         showToast('Đã xoá danh mục nhóm', 'success');
+        if (window.appState.currentPage === 'group-design') renderGroupDesign(groupId);
+        else if (window.appState.currentPage === 'group-detail') renderGroupDetail(groupId);
     } catch (error) {
         showToast(error.message || 'Không xoá được danh mục nhóm', 'error');
     }
@@ -2240,7 +2364,11 @@ function canManageSharedAccountForUi(group, account) {
 async function handleSetSharedAccountCategory(groupId, accountId, categoryId = '') {
     try {
         await updateSharedAccountGroupMeta(groupId, accountId, { groupCategoryId: categoryId || null });
+        const account = getSharedAccountById?.(groupId, accountId);
+        if (account) account.groupCategoryId = categoryId || null;
         showToast('Đã chuyển danh mục tài khoản', 'success');
+        if (window.appState.currentPage === 'group-design') renderGroupDesign(groupId);
+        else if (window.appState.currentPage === 'group-detail') renderGroupDetail(groupId);
     } catch (error) {
         showToast(error.message || 'Không chuyển được danh mục', 'error');
     }
@@ -2259,10 +2387,217 @@ async function handleMoveSharedAccount(groupId, accountId, direction, categoryId
         await Promise.all(ordered.map((account, order) => (
             updateSharedAccountGroupMeta(groupId, account.id, { groupSortOrder: (order + 1) * 1000 })
         )));
+        ordered.forEach((account, order) => {
+            account.groupSortOrder = (order + 1) * 1000;
+        });
         showToast('Đã sắp xếp tài khoản', 'success');
+        if (window.appState.currentPage === 'group-design') renderGroupDesign(groupId);
     } catch (error) {
         showToast(error.message || 'Không sắp xếp được tài khoản', 'error');
     }
+}
+
+function initGroupDesignDragHandlers() {
+    if (window.appState.groupDesignDragReady) return;
+    window.appState.groupDesignDragReady = true;
+    document.addEventListener('pointerdown', startGroupDesignDrag);
+}
+
+function getGroupDesignCategoryOrderFromDom() {
+    return [...document.querySelectorAll('[data-design-category-list] .group-design-category-card[data-category-id]')]
+        .map(card => card.dataset.categoryId)
+        .filter(Boolean);
+}
+
+function getGroupDesignAccountSnapshot(groupId) {
+    return (window.appState.sharedAccounts?.[groupId] || []).map(account => ({
+        id: account.id,
+        groupCategoryId: account.groupCategoryId || null,
+        groupSortOrder: Number.isFinite(Number(account.groupSortOrder)) ? Number(account.groupSortOrder) : null,
+    }));
+}
+
+function restoreGroupDesignAccountSnapshot(groupId, snapshot = []) {
+    const previous = new Map(snapshot.map(item => [item.id, item]));
+    (window.appState.sharedAccounts?.[groupId] || []).forEach(account => {
+        const item = previous.get(account.id);
+        if (!item) return;
+        account.groupCategoryId = item.groupCategoryId;
+        account.groupSortOrder = item.groupSortOrder;
+    });
+}
+
+function collectGroupDesignAccountUpdates() {
+    const updates = [];
+    document.querySelectorAll('.group-design-account-zone').forEach(zone => {
+        const categoryId = zone.dataset.dropCategoryId || null;
+        [...zone.querySelectorAll('.group-design-account[data-account-id]')].forEach((card, index) => {
+            updates.push({
+                id: card.dataset.accountId,
+                groupCategoryId: categoryId,
+                groupSortOrder: (index + 1) * 1000,
+            });
+        });
+    });
+    return updates;
+}
+
+function applyGroupDesignAccountUpdatesLocal(groupId, updates = []) {
+    const byId = new Map(updates.map(item => [item.id, item]));
+    const accounts = window.appState.sharedAccounts?.[groupId] || [];
+    accounts.forEach(account => {
+        const update = byId.get(account.id);
+        if (!update) return;
+        account.groupCategoryId = update.groupCategoryId;
+        account.groupSortOrder = update.groupSortOrder;
+    });
+    if (typeof sortSharedAccountsForGroup === 'function') {
+        window.appState.sharedAccounts[groupId] = sortSharedAccountsForGroup(accounts);
+    }
+}
+
+function sameGroupDesignAccountPlacement(previousMap, update) {
+    const previous = previousMap.get(update.id);
+    if (!previous) return false;
+    return (previous.groupCategoryId || null) === (update.groupCategoryId || null)
+        && Number(previous.groupSortOrder || 0) === Number(update.groupSortOrder || 0);
+}
+
+async function persistGroupDesignCategoryDrag(groupId, previousIds = []) {
+    const nextIds = getGroupDesignCategoryOrderFromDom();
+    if (nextIds.length !== previousIds.length || nextIds.every((id, index) => id === previousIds[index])) return;
+    const group = getGroupById?.(groupId);
+    const categories = getGroupAccountCategories?.(group) || [];
+    const byId = new Map(categories.map(category => [category.id, category]));
+    const ordered = nextIds
+        .map((id, order) => byId.get(id) ? { ...byId.get(id), order } : null)
+        .filter(Boolean);
+    const previousCategories = categories.map(category => ({ ...category }));
+    applyGroupCategoriesLocal(groupId, ordered);
+    try {
+        await updateGroupAccountCategories(groupId, ordered);
+        showToast('Đã sắp xếp danh mục', 'success');
+        renderGroupDesign(groupId);
+    } catch (error) {
+        applyGroupCategoriesLocal(groupId, previousCategories);
+        renderGroupDesign(groupId);
+        showToast(error.message || 'Không sắp xếp được danh mục', 'error');
+    }
+}
+
+async function persistGroupDesignAccountDrag(groupId, previousSnapshot = []) {
+    const updates = collectGroupDesignAccountUpdates();
+    const previousMap = new Map(previousSnapshot.map(item => [item.id, item]));
+    const changed = updates.filter(update => !sameGroupDesignAccountPlacement(previousMap, update));
+    if (!changed.length) return;
+    applyGroupDesignAccountUpdatesLocal(groupId, updates);
+    try {
+        await Promise.all(changed.map(update => (
+            updateSharedAccountGroupMeta(groupId, update.id, {
+                groupCategoryId: update.groupCategoryId,
+                groupSortOrder: update.groupSortOrder,
+            })
+        )));
+        showToast('Đã cập nhật sắp xếp tài khoản', 'success');
+        renderGroupDesign(groupId);
+    } catch (error) {
+        restoreGroupDesignAccountSnapshot(groupId, previousSnapshot);
+        renderGroupDesign(groupId);
+        showToast(error.message || 'Không sắp xếp được tài khoản', 'error');
+    }
+}
+
+function clearGroupDesignDropTargets() {
+    document.querySelectorAll('.group-design-account-zone.is-drop-target').forEach(zone => zone.classList.remove('is-drop-target'));
+}
+
+function startGroupDesignDrag(event) {
+    if (window.appState.currentPage !== 'group-design') return;
+    const handle = event.target.closest?.('[data-drag-handle]');
+    const item = handle?.closest?.('[data-design-draggable]');
+    if (!handle || !item) return;
+    event.preventDefault();
+    const type = item.dataset.designDraggable;
+    const groupId = window.appState.currentGroupId;
+    const state = {
+        type,
+        groupId,
+        item,
+        pointerId: event.pointerId,
+        moved: false,
+        previousCategoryIds: getGroupDesignCategoryOrderFromDom(),
+        previousAccounts: getGroupDesignAccountSnapshot(groupId),
+    };
+    window.appState.groupDesignDrag = state;
+    item.classList.add('is-dragging');
+    document.body.classList.add('is-group-design-dragging');
+    document.addEventListener('pointermove', moveGroupDesignDrag, { passive: false });
+    document.addEventListener('pointerup', finishGroupDesignDrag, { passive: false });
+    document.addEventListener('pointercancel', cancelGroupDesignDrag, { passive: false });
+}
+
+function moveGroupDesignDrag(event) {
+    const state = window.appState.groupDesignDrag;
+    if (!state || event.pointerId !== state.pointerId) return;
+    event.preventDefault();
+    state.moved = true;
+    const over = document.elementFromPoint(event.clientX, event.clientY);
+    if (!over) return;
+
+    if (state.type === 'category') {
+        const list = document.querySelector('[data-design-category-list]');
+        const target = over.closest?.('.group-design-category-card[data-category-id]');
+        if (!list || !target || target === state.item) return;
+        const rect = target.getBoundingClientRect();
+        const before = event.clientY < rect.top + rect.height / 2;
+        list.insertBefore(state.item, before ? target : target.nextSibling);
+        return;
+    }
+
+    if (state.type === 'account') {
+        const zone = over.closest?.('.group-design-account-zone');
+        if (!zone) return;
+        clearGroupDesignDropTargets();
+        zone.classList.add('is-drop-target');
+        zone.querySelector('.group-design-empty')?.remove();
+        const targetAccount = over.closest?.('.group-design-account[data-account-id]:not(.is-dragging)');
+        if (targetAccount && zone.contains(targetAccount)) {
+            const rect = targetAccount.getBoundingClientRect();
+            const before = event.clientY < rect.top + rect.height / 2;
+            zone.insertBefore(state.item, before ? targetAccount : targetAccount.nextSibling);
+        } else if (state.item.parentElement !== zone) {
+            zone.appendChild(state.item);
+        }
+        state.item.dataset.categoryId = zone.dataset.dropCategoryId || '';
+    }
+}
+
+async function finishGroupDesignDrag(event) {
+    const state = window.appState.groupDesignDrag;
+    if (!state || event.pointerId !== state.pointerId) return;
+    event.preventDefault();
+    cleanupGroupDesignDrag();
+    if (!state.moved) return;
+    if (state.type === 'category') await persistGroupDesignCategoryDrag(state.groupId, state.previousCategoryIds);
+    else await persistGroupDesignAccountDrag(state.groupId, state.previousAccounts);
+}
+
+function cancelGroupDesignDrag(event) {
+    const state = window.appState.groupDesignDrag;
+    if (!state || event.pointerId !== state.pointerId) return;
+    cleanupGroupDesignDrag();
+    renderGroupDesign(state.groupId);
+}
+
+function cleanupGroupDesignDrag() {
+    const state = window.appState.groupDesignDrag;
+    if (state?.item) state.item.classList.remove('is-dragging');
+    window.appState.groupDesignDrag = null;
+    clearGroupDesignDropTargets();
+    document.body.classList.remove('is-group-design-dragging');
+    document.removeEventListener('pointermove', moveGroupDesignDrag);
+    document.removeEventListener('pointerup', finishGroupDesignDrag);
+    document.removeEventListener('pointercancel', cancelGroupDesignDrag);
 }
 
 function openSharedAccountGroupNoteModal(groupId, accountId) {
