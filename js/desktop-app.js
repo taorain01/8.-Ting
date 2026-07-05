@@ -55,7 +55,7 @@ window.appState = {
         notifyOverdueDays: 3,
         shortcuts: { openApp: 'Control+Shift+T', quickAdd: 'Control+Shift+S' },
     },
-    appVersion: '1.4.0',
+    appVersion: '1.4.1',
     updateStatus: null,
     updateLog: [],
 };
@@ -360,6 +360,19 @@ function initSmartNavigationInputs() {
 }
 
 // ===== HEADER / SIDEBAR =====
+function formatSidebarVersion(version) {
+    const raw = String(version || '1.4.1').trim().replace(/^v/i, '');
+    return raw ? `v${raw}` : 'v1.4.1';
+}
+
+function updateSidebarVersion() {
+    const el = document.getElementById('sidebar-version');
+    if (!el) return;
+    const label = formatSidebarVersion(window.appState.appVersion);
+    el.textContent = label;
+    el.title = `Ting! ${label}`;
+}
+
 function updateHeader() {
     const u = window.appState.user;
     document.getElementById('sidebar-name').textContent = u.name;
@@ -367,6 +380,7 @@ function updateHeader() {
     const av = document.getElementById('sidebar-avatar');
     if (u.avatar) { av.innerHTML = `<img src="${u.avatar}" alt="">`; }
     else { av.innerHTML = `<span>${u.name.charAt(0).toUpperCase()}</span>`; }
+    updateSidebarVersion();
     // Nav badges
     const bought = window.appState.accounts.filter(a => a.type === 'bought').length;
     const personal = window.appState.accounts.filter(a => a.type === 'personal').length;
@@ -4385,7 +4399,10 @@ async function initDesktopIntegrations() {
         ]);
         if (typeof autoStart === 'boolean') window.appState.settings.autoStart = autoStart;
         if (typeof autoLockMinutes === 'number') window.appState.settings.autoLockMinutes = autoLockMinutes;
-        if (version) window.appState.appVersion = version;
+        if (version) {
+            window.appState.appVersion = version;
+            updateSidebarVersion();
+        }
         if (Array.isArray(updateLog)) window.appState.updateLog = updateLog;
         if (shortcuts && typeof shortcuts === 'object') window.appState.settings.shortcuts = shortcuts;
     } catch (error) {

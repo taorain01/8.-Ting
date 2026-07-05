@@ -56,10 +56,10 @@
 
   /**
    * Phiên bản đang cài trên Android (khớp `versionName`/`versionCode` trong
-   * cấu hình Capacitor: versionName "1.4.0", versionCode 10400).
+   * cấu hình Capacitor: versionName "1.4.1", versionCode 10401).
    */
-  const INSTALLED_VERSION_NAME = '1.4.0';
-  const INSTALLED_VERSION_CODE = 10400;
+  const INSTALLED_VERSION_NAME = '1.4.1';
+  const INSTALLED_VERSION_CODE = 10401;
 
   /** Khóa localStorage cho nhật ký cập nhật và mốc Background_Check. */
   const STORAGE_KEY_UPDATE_LOG = 'ting.update.log';
@@ -388,11 +388,6 @@
 
       if (classification === 'up-to-date') {
         // 4.8: version code đã cài >= manifest → "Đang ở bản mới nhất".
-        writeUpdateLogEntry({
-          version: manifest.latestVersion,
-          status: 'up-to-date',
-          message: MSG_UP_TO_DATE,
-        });
         return { status: 'up-to-date', message: MSG_UP_TO_DATE, info: info };
       }
 

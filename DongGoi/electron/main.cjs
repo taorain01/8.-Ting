@@ -1245,12 +1245,14 @@ async function checkGithubRelease() {
       info.hasInstaller = true;
       info.fallback = true;
     }
-    const log = await appendUpdateLog({
-      version: latestVersion,
-      status,
-      source: 'github',
-      url: info.releaseUrl,
-    });
+    const log = isNewer
+      ? await appendUpdateLog({
+        version: latestVersion,
+        status,
+        source: 'github',
+        url: info.releaseUrl,
+      })
+      : (getSetting('updateLog', []) || []);
 
     testLog('github update check done', `${status} current=${currentVersion} latest=${latestVersion}`);
     sendToRenderer('update-event', { status, message: sanitizeUpdateMessage(message), info, log });
@@ -1323,7 +1325,6 @@ function setupAutoUpdater() {
     // Yêu cầu 3.7: đã ở bản mới nhất.
     logAndSendUpdateEvent(
       { status: 'not-available', message: 'Đang ở bản mới nhất', info },
-      { version: info?.version || normalizeVersion(app.getVersion()), status: 'not-available', source: 'github' },
     );
   });
   updater.on('download-progress', progress => {

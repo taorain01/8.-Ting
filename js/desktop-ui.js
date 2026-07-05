@@ -2589,12 +2589,54 @@ function renderUpdateStatus() {
     return `<div class="settings-item-desc">${escapeHtml(getUpdateStatusMessage(status))}</div>`;
 }
 
+const HIDDEN_UPDATE_LOG_STATUSES = new Set(['not-available', 'up-to-date', 'not_available', 'uptodate']);
+const UPDATE_LOG_STATUS_LABELS = {
+    available: 'Có bản mới',
+    'update-available': 'Có bản mới',
+    downloading: 'Đang tải',
+    downloaded: 'Đã tải xong',
+    error: 'Lỗi',
+    offline: 'Mất mạng',
+    checking: 'Đang kiểm tra',
+};
+
+function clampUpdatePercent(value) {
+    const percent = Number(value);
+    if (!Number.isFinite(percent)) return 0;
+    return Math.max(0, Math.min(100, percent));
+}
+
+function shouldRenderUpdateLogEntry(item) {
+    const status = String(item?.status || '').toLowerCase();
+    return !status || !HIDDEN_UPDATE_LOG_STATUSES.has(status);
+}
+
+function formatUpdateLogStatus(status) {
+    const key = String(status || '').toLowerCase();
+    return UPDATE_LOG_STATUS_LABELS[key] || status || '';
+}
+
+function renderUpdateProgress(status) {
+    if (status?.status !== 'downloading') return '';
+    const percent = clampUpdatePercent(status.progress?.percent ?? status.percent);
+    const rounded = Math.round(percent);
+    return `<div class="settings-update-progress" aria-label="Tiến trình tải cập nhật">
+        <div class="settings-update-progress-head">
+            <span>Đang tải trình cài đặt</span>
+            <strong>${rounded}%</strong>
+        </div>
+        <div class="settings-update-progress-track">
+            <span class="settings-update-progress-fill" style="width:${rounded}%"></span>
+        </div>
+    </div>`;
+}
+
 function renderUpdateLog() {
-    const log = window.appState.updateLog || [];
+    const log = (window.appState.updateLog || []).filter(shouldRenderUpdateLogEntry);
     if (!log.length) return '<div class="settings-empty-log">Chưa có lịch sử cập nhật</div>';
     return `<div class="settings-update-log">${log.slice(0, 5).map(item => `
         <div class="settings-update-log-row">
-            <span>${escapeHtml(item.version || 'unknown')}${item.status ? ` · ${escapeHtml(item.status)}` : ''}</span>
+            <span>${escapeHtml(item.version || 'unknown')}${item.status ? ` · ${escapeHtml(formatUpdateLogStatus(item.status))}` : ''}</span>
             <small>${escapeHtml(item.date || '')}</small>
         </div>`).join('')}</div>`;
 }
@@ -2693,7 +2735,7 @@ function renderMinSupportedWarning(platform, status) {
 // hiệu hoá "Kiểm tra" theo Platform_Detector, định tuyến hành động theo nền tảng, và
 // khoá hành động khi đang tải (Requirements 1.1-1.6, 3.4/3.5/3.7, 4.4/4.6/4.8, 10.1-10.4).
 function renderUpdateSection() {
-    const version = escapeHtml(window.appState.appVersion || '1.4.0');
+    const version = escapeHtml(window.appState.appVersion || '1.4.1');
     const platform = getUpdatePlatform();
     const cap = getUpdateCapability(platform);
     const status = window.appState.updateStatus;
@@ -2703,55 +2745,62 @@ function renderUpdateSection() {
     const ready = kind === 'downloaded';
     const available = kind === 'update-available' || kind === 'available';
     const busy = checking || downloading;
-
-    // Nút "Kiểm tra": bật theo updateCapability, vô hiệu khi đang kiểm tra/tải (1.2-1.6, 10.2).
+    const info = status?.info || {};
+    const latest = escapeHtml(info.latestVersion || info.version || info.manifest?.latestVersion || '');
+    const notes = escapeHtml(info.releaseNotes || info.manifest?.releaseNotes || info.releaseName || '');
     const checkDisabled = !cap.canCheck || busy;
     const checkLabel = checking ? 'Đang kiểm tra' : 'Kiểm tra';
-    const checkBtn = `<button class="btn btn-sm btn-outline settings-inline-btn" onclick="checkForUpdates()" ${checkDisabled ? 'disabled' : ''}>${checkLabel}</button>`;
+    const statusMessage = escapeHtml(getUpdateStatusMessage(status));
+    const statusClass = kind ? ` is-${String(kind).replace(/[^a-z0-9-]/gi, '-')}` : ' is-idle';
 
-    // Dòng chính: luôn hiển thị Installed_Version + trạng thái (1.1, 10.1, 10.3).
-    let rows = `<div class="settings-item"><div class="settings-item-icon" style="background:#E0F2FE">⬆️</div><div class="settings-item-content"><div class="settings-item-title">Ting! v${version}</div>${renderUpdateStatus()}</div>${checkBtn}</div>`;
-
-    // Cảnh báo NỔI BẬT khi Installed_Version < Min_Supported_Version, đặt lên đầu để
-    // dễ thấy; không chặn — vẫn cho bỏ qua/tiếp tục (9.7).
-    rows = renderMinSupportedWarning(platform, status) + rows;
-
-    // Nền tảng không hỗ trợ tự cập nhật: hiển thị thông báo phù hợp; web kèm link tải thủ công (1.4, 10.4).
-    if (!cap.canCheck && cap.disabledMessage) {
-        const desc = platform === 'web'
-            ? `Tải bản mới nhất từ trang phát hành. <a href="${UPDATE_RELEASES_URL}" target="_blank" rel="noopener noreferrer">Tải thủ công</a>`
-            : 'Cập nhật được quản lý bởi nền tảng.';
-        rows += `<div class="settings-item"><div class="settings-item-icon" style="background:var(--warning-bg)">ℹ️</div><div class="settings-item-content"><div class="settings-item-title">${escapeHtml(cap.disabledMessage)}</div><div class="settings-item-desc">${desc}</div></div></div>`;
+    let primaryAction = `<button class="btn btn-sm btn-outline settings-update-btn" onclick="checkForUpdates()" ${checkDisabled ? 'disabled' : ''}>${checkLabel}</button>`;
+    if ((platform === 'android' || platform === 'electron') && available && !downloading && !ready) {
+        primaryAction = `<button class="btn btn-sm btn-primary settings-update-btn" onclick="startUpdateDownload()">Cập nhật ngay</button>`;
     }
-
-    // Android có bản cập nhật: hiển thị phiên bản mới + release notes + nút "Cập nhật";
-    // khoá (ẩn) nút khi đang tải để chỉ một tiến trình tải diễn ra (4.4, 4.6).
-    if (platform === 'android' && available && !downloading) {
-        const latest = escapeHtml(status?.info?.latestVersion || '');
-        const notes = status?.info?.releaseNotes
-            ? `<div class="settings-item-desc">${escapeHtml(status.info.releaseNotes)}</div>`
-            : '';
-        rows += `<div class="settings-item"><div class="settings-item-icon" style="background:var(--accent-bg)">🆕</div><div class="settings-item-content"><div class="settings-item-title">Phiên bản mới${latest ? ' ' + latest : ''}</div>${notes}</div><button class="btn btn-sm btn-primary settings-inline-btn" onclick="startUpdateDownload()">Cập nhật</button></div>`;
-    }
-
-    // Desktop có bản mới nhưng chưa tải xong: cho phép tải installer ngay cả khi
-    // trạng thái đến từ fallback GitHub REST là "available".
-    if (platform === 'electron' && available && !downloading && !ready) {
-        const latest = escapeHtml(status?.info?.latestVersion || status?.info?.version || '');
-        const notes = status?.info?.releaseName
-            ? `<div class="settings-item-desc">${escapeHtml(status.info.releaseName)}</div>`
-            : '';
-        rows += `<div class="settings-item"><div class="settings-item-icon" style="background:var(--accent-bg)">🆕</div><div class="settings-item-content"><div class="settings-item-title">Phiên bản mới${latest ? ' ' + latest : ''}</div>${notes}</div><button class="btn btn-sm btn-primary settings-inline-btn" onclick="startUpdateDownload()">Cập nhật</button></div>`;
-    }
-
-    // Desktop đã tải xong: hiển thị "Bản cập nhật đã sẵn sàng" + nút "Cài đặt" (3.5).
     if (platform === 'electron' && ready) {
-        rows += `<div class="settings-item"><div class="settings-item-icon" style="background:var(--success-bg)">✅</div><div class="settings-item-content"><div class="settings-item-title">Bản cập nhật đã sẵn sàng</div><div class="settings-item-desc">Khởi động lại để cài đặt</div></div><button class="btn btn-sm btn-primary settings-inline-btn" onclick="installDownloadedUpdate()">Cài đặt</button></div>`;
+        primaryAction = `<button class="btn btn-sm btn-primary settings-update-btn" onclick="installDownloadedUpdate()">Cài đặt ngay</button>`;
+    }
+    if (downloading) {
+        primaryAction = `<button class="btn btn-sm btn-primary settings-update-btn" disabled>Đang tải...</button>`;
     }
 
-    rows += `<div class="settings-log-wrap">${renderUpdateLog()}</div>`;
+    const supportNotice = (!cap.canCheck && cap.disabledMessage)
+        ? `<div class="settings-update-notice">
+            <strong>${escapeHtml(cap.disabledMessage)}</strong>
+            <span>${platform === 'web'
+                ? `Tải bản mới nhất từ trang phát hành. <a href="${UPDATE_RELEASES_URL}" target="_blank" rel="noopener noreferrer">Tải thủ công</a>`
+                : 'Cập nhật được quản lý bởi nền tảng.'}</span>
+        </div>`
+        : '';
 
-    return `<div class="settings-group"><div class="settings-group-title">Phiên bản</div><div class="settings-card">${rows}</div></div>`;
+    const latestHtml = latest
+        ? `<div class="settings-update-latest" aria-label="Phiên bản mới ${latest}">Phiên bản mới: <strong>${latest}</strong></div>`
+        : '';
+    const notesHtml = notes
+        ? `<div class="settings-update-notes">${notes}</div>`
+        : '';
+
+    return `<div class="settings-group settings-update-group">
+        <div class="settings-group-title">Cập nhật</div>
+        ${renderMinSupportedWarning(platform, status)}
+        <div class="settings-update-hero${statusClass}" aria-label="Phiên bản Ting! v${version}">
+            <div class="settings-update-glow"></div>
+            <div class="settings-update-top">
+                <div class="settings-update-icon">↑</div>
+                <div class="settings-update-heading">
+                    <span class="settings-update-kicker">Ting! Desktop</span>
+                    <h3>Ting! v${version}</h3>
+                    <p>${statusMessage}</p>
+                </div>
+                <div class="settings-update-actions">${primaryAction}</div>
+            </div>
+            ${latestHtml}
+            ${notesHtml}
+            ${renderUpdateProgress(status)}
+            ${supportNotice}
+            <div class="settings-log-wrap">${renderUpdateLog()}</div>
+        </div>
+    </div>`;
 }
 
 function renderNotifyDaysOptions(days) {
@@ -2778,10 +2827,10 @@ function renderSettings() {
     const autoLock = Number(settings.autoLockMinutes ?? 5);
     document.getElementById('page-content').innerHTML = `
     <div class="settings-tabbar" role="tablist">
+        <button class="settings-tab" data-tab="update" onclick="switchSettingsTab('update')"><span class="settings-tab-ico">🔄</span> Cập nhật</button>
         <button class="settings-tab" data-tab="security" onclick="switchSettingsTab('security')"><span class="settings-tab-ico">🔒</span> Bảo mật</button>
         <button class="settings-tab" data-tab="desktop" onclick="switchSettingsTab('desktop')"><span class="settings-tab-ico">🖥️</span> Desktop</button>
         <button class="settings-tab" data-tab="notifications" onclick="switchSettingsTab('notifications')"><span class="settings-tab-ico">🔔</span> Thông báo</button>
-        <button class="settings-tab" data-tab="update" onclick="switchSettingsTab('update')"><span class="settings-tab-ico">🔄</span> Cập nhật</button>
         <button class="settings-tab" data-tab="data" onclick="switchSettingsTab('data')"><span class="settings-tab-ico">💾</span> Dữ liệu</button>
     </div>
     <div class="d-settings-panels">
@@ -2818,7 +2867,7 @@ function renderSettings() {
             <div class="settings-item" onclick="importBackup()"><div class="settings-item-icon" style="background:#E0F2FE">📥</div><div class="settings-item-content"><div class="settings-item-title">Phục hồi từ file</div><div class="settings-item-desc">Khôi phục tài khoản từ file .ting đã sao lưu</div></div><svg class="settings-item-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg></div>
         </div></div></div>
     </div>`;
-    switchSettingsTab(window._settingsActiveTab || 'security');
+    switchSettingsTab(window._settingsActiveTab || 'update');
 }
 
 function switchSettingsTab(tab) {

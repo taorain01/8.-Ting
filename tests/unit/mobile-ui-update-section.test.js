@@ -41,7 +41,7 @@ function loadMobileUi(windowOverrides = {}) {
   const pageContent = makeStubElement();
   const windowObj = Object.assign({
     appState: {
-      appVersion: '1.4.0',
+      appVersion: '1.4.1',
       updateStatus: null,
       updateLog: [],
       settings: { theme: 'system' },
@@ -89,14 +89,14 @@ describe('mobile Settings update section', () => {
     exports.renderSettings();
 
     expect(pageContent.innerHTML).toContain('Phiên bản');
-    expect(pageContent.innerHTML).toContain('Ting! v1.4.0');
+    expect(pageContent.innerHTML).toContain('Ting! v1.4.1');
     expect(pageContent.innerHTML).toContain('Kiểm tra');
   });
 
   it('shows Update button when Android update is available', () => {
     const { exports } = loadMobileUi({
       appState: {
-        appVersion: '1.4.0',
+        appVersion: '1.4.1',
         updateStatus: { status: 'update-available', info: { latestVersion: '1.3.10', releaseNotes: 'Fix' } },
         updateLog: [],
         settings: { theme: 'system' },

@@ -4,14 +4,27 @@
 !include "nsDialogs.nsh"
 !include "WinMessages.nsh"
 
+!define TING_COLOR_PRIMARY 0x6C5CE7
+!define TING_COLOR_PRIMARY_SOFT 0xF1EEFF
+!define TING_COLOR_TEXT 0x1A1A2E
+!define TING_COLOR_MUTED 0x6B7280
+!define TING_COLOR_PANEL 0xF8FAFC
+!define TING_COLOR_BORDER 0xE5E7EB
+!define TING_COLOR_SUCCESS 0x10B981
+!define TING_COLOR_AMBER 0xF59E0B
+
 !ifndef BUILD_UNINSTALLER
+Var TingWelcomeAccent
+Var TingWelcomeBrandPill
 Var TingWelcomeTitle
 Var TingWelcomeSubtitle
-Var TingWelcomeDesc
+Var TingWelcomePanel
 Var TingWelcomeMeta
 Var TingWelcomeInstallButton
 Var TingWelcomeFontTitle
 Var TingWelcomeFontSubtitle
+Var TingWelcomeFontBody
+Var TingWelcomeFontSmall
 Var TingWelcomeFontButton
 
 !macro customWelcomePage
@@ -34,41 +47,87 @@ Function TingWelcomePageCreate
     Abort
   ${endif}
 
-  CreateFont $TingWelcomeFontTitle "Segoe UI" 24 700
+  CreateFont $TingWelcomeFontTitle "Segoe UI" 22 700
   CreateFont $TingWelcomeFontSubtitle "Segoe UI" 10 600
-  CreateFont $TingWelcomeFontButton "Segoe UI" 12 700
+  CreateFont $TingWelcomeFontBody "Segoe UI" 9 400
+  CreateFont $TingWelcomeFontSmall "Segoe UI" 8 600
+  CreateFont $TingWelcomeFontButton "Segoe UI" 11 700
 
-  ${NSD_CreateLabel} 0u 0u 300u 34u "Ting!"
+  ${NSD_CreateLabel} 0u 0u 5u 196u ""
+  Pop $TingWelcomeAccent
+  SetCtlColors $TingWelcomeAccent ${TING_COLOR_PRIMARY} ${TING_COLOR_PRIMARY}
+
+  ${NSD_CreateLabel} 14u 2u 94u 15u "  TING! INSTALLER"
+  Pop $TingWelcomeBrandPill
+  SendMessage $TingWelcomeBrandPill ${WM_SETFONT} $TingWelcomeFontSmall 1
+  SetCtlColors $TingWelcomeBrandPill ${TING_COLOR_PRIMARY} ${TING_COLOR_PRIMARY_SOFT}
+
+  ${NSD_CreateLabel} 14u 22u 272u 29u "Cài đặt Ting!"
   Pop $TingWelcomeTitle
   SendMessage $TingWelcomeTitle ${WM_SETFONT} $TingWelcomeFontTitle 1
-  SetCtlColors $TingWelcomeTitle 0x6C5CE7 transparent
+  SetCtlColors $TingWelcomeTitle ${TING_COLOR_PRIMARY} transparent
 
-  ${NSD_CreateLabel} 0u 38u 300u 18u "Sẵn sàng cài đặt bản cập nhật mới"
+  ${NSD_CreateLabel} 14u 52u 272u 16u "Bản mới sẵn sàng, dữ liệu của bạn vẫn được giữ nguyên."
   Pop $TingWelcomeSubtitle
   SendMessage $TingWelcomeSubtitle ${WM_SETFONT} $TingWelcomeFontSubtitle 1
-  SetCtlColors $TingWelcomeSubtitle 0x1A1A2E transparent
+  SetCtlColors $TingWelcomeSubtitle ${TING_COLOR_TEXT} transparent
 
-  ${NSD_CreateLabel} 0u 66u 300u 54u "Ting! sẽ tự động đóng ứng dụng đang chạy, cài đặt bản mới và giữ nguyên dữ liệu của bạn.$\r$\n$\r$\nNhấn nút bên dưới để bắt đầu."
-  Pop $TingWelcomeDesc
-  SetCtlColors $TingWelcomeDesc 0x4B5563 transparent
+  ${NSD_CreateLabel} 14u 76u 272u 56u ""
+  Pop $TingWelcomePanel
+  SetCtlColors $TingWelcomePanel ${TING_COLOR_PANEL} ${TING_COLOR_PANEL}
 
-  ${NSD_CreateButton} 0u 132u 300u 38u "Cài đặt Ting!"
+  ${NSD_CreateLabel} 26u 86u 6u 6u ""
+  Pop $0
+  SetCtlColors $0 ${TING_COLOR_PRIMARY} ${TING_COLOR_PRIMARY}
+
+  ${NSD_CreateLabel} 40u 82u 236u 13u "Tự đóng Ting! đang chạy trước khi cập nhật"
+  Pop $0
+  SendMessage $0 ${WM_SETFONT} $TingWelcomeFontBody 1
+  SetCtlColors $0 ${TING_COLOR_TEXT} ${TING_COLOR_PANEL}
+
+  ${NSD_CreateLabel} 26u 103u 6u 6u ""
+  Pop $0
+  SetCtlColors $0 ${TING_COLOR_SUCCESS} ${TING_COLOR_SUCCESS}
+
+  ${NSD_CreateLabel} 40u 99u 236u 13u "Giữ nguyên tài khoản, nhóm và cài đặt cá nhân"
+  Pop $0
+  SendMessage $0 ${WM_SETFONT} $TingWelcomeFontBody 1
+  SetCtlColors $0 ${TING_COLOR_TEXT} ${TING_COLOR_PANEL}
+
+  ${NSD_CreateLabel} 26u 120u 6u 6u ""
+  Pop $0
+  SetCtlColors $0 ${TING_COLOR_AMBER} ${TING_COLOR_AMBER}
+
+  ${NSD_CreateLabel} 40u 116u 236u 13u "Cài bản mới vào đường dẫn mặc định"
+  Pop $0
+  SendMessage $0 ${WM_SETFONT} $TingWelcomeFontBody 1
+  SetCtlColors $0 ${TING_COLOR_TEXT} ${TING_COLOR_PANEL}
+
+  ${NSD_CreateLabel} 14u 142u 272u 1u ""
+  Pop $0
+  SetCtlColors $0 ${TING_COLOR_BORDER} ${TING_COLOR_BORDER}
+
+  ${NSD_CreateButton} 14u 153u 272u 34u "Cài đặt Ting! ngay"
   Pop $TingWelcomeInstallButton
   SendMessage $TingWelcomeInstallButton ${WM_SETFONT} $TingWelcomeFontButton 1
+  SetCtlColors $TingWelcomeInstallButton 0xFFFFFF ${TING_COLOR_PRIMARY}
   ${NSD_OnClick} $TingWelcomeInstallButton TingWelcomeInstallClick
 
-  ${NSD_CreateLabel} 0u 178u 300u 18u "Phiên bản: ${VERSION}  |  Đường dẫn cài đặt mặc định"
+  ${NSD_CreateLabel} 14u 191u 272u 12u "Phiên bản ${VERSION}  |  Đường dẫn cài đặt mặc định"
   Pop $TingWelcomeMeta
-  SetCtlColors $TingWelcomeMeta 0x6B7280 transparent
+  SendMessage $TingWelcomeMeta ${WM_SETFONT} $TingWelcomeFontSmall 1
+  SetCtlColors $TingWelcomeMeta ${TING_COLOR_MUTED} transparent
 
   GetDlgItem $0 $HWNDPARENT 1
-  SendMessage $0 ${WM_SETTEXT} 0 "STR:Cài đặt"
+  SendMessage $0 ${WM_SETTEXT} 0 "STR:Cài đặt ngay"
 
   nsDialogs::Show
 FunctionEnd
 
 Function TingWelcomeInstallClick
   Pop $0
+  SendMessage $TingWelcomeInstallButton ${WM_SETTEXT} 0 "STR:Đang chuẩn bị..."
+  EnableWindow $TingWelcomeInstallButton 0
   SendMessage $HWNDPARENT ${WM_COMMAND} 1 0
 FunctionEnd
 

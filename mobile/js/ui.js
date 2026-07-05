@@ -473,7 +473,7 @@ function renderSettings() {
         </div>
     </div>
 
-    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.4.0')}</p>`;
+    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.4.1')}</p>`;
 }
 
 // ===== MOBILE DESKTOP-PARITY RENDERERS =====
@@ -2125,12 +2125,54 @@ function getMobileUpdateStatusMessage(status) {
     return MOBILE_UPDATE_STATUS_LABELS[status.status] || status.status || 'Đang chờ';
 }
 
+const HIDDEN_MOBILE_UPDATE_LOG_STATUSES = new Set(['not-available', 'up-to-date', 'not_available', 'uptodate']);
+const MOBILE_UPDATE_LOG_STATUS_LABELS = {
+    available: 'Có bản mới',
+    'update-available': 'Có bản mới',
+    downloading: 'Đang tải',
+    downloaded: 'Đã tải xong',
+    error: 'Lỗi',
+    offline: 'Mất mạng',
+    checking: 'Đang kiểm tra',
+};
+
+function clampMobileUpdatePercent(value) {
+    const percent = Number(value);
+    if (!Number.isFinite(percent)) return 0;
+    return Math.max(0, Math.min(100, percent));
+}
+
+function shouldRenderMobileUpdateLogEntry(item) {
+    const status = String(item?.status || '').toLowerCase();
+    return !status || !HIDDEN_MOBILE_UPDATE_LOG_STATUSES.has(status);
+}
+
+function formatMobileUpdateLogStatus(status) {
+    const key = String(status || '').toLowerCase();
+    return MOBILE_UPDATE_LOG_STATUS_LABELS[key] || status || '';
+}
+
+function renderMobileUpdateProgress(status) {
+    if (status?.status !== 'downloading') return '';
+    const percent = clampMobileUpdatePercent(status.progress?.percent ?? status.percent);
+    const rounded = Math.round(percent);
+    return `<div class="settings-update-progress" aria-label="Tiến trình tải cập nhật">
+        <div class="settings-update-progress-head">
+            <span>Đang tải bản cập nhật</span>
+            <strong>${rounded}%</strong>
+        </div>
+        <div class="settings-update-progress-track">
+            <span class="settings-update-progress-fill" style="width:${rounded}%"></span>
+        </div>
+    </div>`;
+}
+
 function renderMobileUpdateLog() {
-    const log = window.appState.updateLog || [];
+    const log = (window.appState.updateLog || []).filter(shouldRenderMobileUpdateLogEntry);
     if (!log.length) return '<div class="settings-empty-log">Chưa có lịch sử cập nhật</div>';
     return `<div class="settings-update-log">${log.slice(0, 5).map(item => `
         <div class="settings-update-log-row">
-            <span>${escapeHtml(item.version || 'unknown')}${item.status ? ` - ${escapeHtml(item.status)}` : ''}</span>
+            <span>${escapeHtml(item.version || 'unknown')}${item.status ? ` - ${escapeHtml(formatMobileUpdateLogStatus(item.status))}` : ''}</span>
             <small>${escapeHtml(item.date || '')}</small>
         </div>`).join('')}</div>`;
 }
@@ -2139,7 +2181,7 @@ function renderUpdateSection() {
     const version = escapeHtml(
         window.appState.appVersion
         || window.TingMobileUpdater?.INSTALLED_VERSION_NAME
-        || '1.4.0'
+        || '1.4.1'
     );
     const platform = getMobileUpdatePlatform();
     const cap = getMobileUpdateCapability(platform);
@@ -2151,38 +2193,51 @@ function renderUpdateSection() {
     const downloaded = kind === 'downloaded';
     const checkDisabled = !cap.canCheck || checking || downloading;
     const latest = escapeHtml(status?.info?.latestVersion || status?.info?.manifest?.latestVersion || '');
-    const notes = status?.info?.releaseNotes || status?.info?.manifest?.releaseNotes || '';
+    const notes = escapeHtml(status?.info?.releaseNotes || status?.info?.manifest?.releaseNotes || '');
+    const statusMessage = escapeHtml(getMobileUpdateStatusMessage(status));
+    const statusClass = kind ? ` is-${String(kind).replace(/[^a-z0-9-]/gi, '-')}` : ' is-idle';
 
-    let rows = `<div class="settings-item">
-        <div class="settings-item-icon" style="background:#E0F2FE">Up</div>
-        <div class="settings-item-content">
-            <div class="settings-item-title">Ting! v${version}</div>
-            <div class="settings-item-desc">${escapeHtml(getMobileUpdateStatusMessage(status))}</div>
-        </div>
-        <button class="btn btn-sm btn-outline settings-inline-btn" onclick="checkForUpdates()" ${checkDisabled ? 'disabled' : ''}>${checking ? 'Đang kiểm tra' : 'Kiểm tra'}</button>
-    </div>`;
-
-    if (!cap.canCheck && cap.disabledMessage) {
-        rows += `<div class="settings-item"><div class="settings-item-icon" style="background:var(--warning-bg)">Info</div><div class="settings-item-content"><div class="settings-item-title">${escapeHtml(cap.disabledMessage)}</div><div class="settings-item-desc">Nền tảng này không hỗ trợ cập nhật trong app.</div></div></div>`;
-    }
-
+    let primaryAction = `<button class="btn btn-sm btn-outline settings-update-btn" onclick="checkForUpdates()" ${checkDisabled ? 'disabled' : ''}>${checking ? 'Đang kiểm tra' : 'Kiểm tra'}</button>`;
     if (platform === 'android' && available && !downloading) {
-        rows += `<div class="settings-item">
-            <div class="settings-item-icon" style="background:var(--accent-bg)">New</div>
-            <div class="settings-item-content">
-                <div class="settings-item-title">Phiên bản mới${latest ? ' ' + latest : ''}</div>
-                ${notes ? `<div class="settings-item-desc">${escapeHtml(notes)}</div>` : ''}
+        primaryAction = `<button class="btn btn-sm btn-primary settings-update-btn" onclick="startUpdateDownload()">Cập nhật ngay</button>`;
+    }
+    if (downloading) {
+        primaryAction = `<button class="btn btn-sm btn-primary settings-update-btn" disabled>Đang tải...</button>`;
+    }
+
+    const supportNotice = (!cap.canCheck && cap.disabledMessage)
+        ? `<div class="settings-update-notice">
+            <strong>${escapeHtml(cap.disabledMessage)}</strong>
+            <span>Nền tảng này không hỗ trợ cập nhật trong app.</span>
+        </div>`
+        : '';
+    const latestHtml = latest ? `<div class="settings-update-latest" aria-label="Phiên bản mới ${latest}">Phiên bản mới: <strong>${latest}</strong></div>` : '';
+    const notesHtml = notes ? `<div class="settings-update-notes">${notes}</div>` : '';
+    const downloadedHtml = downloaded
+        ? `<div class="settings-update-notice is-success"><strong>Trình cài đặt đã được mở</strong><span>Hoàn tất các bước trên màn hình Android để cập nhật.</span></div>`
+        : '';
+
+    return `<div class="settings-group settings-update-group">
+        <div class="settings-group-title">Cập nhật</div>
+        <div class="settings-update-hero${statusClass}" aria-label="Phiên bản Ting! v${version}">
+            <div class="settings-update-glow"></div>
+            <div class="settings-update-top">
+                <div class="settings-update-icon">↑</div>
+                <div class="settings-update-heading">
+                    <span class="settings-update-kicker">Ting! Android</span>
+                    <h3>Ting! v${version}</h3>
+                    <p>${statusMessage}</p>
+                </div>
             </div>
-            <button class="btn btn-sm btn-primary settings-inline-btn" onclick="startUpdateDownload()">Cập nhật</button>
-        </div>`;
-    }
-
-    if (downloaded) {
-        rows += `<div class="settings-item"><div class="settings-item-icon" style="background:var(--success-bg)">OK</div><div class="settings-item-content"><div class="settings-item-title">Trình cài đặt đã được mở</div><div class="settings-item-desc">Hoàn tất các bước trên màn hình Android để cập nhật.</div></div></div>`;
-    }
-
-    rows += `<div class="settings-log-wrap">${renderMobileUpdateLog()}</div>`;
-    return `<div class="settings-group"><div class="settings-group-title">Phiên bản</div><div class="settings-card">${rows}</div></div>`;
+            <div class="settings-update-actions">${primaryAction}</div>
+            ${latestHtml}
+            ${notesHtml}
+            ${renderMobileUpdateProgress(status)}
+            ${downloadedHtml}
+            ${supportNotice}
+            <div class="settings-log-wrap">${renderMobileUpdateLog()}</div>
+        </div>
+    </div>`;
 }
 
 function renderSettings() {
@@ -2195,12 +2250,14 @@ function renderSettings() {
     document.getElementById('page-content').innerHTML = `
     <div class="section-header"><span class="section-title">Cài đặt</span></div>
     <div class="settings-tabbar" role="tablist">
+        <button class="settings-tab" data-tab="update" onclick="switchSettingsTab('update')"><span class="settings-tab-ico">🔄</span> Cập nhật</button>
         <button class="settings-tab" data-tab="general" onclick="switchSettingsTab('general')"><span class="settings-tab-ico">📁</span> Chung</button>
         <button class="settings-tab" data-tab="security" onclick="switchSettingsTab('security')"><span class="settings-tab-ico">🔒</span> Bảo mật</button>
         <button class="settings-tab" data-tab="notifications" onclick="switchSettingsTab('notifications')"><span class="settings-tab-ico">🔔</span> Thông báo</button>
         <button class="settings-tab" data-tab="data" onclick="switchSettingsTab('data')"><span class="settings-tab-ico">💾</span> Dữ liệu</button>
         <button class="settings-tab" data-tab="account" onclick="switchSettingsTab('account')"><span class="settings-tab-ico">👤</span> Tài khoản</button>
     </div>
+    <div class="settings-panel" data-panel="update">${renderUpdateSection()}</div>
     <div class="settings-panel" data-panel="general"><div class="settings-group">
         <div class="settings-group-title">Tổ chức</div>
         <div class="settings-card">
@@ -2230,7 +2287,6 @@ function renderSettings() {
             <label class="settings-item settings-control"><div class="settings-item-icon" style="background:var(--accent-bg)">🌗</div><div class="settings-item-content"><div class="settings-item-title">Theme</div><div class="settings-item-desc">Theo hệ thống, sáng hoặc tối</div></div><select class="settings-select" onchange="handleThemeChange(this.value)"><option value="system" ${settings.theme==='system'?'selected':''}>Hệ thống</option><option value="light" ${settings.theme==='light'?'selected':''}>Sáng</option><option value="dark" ${settings.theme==='dark'?'selected':''}>Tối</option></select></label>
         </div>
     </div></div>
-    <div class="settings-panel" data-panel="data">${renderUpdateSection()}</div>
     <div class="settings-panel" data-panel="notifications"><div class="settings-group">
         <div class="settings-group-title">Thông báo</div>
         <div class="settings-card">
@@ -2252,8 +2308,8 @@ function renderSettings() {
             <div class="settings-item" onclick="signOut()"><div class="settings-item-icon" style="background:var(--danger-bg)">🚪</div><div class="settings-item-content"><div class="settings-item-title" style="color:var(--danger)">Đăng xuất</div></div></div>
         </div>
     </div></div>
-    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.4.0')}</p>`;
-    switchSettingsTab(window._settingsActiveTab || 'general');
+    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.4.1')}</p>`;
+    switchSettingsTab(window._settingsActiveTab || 'update');
 }
 
 function switchSettingsTab(tab) {
