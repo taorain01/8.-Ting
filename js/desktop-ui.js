@@ -1317,6 +1317,46 @@ function togglePlatformPanel() {
     panel.style.display = panel.style.display === 'none' ? '' : 'none';
 }
 
+// ===== Nut_Hien_Thi_Het_Han + di chuyển Nut_Loc/Nut_Loc_Nen_Tang vào ô tìm kiếm =====
+
+// Sinh HTML nút bật/tắt "Hiển thị tài khoản hết hạn" cho màn hình bought/personal.
+// showExpired = true  => thêm class 'is-on', aria-pressed="true" (trạng thái quan sát được: đang bật).
+// showExpired = false => không có class 'is-on', aria-pressed="false" (đang tắt).
+// onclick gọi toggleShowExpired(type) để đảo cờ và render lại đúng màn hình hiện tại.
+function renderShowExpiredToggle(type, showExpired) {
+    const on = !!showExpired;
+    const label = on ? 'Đang hiện tài khoản hết hạn' : 'Hiện tài khoản hết hạn';
+    return `<button type="button" class="show-expired-toggle ${on ? 'is-on' : ''}" aria-pressed="${on ? 'true' : 'false'}" onclick="toggleShowExpired('${escapeJsAttr(type)}')" title="${escapeHtml(label)}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+        <span class="show-expired-toggle-label">${escapeHtml(label)}</span>
+    </button>`;
+}
+
+// Chèn Nut_Loc và Nut_Loc_Nen_Tang vào container con (#search-toolbar-buttons) bên trong ô tìm kiếm.
+// Chỉ gọi khi render màn hình bought/personal. Cập nhật toolbar-filter-dot theo trạng thái bộ lọc:
+//  - hasStatusOrTagFilter: có bộ lọc trạng thái hoặc thẻ đang áp dụng => chấm trên Nut_Loc.
+//  - hasPlatformFilter: có bộ lọc nền tảng đang áp dụng => chấm trên Nut_Loc_Nen_Tang.
+function mountSearchToolbarButtons(type, { hasStatusOrTagFilter = false, hasPlatformFilter = false } = {}) {
+    const container = document.getElementById('search-toolbar-buttons');
+    if (!container) return;
+    container.innerHTML = `
+        <button class="toolbar-filter-btn ${hasStatusOrTagFilter ? 'has-filter' : ''}" onclick="toggleFilterPanel()" title="Lọc">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+            ${hasStatusOrTagFilter ? `<span class="toolbar-filter-dot"></span>` : ''}
+        </button>
+        <button class="toolbar-platform-btn" onclick="togglePlatformPanel()" title="Lọc nền tảng">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+            ${hasPlatformFilter ? `<span class="toolbar-filter-dot"></span>` : ''}
+        </button>`;
+}
+
+// Gỡ Nut_Loc/Nut_Loc_Nen_Tang khỏi ô tìm kiếm khi rời màn hình bought/personal.
+// Container rỗng sẽ tự ẩn nhờ CSS `.d-search-toolbar-btns:empty`, giữ nguyên topbar các màn khác.
+function unmountSearchToolbarButtons() {
+    const container = document.getElementById('search-toolbar-buttons');
+    if (container) container.innerHTML = '';
+}
+
 function renderAccountList(type) {
     const accs = window.appState.accounts.filter(a=>a.type===type);
     const filter = window.appState.currentFilter || 'all';
@@ -1337,23 +1377,29 @@ function renderAccountList(type) {
             || platformLabel.includes(q);
     });
 
+    // Áp dụng toggle "Hiển thị tài khoản hết hạn" SAU khi đã lọc/tìm kiếm (Req 3.9):
+    //  - TẮT: loại bỏ toàn bộ Tai_Khoan_Het_Han (Req 3.1)
+    //  - BẬT: giữ nguyên tập đã lọc nhưng xếp còn hạn trước, hết hạn sau (Req 3.2, 3.3)
+    const showExpired = typeof getShowExpiredState === 'function' ? getShowExpiredState(type) : false;
+    if (showExpired) {
+        filtered = partitionActiveThenExpired(filtered);
+    } else {
+        filtered = filterAccountsByExpiredToggle(filtered, false);
+    }
+
     const title = type==='bought' ? 'Tài khoản mua' : 'Tài khoản cá nhân';
-    const hasActiveFilter = filter !== 'all' || tagFilter || platformFilter;
+    const hasStatusOrTagFilter = filter !== 'all' || !!tagFilter;
+    const hasPlatformFilter = !!platformFilter;
+    const hasActiveFilter = hasStatusOrTagFilter || hasPlatformFilter;
     const filterLabel = getActiveFilterLabel(filter, tagFilter, platformFilter);
+    // Nút bên phải tiêu đề nay là Nut_Hien_Thi_Het_Han; cụm nút lọc được chèn vào ô tìm kiếm (Req 2.1, 2.2)
     let h = `<div class="list-toolbar">
         <div class="list-toolbar-left">
             <span class="section-title">${escapeHtml(title)}</span>
             <span class="section-badge">${filtered.length}</span>
         </div>
         <div class="list-toolbar-right">
-            <button class="toolbar-filter-btn ${hasActiveFilter ? 'has-filter' : ''}" onclick="toggleFilterPanel()" title="Lọc">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
-                ${hasActiveFilter ? `<span class="toolbar-filter-dot"></span>` : ''}
-            </button>
-            <button class="toolbar-platform-btn" onclick="togglePlatformPanel()" title="Lọc nền tảng">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
-                ${platformFilter ? `<span class="toolbar-filter-dot"></span>` : ''}
-            </button>
+            ${renderShowExpiredToggle(type, showExpired)}
         </div>
     </div>
     ${hasActiveFilter ? `<div class="active-filter-bar">${filterLabel}<button class="active-filter-clear" onclick="clearAllFilters()">✕ Xoá lọc</button></div>` : ''}
@@ -1363,12 +1409,18 @@ function renderAccountList(type) {
     if (filtered.length > 0) {
         const displayItems = buildAccountDisplayItems(filtered);
         h += `<div class="d-account-stack anim-stagger">${displayItems.map(item => Array.isArray(item.accounts)
-            ? renderAccountGroup(item, type === 'personal')
-            : renderDesktopCard(item, type === 'personal')).join('')}</div>`;
+            ? renderAccountGroup(item, type === 'personal', showExpired)
+            : renderDesktopCard(item, type === 'personal', false, showExpired && isExpiredAccount(item))).join('')}</div>`;
     } else {
+        // TẮT mà không còn Tai_Khoan_Con_Han nào -> trạng thái danh sách rỗng (Req 3.10)
         h += `<div class="d-empty-state anim-fade-in-up"><div class="d-empty-state-icon">${type==='personal'?'🔒':'🛒'}</div><div class="d-empty-state-title">Không có tài khoản nào</div><div class="d-empty-state-desc">${hasActiveFilter?'Thử đổi bộ lọc hoặc xoá lọc':'Bấm "Thêm TK" để thêm mới'}</div></div>`;
     }
     document.getElementById('page-content').innerHTML = h;
+
+    // Chèn Nut_Loc/Nut_Loc_Nen_Tang vào ô tìm kiếm cho màn hình bought/personal (Req 2.2-2.7)
+    if (typeof mountSearchToolbarButtons === 'function') {
+        mountSearchToolbarButtons(type, { hasStatusOrTagFilter, hasPlatformFilter });
+    }
 }
 
 function renderSearchResults(query) {
@@ -1876,7 +1928,7 @@ function renderGroupInviteCard(group) {
             <div class="group-card-meta">Mời bởi ${escapeHtml(group.ownerEmail || '')} · ${(group.memberEmails || []).length} thành viên</div>
         </div>
         <div class="group-invite-actions">
-            <button type="button" class="btn btn-sm btn-primary" onclick="openAcceptGroupInviteModal('${escapeJsAttr(group.id)}')">${groupHasSharedPassword?.(group) ? 'Nhập mật khẩu' : 'Tham gia'}</button>
+            <button type="button" class="btn btn-sm btn-primary" onclick="openAcceptGroupInviteModal('${escapeJsAttr(group.id)}')">${isJoinPasswordEnabled?.(group) ? 'Nhập mật khẩu' : 'Tham gia'}</button>
             <button type="button" class="btn btn-sm btn-outline" onclick="handleCancelGroupInvite('${escapeJsAttr(group.id)}')">Bỏ qua</button>
         </div>
     </div>`;
@@ -2165,6 +2217,23 @@ function renderGroupSettings(group) {
             ? `<button class="btn btn-sm btn-outline" onclick="openUnlockGroupModal('${escapeJsAttr(group.id)}')">Mở khoá để chỉnh</button>`
             : `<button class="btn btn-sm btn-primary" onclick="openGroupPasswordModal('${escapeJsAttr(group.id)}')">${hasPw ? 'Đổi mật khẩu' : 'Đặt mật khẩu'}</button>${hasPw ? `<button class="btn btn-sm btn-danger-outline" onclick="handleRemoveGroupPassword('${escapeJsAttr(group.id)}')">Gỡ mật khẩu</button>` : ''}`}</div>`
         : `<div class="group-setting-hint">Chỉ chủ nhóm mới chỉnh được mật khẩu chung.</div>`;
+    const joinEnabled = Boolean(isJoinPasswordEnabled?.(group));
+    const joinBlock = isOwner
+        ? `<div class="group-setting-divider"></div>
+        <div class="group-setting-item">
+            <div class="group-setting-info">
+                <div class="group-setting-title">Mật khẩu vào nhóm</div>
+                <div class="group-setting-desc">${joinEnabled
+                    ? 'Người được mời phải nhập đúng mật khẩu này mới tham gia được nhóm.'
+                    : 'Chưa đặt. Người được mời tham gia nhóm mà không cần nhập mật khẩu.'}</div>
+            </div>
+            <span class="group-lock-badge ${joinEnabled ? '' : 'unlocked'}">${joinEnabled ? 'Đã bật mật khẩu vào nhóm' : 'Chưa đặt mật khẩu vào nhóm'}</span>
+        </div>
+        <div class="group-setting-actions">
+            <button class="btn btn-sm btn-primary" onclick="openJoinPasswordModal('${escapeJsAttr(group.id)}','${joinEnabled ? 'change' : 'set'}')">${joinEnabled ? 'Đổi mật khẩu vào nhóm' : 'Đặt mật khẩu vào nhóm'}</button>
+            ${joinEnabled ? `<button class="btn btn-sm btn-danger-outline" onclick="handleRemoveGroupJoinPassword('${escapeJsAttr(group.id)}')">Gỡ mật khẩu</button>` : ''}
+        </div>`
+        : '';
     const manageBlock = isOwner
         ? `<div class="group-setting-divider"></div>
         <div class="group-setting-item">
@@ -2182,6 +2251,7 @@ function renderGroupSettings(group) {
         <div class="group-panel-head"><div class="section-title">Cài đặt nhóm</div></div>
         ${lockRow}
         ${pwActions}
+        ${joinBlock}
         ${manageBlock}
     </div>`;
 }
@@ -2219,7 +2289,6 @@ function renderGroupDetail(groupId, options = {}) {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
             </div>
             <div class="group-detail-main">
-                <div class="group-detail-title">${escapeHtml(group.name || 'Nhóm')}</div>
                 <div class="group-card-meta">${escapeHtml(getGroupRoleLabel(group))} · ${(group.memberEmails || []).length} thành viên · ${accountCount} tài khoản</div>
             </div>
             <div class="group-detail-actions">
@@ -2268,16 +2337,31 @@ function getTrashDaysLeft(acc) {
 
 function renderTrashList() {
     const query = window.appState.searchQuery || '';
-    const all = window.appState.trashAccounts || [];
-    const items = query
+    // Làm trên bản sao để không mutate window.appState.trashAccounts
+    const all = (window.appState.trashAccounts || []).slice();
+    // Lọc theo truy vấn tìm kiếm bằng accountMatchesSearch (Req 1.9)
+    const filtered = query
         ? all.filter(acc => typeof accountMatchesSearch === 'function'
             ? accountMatchesSearch(acc, query)
             : (acc.name || '').toLowerCase().includes(query.toLowerCase()))
         : all;
 
-    const cards = items.length
-        ? `<div class="d-account-stack anim-stagger">${items.map(renderTrashCard).join('')}</div>`
-        : `<div class="d-empty-state anim-fade-in-up"><div class="d-empty-state-icon">🗑️</div><div class="d-empty-state-title">Thùng rác trống</div><div class="d-empty-state-desc">Tài khoản xoá mềm sẽ xuất hiện ở đây để khôi phục.</div></div>`;
+    let body;
+    if (filtered.length) {
+        // Nhóm theo nền tảng bằng buildAccountDisplayItems trên tập đã lọc (Req 1.1).
+        // Mỗi item hoặc là nhóm (>=2 TK, có .accounts) render bằng renderTrashGroup,
+        // hoặc là tài khoản đơn lẻ render bằng renderTrashCard (Req 1.3).
+        const items = buildAccountDisplayItems(filtered);
+        body = `<div class="d-account-stack anim-stagger">${items.map(item => Array.isArray(item.accounts)
+            ? renderTrashGroup(item)
+            : renderTrashCard(item)).join('')}</div>`;
+    } else if (all.length === 0) {
+        // Thùng rác thực sự rỗng (Req 1.8)
+        body = `<div class="d-empty-state anim-fade-in-up"><div class="d-empty-state-icon">🗑️</div><div class="d-empty-state-title">Thùng rác trống</div><div class="d-empty-state-desc">Tài khoản xoá mềm sẽ xuất hiện ở đây để khôi phục.</div></div>`;
+    } else {
+        // Có tài khoản trong thùng rác nhưng không khớp truy vấn tìm kiếm (Req 1.10)
+        body = `<div class="d-empty-state anim-fade-in-up"><div class="d-empty-state-icon">🔍</div><div class="d-empty-state-title">Không tìm thấy kết quả</div><div class="d-empty-state-desc">Không có tài khoản nào trong thùng rác khớp với “${escapeHtml(query)}”.</div></div>`;
+    }
 
     document.getElementById('page-content').innerHTML = `
         <div class="trash-page-head anim-fade-in-up">
@@ -2285,10 +2369,33 @@ function renderTrashList() {
                 <div class="section-title">Thùng rác 30 ngày</div>
                 <div class="trash-page-desc">Tài khoản đã xoá mềm vẫn nằm ở đây để bạn khôi phục lại khi cần.</div>
             </div>
-            <span class="section-badge">${items.length}/${all.length} TK</span>
+            <span class="section-badge">${filtered.length}/${all.length} TK</span>
         </div>
-        ${cards}
+        ${body}
     `;
+}
+
+// Render một nhóm nền tảng trong thùng rác: icon + nhãn + số lượng, kèm các thẻ con.
+function renderTrashGroup(group) {
+    const accounts = group.accounts;
+    const label = getPlatformLabel(group.platform, accounts);
+    const emoji = getPlatformEmoji(group.platform);
+    const logoStyle = typeof getPlatformLogoStyle === 'function' ? getPlatformLogoStyle(group.platform, label) : `background:${stringToColor(label)}15;color:${stringToColor(label)}`;
+    const logoMark = typeof renderPlatformLogoMark === 'function' ? renderPlatformLogoMark(group.platform, emoji) : emoji;
+    // Số lượng = tổng số tài khoản của nhóm đang hiển thị trong thùng rác (Req 1.2)
+    const count = accounts.length;
+
+    return `
+    <div class="trash-group anim-fade-in-up">
+        <div class="trash-group-header">
+            <div class="account-logo trash-group-logo" style="${logoStyle}">${logoMark}</div>
+            <div class="trash-group-info">
+                <div class="trash-group-title">${escapeHtml(label)} <span class="trash-group-count">${count} TK</span></div>
+                <div class="trash-group-meta">Đã xoá mềm • đang chờ khôi phục</div>
+            </div>
+        </div>
+        <div class="trash-group-children">${accounts.map(renderTrashCard).join('')}</div>
+    </div>`;
 }
 
 function renderTrashCard(acc) {
@@ -2298,7 +2405,10 @@ function renderTrashCard(acc) {
     const logoMark = typeof renderPlatformLogoMark === 'function' ? renderPlatformLogoMark(platformRef, emoji) : emoji;
     const deletedDate = getTrashDeletedDate(acc);
     const deletedText = deletedDate ? formatDateVN(deletedDate) : 'Không rõ ngày xoá';
-    const daysLeft = getTrashDaysLeft(acc);
+    // Đếm ngược thời hạn giữ: mốc 0 ngày hiển thị "hết hạn giữ", không số âm (Req 1.5)
+    const countdownText = typeof formatTrashCountdown === 'function'
+        ? formatTrashCountdown(acc)
+        : `còn ${getTrashDaysLeft(acc)} ngày giữ`;
     const authBadge = renderAuthMethodBadge(acc);
 
     return `
@@ -2315,7 +2425,7 @@ function renderTrashCard(acc) {
             <span class="account-badge badge-expired">Đã xoá</span>
         </div>
         <div class="d-account-card-bottom trash-card-bottom">
-            <span class="trash-countdown">Xoá mềm ${escapeHtml(deletedText)} · còn ${daysLeft} ngày giữ</span>
+            <span class="trash-countdown">Xoá mềm ${escapeHtml(deletedText)} · ${escapeHtml(countdownText)}</span>
             <div class="account-actions" onclick="event.stopPropagation()">
                 <button class="btn btn-sm btn-outline" onclick="restoreAccount('${escapeJsAttr(acc.id)}')">Khôi phục</button>
             </div>
@@ -2323,40 +2433,88 @@ function renderTrashCard(acc) {
     </div>`;
 }
 
-function renderAccountGroup(group, isPersonal=false) {
+function getAccountGroupReadableNote(acc) {
+    const active = window.appState?.activeDecryptedAccount;
+    const cached = active?.id === acc?.id ? active.data : null;
+    return String(cached?.note || acc?.note || '').trim();
+}
+
+function getAccountGroupNoteRows(accounts = []) {
+    return accounts
+        .map(acc => ({ acc, note: getAccountGroupReadableNote(acc) }))
+        .filter(item => item.note);
+}
+
+function renderAccountGroupNoteToggle(groupKey, checked) {
+    return `<label class="account-group-note-toggle" onclick="event.stopPropagation()" title="Hiện ghi chú">
+        <input type="checkbox" onchange="toggleAccountGroupNotes('${escapeJsAttr(groupKey)}')" ${checked ? 'checked' : ''}>
+        <span>Ghi chú</span>
+    </label>`;
+}
+
+function renderAccountGroupNotes(noteRows = []) {
+    if (!noteRows.length) return '';
+    return `<div class="account-group-notes" onclick="event.stopPropagation()">
+        ${noteRows.map(({ acc, note }) => {
+            const name = typeof getAccountDisplayName === 'function'
+                ? getAccountDisplayName(acc)
+                : (acc?.name || 'Tài khoản');
+            const username = typeof getAccountUsernameForDisplay === 'function'
+                ? getAccountUsernameForDisplay(acc)
+                : (acc?.displayUsername || acc?.username || '');
+            return `<div class="account-group-note-item">
+                <div class="account-group-note-head">
+                    <span class="account-group-note-name">${escapeHtml(name)}</span>
+                    ${username ? `<span class="account-group-note-user">${escapeHtml(username)}</span>` : ''}
+                </div>
+                <div class="account-group-note-body">${renderSmartNote(note)}</div>
+            </div>`;
+        }).join('')}
+    </div>`;
+}
+
+function renderAccountGroup(group, isPersonal=false, showExpired=false) {
     const accounts = group.accounts;
     const label = getPlatformLabel(group.platform, accounts);
     const emoji = getPlatformEmoji(group.platform);
     const logoStyle = typeof getPlatformLogoStyle === 'function' ? getPlatformLogoStyle(group.platform, label) : `background:${stringToColor(label)}15;color:${stringToColor(label)}`;
     const logoMark = typeof renderPlatformLogoMark === 'function' ? renderPlatformLogoMark(group.platform, emoji) : emoji;
-    const status = getWorstGroupStatus(accounts);
+    // Số lượng hiển thị của nhóm theo trạng thái toggle (Req 3.8, 3.11)
+    const visibleCount = typeof countGroupVisible === 'function' ? countGroupVisible(accounts, showExpired) : accounts.length;
     const expiredCount = accounts.filter(a => a.status === 'expired').length;
     const expiringCount = accounts.filter(a => a.status === 'expiring').length;
     const activeCount = accounts.filter(a => a.status === 'active').length;
-    const expanded = Boolean(window.appState.expandedGroups[group.key]);
+    const expanded = Boolean(window.appState.expandedGroups?.[group.key]);
     const summaryParts = [];
     if (activeCount) summaryParts.push(`${activeCount} hoạt động`);
     if (expiringCount) summaryParts.push(`${expiringCount} sắp hết`);
     if (expiredCount) summaryParts.push(`${expiredCount} hết hạn`);
     const expirySummary = getGroupExpirySummary(accounts);
     const dateChips = renderGroupDateChips(accounts);
+    const noteRows = getAccountGroupNoteRows(accounts);
+    const notesVisible = Boolean(window.appState.visibleGroupNotes?.[group.key] && noteRows.length);
 
     return `
     <div class="account-group anim-fade-in-up">
-        <button class="account-group-header" onclick="toggleAccountGroup('${escapeJsAttr(group.key)}')">
-            <div class="account-logo group-logo" style="${logoStyle}">${logoMark}</div>
-            <div class="account-group-info">
-                <div class="account-group-title">${escapeHtml(label)} <span class="account-group-count">${accounts.length} TK</span></div>
-                <div class="account-group-meta">${escapeHtml(summaryParts.join(' • ') || 'Không có trạng thái')} • ${escapeHtml(expirySummary)}</div>
-                ${dateChips}
+        <div class="account-group-header">
+            <button type="button" class="account-group-main" onclick="toggleAccountGroup('${escapeJsAttr(group.key)}')">
+                <div class="account-logo group-logo" style="${logoStyle}">${logoMark}</div>
+                <div class="account-group-info">
+                    <div class="account-group-title">${escapeHtml(label)} <span class="account-group-count">${visibleCount} TK</span></div>
+                    <div class="account-group-meta">${escapeHtml(summaryParts.join(' • ') || 'Không có trạng thái')} • ${escapeHtml(expirySummary)}</div>
+                    ${dateChips}
+                </div>
+            </button>
+            <div class="account-group-actions" onclick="event.stopPropagation()">
+                ${noteRows.length ? renderAccountGroupNoteToggle(group.key, notesVisible) : ''}
+                <button type="button" class="account-group-toggle ${expanded ? 'open' : ''}" onclick="toggleAccountGroup('${escapeJsAttr(group.key)}')">
+                    <span class="account-group-toggle-text">${expanded ? 'Thu gọn' : `Xem ${accounts.length} TK`}</span>
+                    <svg class="account-group-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" width="15" height="15"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
             </div>
-            <span class="account-badge ${getStatusBadgeClass(status)}">${getStatusText(status)}</span>
-            <span class="account-group-toggle ${expanded ? 'open' : ''}">
-                <span class="account-group-toggle-text">${expanded ? 'Thu gọn' : `Xem ${accounts.length} TK`}</span>
-                <svg class="account-group-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" width="15" height="15"><polyline points="6 9 12 15 18 9"/></svg>
-            </span>
-        </button>
-        ${expanded ? `<div class="account-group-children">${accounts.map(a => renderDesktopCard(a, isPersonal, true)).join('')}</div>` : ''}
+        </div>
+        ${notesVisible ? renderAccountGroupNotes(noteRows) : ''}
+        ${expanded ? `<div class="account-group-children">${accounts.map(a => renderDesktopCard(a, isPersonal, true, showExpired && isExpiredAccount(a))).join('')}</div>` : ''}
     </div>`;
 }
 
@@ -2382,7 +2540,7 @@ function renderGroupDateChips(accounts) {
 }
 
 // ===== DESKTOP CARD =====
-function renderDesktopCard(acc, isPersonal=false, isChild=false) {
+function renderDesktopCard(acc, isPersonal=false, isChild=false, dimmed=false) {
     const secretCard = accountNeedsMasterForDisplay(acc);
     const canCopy = canShowSecretActions(acc);
     const revealedUsername = getRevealedSecret?.(acc.id, 'username');
@@ -2403,7 +2561,7 @@ function renderDesktopCard(acc, isPersonal=false, isChild=false) {
         ? `${preferenceActions}${renderEyeButton(acc.id, 'username', 'Hiện tài khoản')}${canCopy ? renderCopyButton(acc.id, 'username', 'Copy tài khoản') : ''}${renderEyeButton(acc.id, 'password', 'Hiện mật khẩu')}${canCopy ? renderCopyButton(acc.id, 'password', 'Copy mật khẩu') : ''}`
         : `${preferenceActions}${renderCopyButton(acc.id, 'username', 'Copy tài khoản')}${renderCopyButton(acc.id, 'password', 'Copy mật khẩu')}`;
     return `
-    <div class="d-account-card ${isChild ? 'account-child-card' : ''} ${acc.pendingSync ? 'sync-pending' : ''} ${isAccountFavorite(acc) ? 'is-favorite' : ''} ${isAccountPinned(acc) ? 'is-pinned' : ''} ${mutedClass} anim-fade-in-up" onclick="showDetail('${acc.id}')">
+    <div class="d-account-card ${isChild ? 'account-child-card' : ''} ${dimmed ? 'is-expired-dimmed' : ''} ${acc.pendingSync ? 'sync-pending' : ''} ${isAccountFavorite(acc) ? 'is-favorite' : ''} ${isAccountPinned(acc) ? 'is-pinned' : ''} ${mutedClass} anim-fade-in-up" onclick="showDetail('${acc.id}')">
         <div class="d-account-card-top">
             <div class="account-logo" style="${logoStyle}">${logoMark}</div>
             <div class="account-info">
@@ -2430,6 +2588,93 @@ function renderDesktopCard(acc, isPersonal=false, isChild=false) {
 }
 
 // ===== DETAIL =====
+
+// Xác định có thể lấy được dữ liệu nhạy cảm của tài khoản để sửa nhanh hay không.
+// Trả về false khi tài khoản đang bị che (cần Master) nhưng không còn nguồn dữ liệu
+// nào để giải mã (thiếu cả payload mã hoá lẫn dữ liệu thô) — tức không giải mã được.
+function canQuickEditDecryptAccount(acc) {
+    if (!acc) return false;
+    // Đã giải mã sẵn trong phiên hiện tại thì chắc chắn lấy được dữ liệu.
+    if (window.appState?.activeDecryptedAccount?.id === acc.id) return true;
+    // Tài khoản không bị che thì đọc trực tiếp dữ liệu hiển thị được.
+    if (!accountNeedsMasterForDisplay(acc)) return true;
+    const hasEncryptedPayload = Boolean(acc.encryptedData && acc.salt && acc.iv);
+    const hasPlainData = Boolean(acc.username || acc.password || acc.twoFaCode || acc.note || acc.rawInput);
+    // Còn payload mã hoá hoặc dữ liệu thô thì có thể mở khoá để sửa nhanh.
+    return hasEncryptedPayload || hasPlainData;
+}
+
+// Nút "Sửa nhanh" (biểu tượng cây bút) trong hàng nút hành động của thẻ chi tiết.
+// Đặt liền trước nút "✏️ Sửa". Khi tài khoản cần Master nhưng không giải mã được
+// thì render ở trạng thái disabled kèm giải thích cần giải mã trước.
+function renderQuickEditButton(acc) {
+    if (!acc) return '';
+    const needsMaster = accountNeedsMasterForDisplay(acc);
+    const canDecrypt = canQuickEditDecryptAccount(acc);
+    // Chỉ vô hiệu hoá khi tài khoản đang bị che và không còn nguồn dữ liệu để giải mã.
+    if (needsMaster && !canDecrypt) {
+        const lockedLabel = 'Cần giải mã tài khoản trước khi sửa nhanh';
+        return `<button class="btn btn-outline btn-sm" disabled title="${escapeHtml(lockedLabel)}" aria-label="${escapeHtml(lockedLabel)}">✏️⚡ Sửa nhanh</button>`;
+    }
+    const label = 'Sửa nhanh';
+    return `<button class="btn btn-outline btn-sm" onclick="enterQuickEditMode('${escapeJsAttr(acc.id)}')" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">✏️⚡ Sửa nhanh</button>`;
+}
+
+// Trả về giới hạn maxlength của một ô sửa nhanh (ưu tiên bản export từ quick-edit-core.js).
+function getQuickEditMaxLength(field, fallback) {
+    const fields = (typeof window !== 'undefined') ? window.QUICK_EDIT_FIELDS : null;
+    const max = fields && fields[field] ? fields[field].maxLength : undefined;
+    return Number.isFinite(max) ? max : fallback;
+}
+
+// Render khối các ô nhập liệu ở Chế độ sửa nhanh (thay cho detail-section chỉ đọc).
+// - Giá trị nạp vào lấy từ snapshot `window.appState.quickEdit.original` (đã giải mã khi
+//   vào chế độ), rỗng nếu ô không có giá trị.
+// - Ô 2FA nạp Secret TOTP GỐC (không phải mã 6 số tức thời) — Yêu cầu 2.4.
+// - Quy ước id: `quick-edit-username|password|twoFaCode|sellerName|note` (task 3.1 yêu cầu).
+// - Mỗi ô gắn onpaste="handleQuickEditPaste(event,'<field>')" để cắt theo giới hạn khi dán.
+// - Với Auth_Method khác `email`, ô Mật khẩu giữ dạng chỉ đọc qua renderSsoPasswordDetail
+//   (KHÔNG render input password sửa được).
+function renderQuickEditSection(acc) {
+    const original = window.appState.quickEdit?.original || {};
+    const isEmailAuth = getAuthMethod(acc) === 'email';
+
+    // Ô nhập một dòng cho các trường ngắn (username/password/twoFaCode/sellerName).
+    const inputRow = (labelText, field, value, maxLength) =>
+        `<div class="detail-row quick-edit-row">
+            <span class="detail-label">${labelText}</span>
+            <input type="text" class="input quick-edit-input" id="quick-edit-${field}" value="${escapeHtml(value)}" maxlength="${maxLength}" onpaste="handleQuickEditPaste(event,'${field}')" autocomplete="off" spellcheck="false">
+        </div>`;
+
+    const usernameRow = inputRow('Tài khoản', 'username', String(original.username || ''), getQuickEditMaxLength('username', 255));
+
+    // Mật khẩu: chỉ email mới cho sửa (input); SSO giữ chỉ đọc qua renderSsoPasswordDetail.
+    // Không render input password khi SSO → collectQuickEditValues sẽ dùng lại snapshot.
+    const passwordRow = isEmailAuth
+        ? inputRow('Mật khẩu', 'password', String(original.password || ''), getQuickEditMaxLength('password', 255))
+        : `<div class="detail-row quick-edit-row"><span class="detail-label">Mật khẩu</span><span class="detail-value secret-value">${renderSsoPasswordDetail(acc)}</span></div>`;
+
+    // 2FA: nạp Secret TOTP gốc từ snapshot (Yêu cầu 2.4).
+    const twoFaRow = inputRow('2FA', 'twoFaCode', String(original.twoFaCode || ''), getQuickEditMaxLength('twoFaCode', 255));
+
+    const sellerRow = inputRow('Người bán', 'sellerName', String(original.sellerName || ''), getQuickEditMaxLength('sellerName', 255));
+
+    // Ghi chú dùng textarea với maxlength 1000.
+    const noteMax = getQuickEditMaxLength('note', 1000);
+    const noteRow = `<div class="detail-row detail-note-row quick-edit-row">
+            <span class="detail-label">Ghi chú</span>
+            <textarea class="input quick-edit-input quick-edit-note" id="quick-edit-note" maxlength="${noteMax}" rows="3" onpaste="handleQuickEditPaste(event,'note')" spellcheck="false">${escapeHtml(String(original.note || ''))}</textarea>
+        </div>`;
+
+    return `<div class="detail-section quick-edit-section anim-fade-in-up">
+            ${usernameRow}
+            ${passwordRow}
+            ${twoFaRow}
+            ${noteRow}
+            ${sellerRow}
+        </div>`;
+}
+
 function renderDetail(accId) {
     const acc = window.appState.accounts.find(a=>a.id===accId);
     if (!acc) return;
@@ -2458,6 +2703,34 @@ function renderDetail(accId) {
     const twoFaEye = needsMaster ? renderEyeButton(acc.id, 'twoFaCode', 'Hiện 2FA') : '';
 
     const sellerRow = renderSellerDetailRow(acc);
+
+    // Chế độ sửa nhanh đang bật cho đúng tài khoản này? (lớp render đọc appState.quickEdit)
+    const quickEditActive = window.appState.quickEdit?.accId === accId && window.appState.quickEdit.active === true;
+
+    // Khối thông tin nhạy cảm: Chế độ sửa nhanh render các ô nhập liệu; ngược lại giữ Chế độ xem.
+    const secretSectionHtml = quickEditActive
+        ? renderQuickEditSection(acc)
+        : `<div class="detail-section anim-fade-in-up">
+            <div class="detail-row"><span class="detail-label">Tài khoản</span><span class="detail-value secret-value">${escapeHtml(usernameText)} ${renderEyeButton(acc.id, 'username', 'Hiện tài khoản')} ${canCopy ? renderCopyButton(acc.id, 'username', 'Copy tài khoản') : ''}</span></div>
+            <div class="detail-row"><span class="detail-label">Mật khẩu</span><span class="detail-value secret-value">${getAuthMethod(acc) === 'email' ? `${escapeHtml(passwordText)} ${renderEyeButton(acc.id, 'password', 'Hiện mật khẩu')} ${canCopy ? renderCopyButton(acc.id, 'password', 'Copy mật khẩu') : ''}` : renderSsoPasswordDetail(acc)}</span></div>
+            ${hasTwoFa?`<div class="detail-row"><span class="detail-label">2FA</span><span class="detail-value secret-value">${escapeHtml(twoFaText)} ${renderEyeButton(acc.id, 'twoFaCode', 'Hiện 2FA')} ${canCopy ? renderCopyButton(acc.id, '2fa', 'Copy 2FA') : ''}</span></div>${renderTwoFaExtra(acc, twoFaSecret, twoFaIsTotp)}`:''}
+            ${noteText?`<div class="detail-row detail-note-row"><span class="detail-label">Ghi chú</span><div class="detail-note-value">${renderSmartNote(noteText)}</div></div>`:''}
+            ${sellerRow}
+        </div>`;
+
+    // Hàng nút hành động: Chế độ sửa nhanh hiển thị Xác nhận/Huỷ; ngược lại giữ nút gốc.
+    const actionRowHtml = quickEditActive
+        ? `<div class="d-detail-full quick-edit-actions" style="display:flex;gap:12px;margin-top:8px">
+            <button class="btn btn-primary btn-sm" onclick="confirmQuickEdit('${escapeJsAttr(acc.id)}')">Xác nhận</button>
+            <button class="btn btn-outline btn-sm" onclick="cancelQuickEdit('${escapeJsAttr(acc.id)}')">Huỷ</button>
+        </div>`
+        : `<div class="d-detail-full" style="display:flex;gap:12px;margin-top:8px">
+            <button class="btn btn-outline btn-sm" onclick="openShareAccountModal('${acc.id}')">Chia sẻ lên nhóm</button>
+            ${renderQuickEditButton(acc)}
+            <button class="btn btn-outline btn-sm" onclick="editAccount('${acc.id}')">✏️ Sửa</button>
+            <button class="btn btn-danger-outline btn-sm" onclick="deleteAccount('${acc.id}')">🗑️ Xoá</button>
+        </div>`;
+
     let h = `
     <button class="back-btn" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polyline points="15,18 9,12 15,6"/></svg> Quay lại</button>
     <div class="d-detail-layout">
@@ -2477,13 +2750,7 @@ function renderDetail(accId) {
             </div>
         </div>
         ${renderDetailAuthSection(acc)}
-        <div class="detail-section anim-fade-in-up">
-            <div class="detail-row"><span class="detail-label">Tài khoản</span><span class="detail-value secret-value">${escapeHtml(usernameText)} ${renderEyeButton(acc.id, 'username', 'Hiện tài khoản')} ${canCopy ? renderCopyButton(acc.id, 'username', 'Copy tài khoản') : ''}</span></div>
-            <div class="detail-row"><span class="detail-label">Mật khẩu</span><span class="detail-value secret-value">${getAuthMethod(acc) === 'email' ? `${escapeHtml(passwordText)} ${renderEyeButton(acc.id, 'password', 'Hiện mật khẩu')} ${canCopy ? renderCopyButton(acc.id, 'password', 'Copy mật khẩu') : ''}` : renderSsoPasswordDetail(acc)}</span></div>
-            ${hasTwoFa?`<div class="detail-row"><span class="detail-label">2FA</span><span class="detail-value secret-value">${escapeHtml(twoFaText)} ${renderEyeButton(acc.id, 'twoFaCode', 'Hiện 2FA')} ${canCopy ? renderCopyButton(acc.id, '2fa', 'Copy 2FA') : ''}</span></div>${renderTwoFaExtra(acc, twoFaSecret, twoFaIsTotp)}`:''}
-            ${noteText?`<div class="detail-row detail-note-row"><span class="detail-label">Ghi chú</span><div class="detail-note-value">${renderSmartNote(noteText)}</div></div>`:''}
-            ${sellerRow}
-        </div>
+        ${secretSectionHtml}
         <div class="detail-section anim-fade-in-up">
             <div class="detail-row"><span class="detail-label">Ngày mua</span><span class="detail-value">${formatDateVN(acc.purchaseDate)}</span></div>
             ${acc.purchasePrice && typeof formatPriceVN === 'function' ? `<div class="detail-row"><span class="detail-label">Giá mua</span><span class="detail-value detail-price-value">${escapeHtml(formatPriceVN(acc.purchasePrice))}</span></div>` : ''}
@@ -2492,14 +2759,10 @@ function renderDetail(accId) {
             ${acc.expiryType!=='lifetime'?`<div style="margin-top:12px"><div style="font-size:13px;font-weight:600;margin-bottom:8px">Gia hạn nhanh</div><div class="renew-options"><button class="renew-btn" onclick="renewAccount('${acc.id}',7)">+7 ngày</button><button class="renew-btn" onclick="renewAccount('${acc.id}',15)">+15</button><button class="renew-btn" onclick="renewAccount('${acc.id}',30)">+30</button><button class="renew-btn" onclick="renewAccount('${acc.id}',90)">+90</button><button class="renew-btn" onclick="renewAccount('${acc.id}',365)">+365</button>${acc.status!=='expired'?`<button class="renew-btn renew-btn-expire" onclick="markAccountExpired('${acc.id}')" title="Đặt hết hạn ngay hôm nay">⏱️ Hết hạn ngay</button>`:''}</div></div>`:''}
         </div>
         ${renderLinkedServicesSection(acc.id)}
-        <div class="d-detail-full" style="display:flex;gap:12px;margin-top:8px">
-            <button class="btn btn-outline btn-sm" onclick="openShareAccountModal('${acc.id}')">Chia sẻ lên nhóm</button>
-            <button class="btn btn-outline btn-sm" onclick="editAccount('${acc.id}')">✏️ Sửa</button>
-            <button class="btn btn-danger-outline btn-sm" onclick="deleteAccount('${acc.id}')">🗑️ Xoá</button>
-        </div>
+        ${actionRowHtml}
     </div>`;
     document.getElementById('page-content').innerHTML = h;
-    if (twoFaIsTotp && typeof startTotpTicker === 'function') startTotpTicker(twoFaSecret);
+    if (!quickEditActive && twoFaIsTotp && typeof startTotpTicker === 'function') startTotpTicker(twoFaSecret);
     else if (typeof stopTotpTicker === 'function') stopTotpTicker();
 }
 
@@ -2770,7 +3033,7 @@ function renderMinSupportedWarning(platform, status) {
 // hiệu hoá "Kiểm tra" theo Platform_Detector, định tuyến hành động theo nền tảng, và
 // khoá hành động khi đang tải (Requirements 1.1-1.6, 3.4/3.5/3.7, 4.4/4.6/4.8, 10.1-10.4).
 function renderUpdateSection() {
-    const version = escapeHtml(window.appState.appVersion || '1.4.2');
+    const version = escapeHtml(window.appState.appVersion || '1.4.3');
     const platform = getUpdatePlatform();
     const cap = getUpdateCapability(platform);
     const status = window.appState.updateStatus;

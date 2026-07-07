@@ -98,6 +98,7 @@ public class TingUpdaterPlugin extends Plugin {
                 InputStream input = null;
                 OutputStream output = null;
                 try {
+                    deleteQuietly(apkFile);
                     connection = openDownloadConnection(url);
 
                     int statusCode = connection.getResponseCode();

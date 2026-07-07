@@ -130,6 +130,18 @@ async function verifySharedPassword(sharedPassword, storedHash, salt) {
     return verifyMasterPasswordHash(sharedPassword, storedHash, salt);
 }
 
+// ===== Join_Password (mật khẩu vào nhóm) =====
+// Tái sử dụng đúng cơ chế băm PBKDF2 của Shared_Password nhưng là API tách biệt
+// về ngữ nghĩa: Join_Password chỉ dùng để gác cổng tham gia nhóm, KHÔNG bao giờ
+// dùng để suy ra khoá mã hoá zero-knowledge.
+async function hashJoinPassword(joinPassword, salt) {
+    return hashMasterPassword(joinPassword, salt);
+}
+
+async function verifyJoinPassword(joinPassword, storedHash, salt) {
+    return verifyMasterPasswordHash(joinPassword, storedHash, salt);
+}
+
 window.TingCrypto = {
     generateSalt,
     generateIv,
@@ -141,6 +153,8 @@ window.TingCrypto = {
     verifyMasterPasswordHash,
     hashSharedPassword,
     verifySharedPassword,
+    hashJoinPassword,
+    verifyJoinPassword,
 };
 
 window.generateSalt = generateSalt;
@@ -152,6 +166,8 @@ window.hashMasterPassword = hashMasterPassword;
 window.verifyMasterPasswordHash = verifyMasterPasswordHash;
 window.hashSharedPassword = hashSharedPassword;
 window.verifySharedPassword = verifySharedPassword;
+window.hashJoinPassword = hashJoinPassword;
+window.verifyJoinPassword = verifyJoinPassword;
 
 
 // ===== TOTP (2FA) — tạo mã 6 số trực tiếp từ secret key =====

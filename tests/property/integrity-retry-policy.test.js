@@ -135,8 +135,8 @@ describe('Mobile_Updater.downloadAndInstall — Property 11 (chính sách thử 
           expect(result.status).toBe('error');
           expect(result.canRetry).toBe(true);
 
-          // 4) Artifact hỏng được dọn dẹp mỗi lần tải thất bại.
-          expect(cleanupApkCalls).toBe(downloadApkCalls);
+          // 4) APK cũ được dọn trước khi tải, artifact hỏng được dọn sau mỗi lần fail.
+          expect(cleanupApkCalls).toBe(downloadApkCalls + 1);
         },
       ),
       { numRuns: 100 },

@@ -187,11 +187,98 @@
         }
     }
 
+    // ---------- Vuốt ngang để chuyển tab (màn Nhóm & Cài đặt) ----------
+    // Trên mobile, cho phép lướt trái/phải trong vùng nội dung để nhảy nhanh
+    // giữa các tab con thay vì phải bấm từng nút tab.
+    var SWIPE_MIN_X = 55;      // quãng ngang tối thiểu (px) để tính là vuốt chuyển tab
+    var SWIPE_MAX_OFF = 0.6;   // |dy| phải nhỏ hơn |dx| * hệ số này (vuốt phải đủ "ngang")
+    var SWIPE_MAX_MS = 700;    // thời gian tối đa của một cú vuốt
+    var GROUP_TAB_ORDER = ['board', 'accounts', 'members', 'settings'];
+
+    // Bỏ qua khi vuốt bắt đầu trên các phần tử cần thao tác ngang riêng
+    // (thanh tab tự cuộn, ô nhập, thanh trượt, danh sách vuốt-để-xoá...).
+    var SWIPE_IGNORE = 'input, textarea, select, .settings-tabbar, .group-tabs, [data-no-swipe]';
+
+    function getSwipeContext() {
+        var pc = document.getElementById('page-content');
+        if (!pc) return null;
+        if (pc.querySelector('.group-tabs')) {
+            var gCurrent = (window.appState && window.appState.currentGroupTab) || 'board';
+            return {
+                order: GROUP_TAB_ORDER.slice(),
+                current: gCurrent,
+                apply: function (next) {
+                    if (typeof window.setGroupDetailTab === 'function') window.setGroupDetailTab(next);
+                }
+            };
+        }
+        var tabbar = pc.querySelector('.settings-tabbar');
+        if (tabbar) {
+            var order = Array.prototype.map.call(
+                tabbar.querySelectorAll('.settings-tab'),
+                function (btn) { return btn.dataset.tab; }
+            ).filter(Boolean);
+            if (!order.length) return null;
+            var sCurrent = window._settingsActiveTab && order.indexOf(window._settingsActiveTab) >= 0
+                ? window._settingsActiveTab
+                : order[0];
+            return {
+                order: order,
+                current: sCurrent,
+                apply: function (next) {
+                    if (typeof window.switchSettingsTab === 'function') window.switchSettingsTab(next);
+                }
+            };
+        }
+        return null;
+    }
+
+    function setupSwipeTabs() {
+        if (!isTouch) return; // chỉ bật trên thiết bị cảm ứng
+        var pc = document.getElementById('page-content');
+        if (!pc) return;
+        var startX = 0, startY = 0, startAt = 0, tracking = false;
+
+        pc.addEventListener('touchstart', function (e) {
+            if (!e.touches || e.touches.length !== 1) { tracking = false; return; }
+            var t = e.target;
+            if (t && t.closest && t.closest(SWIPE_IGNORE)) { tracking = false; return; }
+            if (!getSwipeContext()) { tracking = false; return; }
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            startAt = Date.now();
+            tracking = true;
+        }, { passive: true });
+
+        pc.addEventListener('touchend', function (e) {
+            if (!tracking) return;
+            tracking = false;
+            var touch = (e.changedTouches && e.changedTouches[0]) || null;
+            if (!touch) return;
+            var dx = touch.clientX - startX;
+            var dy = touch.clientY - startY;
+            if (Date.now() - startAt > SWIPE_MAX_MS) return;
+            if (Math.abs(dx) < SWIPE_MIN_X) return;
+            if (Math.abs(dy) > Math.abs(dx) * SWIPE_MAX_OFF) return;
+
+            var ctx = getSwipeContext();
+            if (!ctx) return;
+            var idx = ctx.order.indexOf(ctx.current);
+            if (idx < 0) idx = 0;
+            // Vuốt sang trái (dx<0) → tab kế tiếp; vuốt phải (dx>0) → tab trước.
+            var nextIdx = dx < 0 ? idx + 1 : idx - 1;
+            if (nextIdx < 0 || nextIdx >= ctx.order.length) return;
+            if (canVibrate) { try { navigator.vibrate(9); } catch (err) { /* ignore */ } }
+            ctx.apply(ctx.order[nextIdx]);
+        }, { passive: true });
+    }
+
     // ---------- Khởi động ----------
     function init() {
         observePageContent();
         wrapNavigation();
         bindScrollShrink();
+        setupSwipeTabs();
         document.addEventListener('click', function (e) {
             spawnRipple(e);
             tinyHaptic(e);

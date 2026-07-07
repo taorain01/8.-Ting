@@ -435,7 +435,7 @@ async function cancelGroupInvite(groupId, email = '') {
     return true;
 }
 
-async function acceptGroupInvite(groupId, sharedPassword) {
+async function acceptGroupInvite(groupId, joinPassword = '') {
     ensureGroupState();
     const user = requireGroupUser();
     const group = getGroupInviteById(groupId) || getKnownGroupById(groupId);
@@ -443,11 +443,19 @@ async function acceptGroupInvite(groupId, sharedPassword) {
     if (!(group.pendingMemberEmails || []).includes(user.email) && !window.appState.isDemo) {
         throw new Error('Email của bạn không có trong lời mời nhóm');
     }
-    // Chỉ yêu cầu mật khẩu khi nhóm thực sự có đặt mật khẩu chung.
-    if (groupHasSharedPassword(group)) {
-        if (!sharedPassword) throw new Error('Nhập mật khẩu chung của nhóm');
-        const ok = await verifyGroupPassword(group, sharedPassword);
-        if (!ok) throw new Error('Mật khẩu chung không đúng');
+    // Việc tham gia nhóm chỉ phụ thuộc Join_Password (nếu chủ nhóm đã đặt),
+    // hoàn toàn tách rời khỏi Mật khẩu chung (Shared_Password). Không tự động
+    // mở khoá dữ liệu nhạy cảm — việc đó vẫn cần Shared_Password riêng (Req 5.8, 9.4).
+    if (isJoinPasswordEnabled(group)) {
+        assertJoinRateLimitOk(groupId);
+        const candidate = String(joinPassword ?? '').trim();
+        if (!candidate) throw new Error('Nhập mật khẩu vào nhóm');
+        const ok = await verifyGroupJoinPassword(group, candidate);
+        if (!ok) {
+            registerJoinFailure(groupId);
+            throw new Error('Mật khẩu vào nhóm không đúng');
+        }
+        clearJoinFailures(groupId);
     }
 
     if (window.appState.isDemo) {
@@ -457,16 +465,21 @@ async function acceptGroupInvite(groupId, sharedPassword) {
         group.updatedAt = new Date();
         window.appState.groupInvites = (window.appState.groupInvites || []).filter(item => item.id !== groupId);
         if (!window.appState.groups.some(item => item.id === groupId)) window.appState.groups.unshift(group);
-        setGroupUnlocked(groupId, sharedPassword);
         notifyGroupsChanged(groupId);
         return true;
     }
 
-    await db.collection('groups').doc(groupId).update({
-        memberEmails: firebase.firestore.FieldValue.arrayUnion(user.email),
-        pendingMemberEmails: firebase.firestore.FieldValue.arrayRemove(user.email),
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-    });
+    // Không thay đổi mảng thành viên cục bộ trước khi ghi: nếu ghi lỗi thì
+    // không có gì để rollback, người dùng vẫn ở nguyên trạng thái được mời (Req 4.5).
+    try {
+        await withJoinSaveTimeout(db.collection('groups').doc(groupId).update({
+            memberEmails: firebase.firestore.FieldValue.arrayUnion(user.email),
+            pendingMemberEmails: firebase.firestore.FieldValue.arrayRemove(user.email),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        }));
+    } catch (error) {
+        throw new Error(error?.message || 'Không tham gia được nhóm');
+    }
     const acceptedGroup = {
         ...group,
         memberEmails: [...new Set([...(group.memberEmails || []), user.email])],
@@ -478,7 +491,6 @@ async function acceptGroupInvite(groupId, sharedPassword) {
     };
     window.appState.groupInvites = (window.appState.groupInvites || []).filter(item => item.id !== groupId);
     window.appState.groups = [acceptedGroup, ...(window.appState.groups || []).filter(item => item.id !== groupId)];
-    setGroupUnlocked(groupId, sharedPassword);
     return true;
 }
 
@@ -1184,6 +1196,161 @@ async function changeGroupSharedPassword(groupId, newPassword) {
     return true;
 }
 
+// ===================== Join_Password (mật khẩu vào nhóm) =====================
+// Tách rời hoàn toàn với Shared_Password: chỉ gác cổng việc tham gia nhóm,
+// không đụng tới sharedPwHash/sharedPwSalt và không suy ra khoá mã hoá.
+
+const MIN_JOIN_PASSWORD_LENGTH = 6;
+const MAX_JOIN_PASSWORD_LENGTH = 128;
+const JOIN_SAVE_TIMEOUT_MS = 10000;
+
+// Rate-limit chống dò mật khẩu (chỉ trong bộ nhớ, reset khi khởi động lại app).
+const joinAttemptState = new Map(); // groupId -> { failures, lockedUntil }
+const JOIN_MAX_ATTEMPTS = 5;
+const JOIN_LOCK_MS = 60000;
+
+// Nhóm bật Join_Password khi và chỉ khi có cả hash lẫn salt hợp lệ (không rỗng).
+function isJoinPasswordEnabled(group) {
+    return Boolean(group?.joinPwHash && group?.joinPwSalt);
+}
+
+function isValidJoinPasswordLength(value) {
+    const len = String(value ?? '').length;
+    return len >= MIN_JOIN_PASSWORD_LENGTH && len <= MAX_JOIN_PASSWORD_LENGTH;
+}
+
+// Xác minh Join_Password người dùng nhập với hash/salt của nhóm.
+// Nhóm chưa bật Join_Password ⇒ luôn trả về không khớp (Req 7.6).
+async function verifyGroupJoinPassword(group, joinPassword) {
+    if (!isJoinPasswordEnabled(group)) return false;
+    // Trim để khớp với cách lưu (setGroupJoinPassword băm giá trị đã trim),
+    // tránh trường hợp mật khẩu có khoảng trắng đầu/cuối không bao giờ khớp.
+    return verifyJoinPassword(String(joinPassword ?? '').trim(), group.joinPwHash, group.joinPwSalt);
+}
+
+// Xác định quyền chủ nhóm cho thao tác quản lý Join_Password (Req 6).
+function assertGroupOwnerForJoinPassword(group) {
+    const user = requireGroupUser();
+    if (!group?.ownerUid || !user?.uid) throw new Error('Không thể xác minh quyền chủ nhóm');
+    if (!isGroupOwnerUser(group, user)) throw new Error('Chỉ chủ nhóm mới có quyền quản lý mật khẩu vào nhóm');
+    return user;
+}
+
+// Bọc thao tác ghi bằng timeout 10s để coi là offline khi quá hạn (Req 8.5).
+function withJoinSaveTimeout(promise) {
+    let timer = null;
+    const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Thao tác chưa được lưu (thiết bị offline hoặc quá thời gian)')), JOIN_SAVE_TIMEOUT_MS);
+    });
+    return Promise.race([promise, timeout]).finally(() => { if (timer) clearTimeout(timer); });
+}
+
+function assertJoinRateLimitOk(groupId) {
+    const state = joinAttemptState.get(groupId);
+    if (state?.lockedUntil && Date.now() < state.lockedUntil) {
+        const secondsLeft = Math.ceil((state.lockedUntil - Date.now()) / 1000);
+        throw new Error(`Đã nhập sai quá nhiều lần. Thử lại sau ${secondsLeft} giây`);
+    }
+}
+
+function registerJoinFailure(groupId) {
+    const state = joinAttemptState.get(groupId) || { failures: 0, lockedUntil: 0 };
+    state.failures += 1;
+    if (state.failures >= JOIN_MAX_ATTEMPTS) {
+        state.lockedUntil = Date.now() + JOIN_LOCK_MS;
+        state.failures = 0;
+    }
+    joinAttemptState.set(groupId, state);
+}
+
+function clearJoinFailures(groupId) {
+    joinAttemptState.delete(groupId);
+}
+
+// Đặt hoặc đổi Join_Password (chỉ chủ nhóm). Sinh salt mới mỗi lần lưu.
+async function setGroupJoinPassword(groupId, joinPassword) {
+    ensureGroupState();
+    const group = getGroupById(groupId);
+    if (!group) throw new Error('Không tìm thấy nhóm');
+    assertGroupOwnerForJoinPassword(group);
+
+    const pw = String(joinPassword ?? '');
+    if (!isValidJoinPasswordLength(pw)) {
+        throw new Error(`Mật khẩu vào nhóm cần từ ${MIN_JOIN_PASSWORD_LENGTH} đến ${MAX_JOIN_PASSWORD_LENGTH} ký tự`);
+    }
+    // Khi đang bật (đổi mật khẩu): giá trị mới phải khác giá trị cũ (Req 2.4).
+    if (isJoinPasswordEnabled(group)) {
+        const sameAsCurrent = await verifyGroupJoinPassword(group, pw);
+        if (sameAsCurrent) throw new Error('Mật khẩu vào nhóm mới phải khác mật khẩu hiện tại');
+    }
+
+    const joinPwSalt = generateSalt();
+    // Băm giá trị đã trim để nhất quán với luồng xác minh (verifyGroupJoinPassword trim input).
+    const joinPwHash = await hashJoinPassword(pw.trim(), joinPwSalt);
+    const snapshot = { joinPwHash: group.joinPwHash, joinPwSalt: group.joinPwSalt };
+
+    if (window.appState.isDemo) {
+        group.joinPwHash = joinPwHash;
+        group.joinPwSalt = joinPwSalt;
+        group.updatedAt = new Date();
+        notifyGroupsChanged(groupId);
+        return true;
+    }
+
+    // Áp dụng lạc quan lên state cục bộ, rollback nếu ghi thất bại/timeout.
+    group.joinPwHash = joinPwHash;
+    group.joinPwSalt = joinPwSalt;
+    try {
+        await withJoinSaveTimeout(db.collection('groups').doc(groupId).update({
+            joinPwHash,
+            joinPwSalt,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        }));
+    } catch (error) {
+        group.joinPwHash = snapshot.joinPwHash;
+        group.joinPwSalt = snapshot.joinPwSalt;
+        notifyGroupsChanged(groupId);
+        throw new Error(error?.message || 'Chưa lưu được mật khẩu vào nhóm');
+    }
+    notifyGroupsChanged(groupId);
+    return true;
+}
+
+// Gỡ Join_Password, đưa nhóm về trạng thái Disabled (chỉ chủ nhóm).
+async function removeGroupJoinPassword(groupId) {
+    ensureGroupState();
+    const group = getGroupById(groupId);
+    if (!group) throw new Error('Không tìm thấy nhóm');
+    assertGroupOwnerForJoinPassword(group);
+
+    const snapshot = { joinPwHash: group.joinPwHash, joinPwSalt: group.joinPwSalt };
+
+    if (window.appState.isDemo) {
+        delete group.joinPwHash;
+        delete group.joinPwSalt;
+        group.updatedAt = new Date();
+        notifyGroupsChanged(groupId);
+        return true;
+    }
+
+    delete group.joinPwHash;
+    delete group.joinPwSalt;
+    try {
+        await withJoinSaveTimeout(db.collection('groups').doc(groupId).update({
+            joinPwHash: firebase.firestore.FieldValue.delete(),
+            joinPwSalt: firebase.firestore.FieldValue.delete(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        }));
+    } catch (error) {
+        group.joinPwHash = snapshot.joinPwHash;
+        group.joinPwSalt = snapshot.joinPwSalt;
+        notifyGroupsChanged(groupId);
+        throw new Error(error?.message || 'Chưa gỡ được mật khẩu vào nhóm');
+    }
+    notifyGroupsChanged(groupId);
+    return true;
+}
+
 window.normalizeGroupEmail = normalizeGroupEmail;
 window.createGroup = createGroup;
 window.loadGroupsRealtime = loadGroupsRealtime;
@@ -1196,6 +1363,11 @@ window.renameGroup = renameGroup;
 window.deleteGroup = deleteGroup;
 window.verifyGroupPassword = verifyGroupPassword;
 window.groupHasSharedPassword = groupHasSharedPassword;
+window.isJoinPasswordEnabled = isJoinPasswordEnabled;
+window.isValidJoinPasswordLength = isValidJoinPasswordLength;
+window.verifyGroupJoinPassword = verifyGroupJoinPassword;
+window.setGroupJoinPassword = setGroupJoinPassword;
+window.removeGroupJoinPassword = removeGroupJoinPassword;
 window.getGroupDerivedKey = getGroupDerivedKey;
 window.changeGroupSharedPassword = changeGroupSharedPassword;
 window.setGroupUnlocked = setGroupUnlocked;

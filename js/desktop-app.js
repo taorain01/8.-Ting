@@ -23,6 +23,10 @@ window.appState = {
     firestoreFromCache: false,
     pendingSyncCount: 0,
     expandedGroups: {},
+    // Cờ BẬT/TẮT "Hiển thị tài khoản hết hạn" của màn hình TK Mua và Cá nhân.
+    // Lưu theo phiên trong appState (KHÔNG persist qua localStorage); mặc định TẮT
+    // mỗi lần khởi động app. Hai màn hình dùng cờ riêng, tách biệt nhau.
+    showExpired: { bought: false, personal: false },
     addFormTags: [],
     addFormAutoTags: [],
     addFormPlatform: null,
@@ -39,6 +43,11 @@ window.appState = {
     masterChangeInProgress: false,
     masterSecurity: null,
     activeDecryptedAccount: null,
+    // Trạng thái Chế độ sửa nhanh inline trên Thẻ chi tiết tài khoản.
+    // `accId`: id tài khoản đang sửa; `active`: đang ở Chế độ sửa nhanh;
+    // `original`: snapshot giá trị đã giải mã lúc vào chế độ (mốc dirty + khôi phục);
+    // `saving`: cờ chống double-submit khi đang lưu. Xem js/quick-edit-core.js.
+    quickEdit: { accId: null, active: false, original: null, saving: false },
     revealedSecrets: {},
     revealTimers: {},
     settings: {
@@ -55,9 +64,10 @@ window.appState = {
         notifyOverdueDays: 3,
         shortcuts: { openApp: 'Control+Shift+T', quickAdd: 'Control+Shift+S' },
     },
-    appVersion: '1.4.2',
+    appVersion: '1.4.3',
     updateStatus: null,
     updateLog: [],
+    visibleGroupNotes: {},
 };
 
 const DEFAULT_DEMO_CATEGORIES = [
@@ -157,6 +167,10 @@ function cloneNavExpandedGroups(value = window.appState.expandedGroups) {
     return { ...(value && typeof value === 'object' ? value : {}) };
 }
 
+function cloneNavVisibleGroupNotes(value = window.appState.visibleGroupNotes) {
+    return { ...(value && typeof value === 'object' ? value : {}) };
+}
+
 function createNavEntry() {
     const page = window.appState.currentPage;
     if (!page) return null;
@@ -170,6 +184,7 @@ function createNavEntry() {
         currentPlatformFilter: window.appState.currentPlatformFilter || '',
         searchQuery: window.appState.searchQuery || '',
         expandedGroups: cloneNavExpandedGroups(),
+        visibleGroupNotes: cloneNavVisibleGroupNotes(),
         scrollTop: content ? content.scrollTop : 0,
         windowScrollY: window.scrollY || window.pageYOffset || 0,
     };
@@ -199,6 +214,7 @@ function applyNavEntryState(entry) {
     window.appState.currentPlatformFilter = entry.currentPlatformFilter || '';
     window.appState.searchQuery = entry.searchQuery || '';
     window.appState.expandedGroups = cloneNavExpandedGroups(entry.expandedGroups);
+    window.appState.visibleGroupNotes = cloneNavVisibleGroupNotes(entry.visibleGroupNotes);
     const searchInput = document.getElementById('search-input');
     if (searchInput) searchInput.value = window.appState.searchQuery;
 }
@@ -235,7 +251,10 @@ function navigateTo(page, isBack = false) {
     if (page !== 'detail') window.appState.activeDecryptedAccount = null;
     if (page !== 'detail') window.appState.currentDetailId = null;
     if (!isRestoring) {
-        if (page !== window.appState.previousPage) window.appState.expandedGroups = {};
+        if (page !== window.appState.previousPage) {
+            window.appState.expandedGroups = {};
+            window.appState.visibleGroupNotes = {};
+        }
         window.appState.currentFilter = 'all';
         window.appState.currentTagFilter = '';
         window.appState.currentPlatformFilter = '';
@@ -253,6 +272,12 @@ function navigateTo(page, isBack = false) {
     const categoryId = page.startsWith('category:') ? page.slice('category:'.length) : '';
     const category = categoryId ? getCategoryById(categoryId) : null;
     document.getElementById('page-title').textContent = category?.name || pageTitles[page] || '';
+    // Rời màn hình TK Mua/Cá nhân: gỡ Nut_Loc/Nut_Loc_Nen_Tang khỏi ô tìm kiếm
+    // để giữ nguyên bố trí topbar của các màn hình khác (Requirement 2.8).
+    // Khi vào lại bought/personal, renderAccountList sẽ tự chèn lại các nút này.
+    if (page !== 'bought' && page !== 'personal') {
+        if (typeof unmountSearchToolbarButtons === 'function') unmountSearchToolbarButtons();
+    }
     // Render
     switch (page) {
         case 'dashboard': renderDashboard(); break;
@@ -290,7 +315,7 @@ async function handleBackIntent() {
     const entry = stack[stack.length - 1];
     if (!entry?.page) {
         if (window.appState.currentPage !== 'dashboard') {
-            applyNavEntryState({ currentFilter: 'all', currentTagFilter: '', currentPlatformFilter: '', searchQuery: '', expandedGroups: {} });
+            applyNavEntryState({ currentFilter: 'all', currentTagFilter: '', currentPlatformFilter: '', searchQuery: '', expandedGroups: {}, visibleGroupNotes: {} });
             navigateTo('dashboard', true);
             resetNavScroll();
             return true;
@@ -361,8 +386,8 @@ function initSmartNavigationInputs() {
 
 // ===== HEADER / SIDEBAR =====
 function formatSidebarVersion(version) {
-    const raw = String(version || '1.4.2').trim().replace(/^v/i, '');
-    return raw ? `v${raw}` : 'v1.4.2';
+    const raw = String(version || '1.4.3').trim().replace(/^v/i, '');
+    return raw ? `v${raw}` : 'v1.4.3';
 }
 
 function updateSidebarVersion() {
@@ -417,6 +442,8 @@ function updateHeader() {
 // ===== SEARCH & FILTER =====
 function handleSearch(v) {
     window.appState.searchQuery = String(v || '');
+    window.appState.expandedGroups = {};
+    window.appState.visibleGroupNotes = {};
     const hasSearch = window.appState.searchQuery.trim().length > 0;
     const p = window.appState.currentPage;
     if (p === 'bought') renderAccountList('bought');
@@ -434,6 +461,7 @@ function clearSearch() { document.getElementById('search-input').value = ''; han
 function setFilter(f) {
     window.appState.currentFilter = f;
     window.appState.expandedGroups = {};
+    window.appState.visibleGroupNotes = {};
     const p = window.appState.currentPage;
     if (p === 'bought') renderAccountList('bought');
     else if (p === 'personal') renderAccountList('personal');
@@ -443,6 +471,7 @@ function setFilter(f) {
 function setTagFilter(tag) {
     window.appState.currentTagFilter = String(tag || '');
     window.appState.expandedGroups = {};
+    window.appState.visibleGroupNotes = {};
     const p = window.appState.currentPage;
     if (p === 'bought') renderAccountList('bought');
     else if (p === 'personal') renderAccountList('personal');
@@ -453,6 +482,7 @@ function setTagFilter(tag) {
 function setPlatformFilter(platform) {
     window.appState.currentPlatformFilter = String(platform || '');
     window.appState.expandedGroups = {};
+    window.appState.visibleGroupNotes = {};
     const p = window.appState.currentPage;
     if (p === 'bought') renderAccountList('bought');
     else if (p === 'personal') renderAccountList('personal');
@@ -470,6 +500,7 @@ function setGlobalPlatformFilter(platform) {
     window.appState.currentPlatformFilter = next;
     window.appState.searchQuery = '';
     window.appState.expandedGroups = {};
+    window.appState.visibleGroupNotes = {};
     const input = document.getElementById('search-input');
     if (input) input.value = '';
     renderDashboard();
@@ -484,6 +515,7 @@ function setGlobalTagFilter(tag) {
     window.appState.currentTagFilter = next;
     window.appState.currentPlatformFilter = '';
     window.appState.expandedGroups = {};
+    window.appState.visibleGroupNotes = {};
     const p = window.appState.currentPage;
     if (p === 'bought') renderAccountList('bought');
     else if (p === 'personal') renderAccountList('personal');
@@ -499,6 +531,7 @@ function setGlobalQuickFilter(platform, tag) {
     window.appState.currentPlatformFilter = String(platform || '');
     window.appState.currentTagFilter = String(tag || '');
     window.appState.expandedGroups = {};
+    window.appState.visibleGroupNotes = {};
     const p = window.appState.currentPage;
     if (p === 'bought') renderAccountList('bought');
     else if (p === 'personal') renderAccountList('personal');
@@ -512,6 +545,7 @@ function clearAllFilters() {
     window.appState.currentTagFilter = '';
     window.appState.currentPlatformFilter = '';
     window.appState.expandedGroups = {};
+    window.appState.visibleGroupNotes = {};
     const p = window.appState.currentPage;
     if (p === 'bought') renderAccountList('bought');
     else if (p === 'personal') renderAccountList('personal');
@@ -525,6 +559,35 @@ function toggleAccountGroup(groupKey) {
     if (p === 'bought') renderAccountList('bought');
     else if (p === 'personal') renderAccountList('personal');
     else if (p.startsWith('category:')) renderCategoryDetail(p.slice('category:'.length));
+}
+
+function toggleAccountGroupNotes(groupKey) {
+    window.appState.visibleGroupNotes = window.appState.visibleGroupNotes || {};
+    if (window.appState.visibleGroupNotes[groupKey]) delete window.appState.visibleGroupNotes[groupKey];
+    else window.appState.visibleGroupNotes[groupKey] = true;
+    const p = window.appState.currentPage;
+    if (p === 'bought') renderAccountList('bought');
+    else if (p === 'personal') renderAccountList('personal');
+    else if (p.startsWith('category:')) renderCategoryDetail(p.slice('category:'.length));
+}
+
+// ===== HIỂN THỊ TÀI KHOẢN HẾT HẠN (theo phiên, riêng từng màn hình) =====
+// Đọc cờ Trạng_Thái_Hiện_Hết_Hạn của một màn hình. Chỉ áp dụng cho 'bought'/'personal';
+// mặc định TẮT (false) khi cờ chưa được đặt hoặc type không hợp lệ.
+function getShowExpiredState(type) {
+    const flags = window.appState.showExpired;
+    if (!flags || (type !== 'bought' && type !== 'personal')) return false;
+    return flags[type] === true;
+}
+
+// Đảo cờ Trạng_Thái_Hiện_Hết_Hạn của đúng màn hình `type`, rồi chỉ render lại
+// màn hình hiện tại (nếu đang ở đúng màn hình đó). Không tác động cờ của màn hình còn lại.
+function toggleShowExpired(type) {
+    if (type !== 'bought' && type !== 'personal') return;
+    window.appState.showExpired = window.appState.showExpired || { bought: false, personal: false };
+    window.appState.showExpired[type] = !getShowExpiredState(type);
+    // Chỉ render lại đúng màn hình hiện tại để không tác động các màn hình khác.
+    if (window.appState.currentPage === type) renderAccountList(type);
 }
 
 // ===== PERSONAL =====
@@ -1443,6 +1506,375 @@ function rerenderCurrentView(accountId) {
     else if (page.startsWith('category:')) renderCategoryDetail(page.slice('category:'.length));
 }
 
+// ============================================================================
+//  QUICK_EDIT_CONTROLLER — Lớp điều khiển Chế độ "Sửa nhanh inline" trên Thẻ
+//  chi tiết tài khoản (renderDetail). Thao tác trạng thái window.appState.quickEdit
+//  và gọi lại renderDetail. Luồng bảo mật (mở khoá Master + mã hoá zero-knowledge)
+//  tái sử dụng hoàn toàn hạ tầng có sẵn (getSensitiveAccountData, requireMasterPassword,
+//  encryptAccountData, updateAccountInDB) — KHÔNG viết lại logic bảo mật.
+//
+//  Logic thuần (chuẩn hoá, dirty detection, cắt giới hạn, xác thực) nằm ở
+//  js/quick-edit-core.js và được export qua window (QUICK_EDIT_FIELDS,
+//  normalizeQuickEditValue, truncateToLimit, computeDirtyFields, ...).
+//
+//  LƯU Ý MỞ RỘNG: các task sau bổ sung tiếp vào section này:
+//    - Task 3.2: confirmQuickEdit(accId) — lưu nguyên tử
+//    - Task 3.3: cancelQuickEdit(accId) — huỷ + khôi phục
+//  Task 3.1 dưới đây chỉ hiện thực: khởi tạo state, enterQuickEditMode,
+//  collectQuickEditValues, hasUnsavedQuickEditChanges, handleQuickEditPaste.
+// ============================================================================
+
+// Danh sách tên ô sửa nhanh dùng làm dự phòng nếu window.QUICK_EDIT_FIELDS chưa nạp.
+const QUICK_EDIT_FIELD_NAMES = ['username', 'password', 'twoFaCode', 'sellerName', 'note'];
+
+// Trả về map cấu hình các ô sửa nhanh (ưu tiên bản export từ quick-edit-core.js).
+function getQuickEditFields() {
+    return (typeof window !== 'undefined' && window.QUICK_EDIT_FIELDS)
+        ? window.QUICK_EDIT_FIELDS
+        : null;
+}
+
+// Vào Chế độ sửa nhanh cho tài khoản `accId`.
+// - Uỷ quyền mở khoá cho getSensitiveAccountData (đã bao gồm requireMasterPassword).
+// - Nếu người dùng huỷ / nhập sai Master (trả null) thì GIỮ Chế độ xem, không set active.
+// - Nếu mở khoá thành công thì chụp snapshot giá trị đã giải mã (ô 2FA lưu Secret TOTP
+//   GỐC chứ không phải mã 6 số tức thời), đặt active=true rồi render lại thẻ chi tiết.
+async function enterQuickEditMode(accId) {
+    const acc = window.appState.accounts.find(a => a.id === accId);
+    if (!acc) return;
+
+    // Auth_Method quyết định ô Mật khẩu có cho sửa hay không (SSO là chỉ đọc).
+    const authMethod = (typeof getAuthMethod === 'function') ? getAuthMethod(acc) : acc.authMethod;
+    const isEmailAuth = authMethod === 'email';
+
+    // Uỷ quyền giải mã + mở khoá Master. Trả null nghĩa là huỷ/sai MK → giữ Chế độ xem.
+    const sensitive = await getSensitiveAccountData(acc, 'Mở khoá để sửa nhanh');
+    if (!sensitive) return; // Yêu cầu 3.3, 3.4: giữ nguyên Chế độ xem.
+
+    // Chụp snapshot giá trị ban đầu làm mốc dirty + nguồn khôi phục khi Huỷ.
+    // - username/password/twoFaCode/note lấy từ dữ liệu đã giải mã.
+    // - password rỗng khi Auth_Method khác email (ô Mật khẩu SSO là chỉ đọc).
+    // - twoFaCode là Secret TOTP GỐC (Yêu cầu 2.4), KHÔNG phải mã 6 số.
+    // - sellerName là trường thường nằm trực tiếp trên account.
+    const original = {
+        username: String(sensitive.username || ''),
+        password: isEmailAuth ? String(sensitive.password || '') : '',
+        twoFaCode: String(sensitive.twoFaCode || ''),
+        sellerName: String(acc.sellerName || ''),
+        note: String(sensitive.note || acc.note || ''),
+    };
+
+    window.appState.quickEdit = {
+        accId,
+        active: true,
+        original,
+        saving: false,
+    };
+
+    // Render lại thẻ chi tiết ở Chế độ sửa nhanh (lớp render đọc appState.quickEdit).
+    if (typeof renderDetail === 'function') renderDetail(accId);
+}
+
+// Đọc giá trị hiện tại từ các ô sửa nhanh trong DOM.
+// Quy ước id phần tử: `quick-edit-<field>` (vd `quick-edit-username`, `quick-edit-note`).
+// Nếu một ô không tồn tại trong DOM (vd Mật khẩu SSO chỉ đọc) thì giữ giá trị snapshot
+// ban đầu để dirty detection không hiểu nhầm là đã thay đổi.
+function collectQuickEditValues() {
+    const original = window.appState.quickEdit?.original || {};
+    const fields = getQuickEditFields();
+    const names = fields ? Object.keys(fields) : QUICK_EDIT_FIELD_NAMES;
+    const values = {};
+    names.forEach(field => {
+        const el = document.getElementById(`quick-edit-${field}`);
+        values[field] = el ? String(el.value ?? '') : String(original[field] ?? '');
+    });
+    return values;
+}
+
+// Cho biết Chế độ sửa nhanh hiện có thay đổi chưa lưu hay không.
+// Dùng computeDirtyFields (logic thuần) so sánh snapshot ban đầu với giá trị hiện tại.
+function hasUnsavedQuickEditChanges() {
+    const qe = window.appState.quickEdit;
+    if (!qe || !qe.active || !qe.original) return false;
+    const compute = (typeof window !== 'undefined') ? window.computeDirtyFields : null;
+    if (typeof compute !== 'function') return false;
+    const current = collectQuickEditValues();
+    return compute(qe.original, current).length > 0;
+}
+
+// Xử lý dán vào một ô sửa nhanh: bảo toàn nội dung đang có, chèn nội dung dán tại vị trí
+// con trỏ rồi cắt theo giới hạn ký tự của ô (truncateToLimit). Luôn giữ Chế độ sửa nhanh.
+function handleQuickEditPaste(event, field) {
+    const input = event?.target;
+    if (!input) return;
+
+    const fields = getQuickEditFields();
+    const limit = fields?.[field]?.maxLength;
+
+    // Lấy nội dung dán từ clipboard rồi chặn hành vi dán mặc định để tự kiểm soát cắt giới hạn.
+    const clipboard = event.clipboardData || (typeof window !== 'undefined' ? window.clipboardData : null);
+    const pasted = clipboard ? String(clipboard.getData('text') || '') : '';
+    if (typeof event.preventDefault === 'function') event.preventDefault();
+
+    const currentValue = String(input.value ?? '');
+    const start = Number.isInteger(input.selectionStart) ? input.selectionStart : currentValue.length;
+    const end = Number.isInteger(input.selectionEnd) ? input.selectionEnd : currentValue.length;
+
+    // Ghép nội dung dán vào vị trí con trỏ (thay thế phần đang bôi chọn nếu có).
+    const merged = currentValue.slice(0, start) + pasted + currentValue.slice(end);
+
+    // Cắt theo giới hạn ô bằng logic thuần; bảo toàn nội dung trong giới hạn.
+    const truncate = (typeof window !== 'undefined') ? window.truncateToLimit : null;
+    const nextValue = (typeof truncate === 'function')
+        ? truncate(merged, limit)
+        : (Number.isFinite(limit) ? merged.slice(0, Math.max(0, Math.floor(limit))) : merged);
+
+    input.value = nextValue;
+
+    // Đặt lại con trỏ ngay sau đoạn vừa dán, không vượt quá độ dài mới.
+    const caret = Math.min(nextValue.length, start + pasted.length);
+    try { input.setSelectionRange(caret, caret); } catch (_) { /* một số phần tử không hỗ trợ */ }
+}
+
+// Các ô sửa nhanh được lưu BÊN TRONG blob mã hoá zero-knowledge (encryptedData)
+// đối với tài khoản có protectedByMasterPassword. Vì blob là một khối liền, mọi
+// thay đổi ở các ô này đều bắt buộc mã hoá lại toàn bộ blob. `sellerName` là
+// trường thường (plaintext) nằm ngoài blob nên không cần mã hoá.
+const QUICK_EDIT_BLOB_FIELDS = ['username', 'password', 'twoFaCode', 'note'];
+
+// Thoát Chế độ sửa nhanh về Chế độ xem: xoá state quickEdit và render lại thẻ.
+function exitQuickEditToViewMode(accId) {
+    window.appState.quickEdit = null;
+    if (typeof renderDetail === 'function') renderDetail(accId);
+}
+
+// Xác nhận lưu Chế độ sửa nhanh cho tài khoản `accId` — lưu NGUYÊN TỬ (all-or-nothing).
+// Luồng (Yêu cầu 4.x, 5.x, 7.x):
+//   1) collectQuickEditValues → computeDirtyFields; nếu KHÔNG có ô dirty thì thoát
+//      không lưu, về Chế độ xem (Yêu cầu 4.4).
+//   2) Xác thực isValidQuickEdit2fa + validateQuickEditLengths; nếu lỗi thì GIỮ
+//      Chế độ sửa nhanh + toast lỗi (Yêu cầu 5.2, 5.3, 5.4), giữ giá trị đang nhập.
+//   3) buildQuickEditPayload → nếu có Trường nhạy cảm dirty và tài khoản được bảo vệ
+//      thì requireMasterPassword + encryptAccountData; bọc thao tác lưu trong
+//      Promise.race timeout 5 giây (Yêu cầu 7.2, 7.4).
+//   4) Thành công: cập nhật appState/activeDecryptedAccount, thoát Chế độ sửa nhanh,
+//      toast thành công, renderDetail. Thất bại/timeout: giữ nguyên MỌI thứ
+//      (Yêu cầu 4.6, 4.7, 7.3) + toast lỗi, giữ giá trị đang nhập.
+//   5) Cờ `saving` chống double-submit.
+async function confirmQuickEdit(accId) {
+    const qe = window.appState.quickEdit;
+    // Chỉ xử lý khi đang ở Chế độ sửa nhanh đúng tài khoản.
+    if (!qe || !qe.active || qe.accId !== accId) return;
+    // Chống double-submit: đang lưu thì bỏ qua lần bấm tiếp theo.
+    if (qe.saving) return;
+
+    const acc = (window.appState.accounts || []).find(a => a.id === accId);
+    if (!acc) return;
+
+    const fields = getQuickEditFields();
+    const original = qe.original || {};
+    const current = collectQuickEditValues();
+
+    // --- Bước 1: Dirty detection (logic thuần) ---
+    const computeDirty = (typeof window !== 'undefined') ? window.computeDirtyFields : null;
+    const dirtyFields = (typeof computeDirty === 'function')
+        ? computeDirty(original, current, fields || undefined)
+        : [];
+    if (!dirtyFields.length) {
+        // Yêu cầu 4.4: không có thay đổi → thoát không lưu, về Chế độ xem.
+        exitQuickEditToViewMode(accId);
+        return;
+    }
+
+    // --- Bước 2: Xác thực (giữ Chế độ sửa nhanh nếu lỗi) ---
+    const normalize = (typeof window !== 'undefined') ? window.normalizeQuickEditValue : null;
+    const validate2fa = (typeof window !== 'undefined') ? window.isValidQuickEdit2fa : null;
+    if (dirtyFields.includes('twoFaCode') && typeof validate2fa === 'function') {
+        const twoFaVal = (typeof normalize === 'function') ? normalize(current.twoFaCode) : current.twoFaCode;
+        if (!validate2fa(twoFaVal)) {
+            // Yêu cầu 5.2, 5.3: định dạng 2FA không hợp lệ → huỷ lưu, giữ 2FA cũ.
+            showToast('Định dạng 2FA không hợp lệ', 'error');
+            return;
+        }
+    }
+    const validateLengths = (typeof window !== 'undefined') ? window.validateQuickEditLengths : null;
+    if (typeof validateLengths === 'function') {
+        const lenResult = validateLengths(current, fields || undefined);
+        if (lenResult && lenResult.ok === false) {
+            // Yêu cầu 5.4: vượt độ dài Người bán/Ghi chú → huỷ lưu, giữ Chế độ sửa nhanh.
+            showToast(lenResult.message || 'Giá trị vượt quá độ dài cho phép', 'error');
+            return;
+        }
+    }
+
+    // --- Bước 3: Dựng payload (logic thuần) ---
+    const buildPayload = (typeof window !== 'undefined') ? window.buildQuickEditPayload : null;
+    const payload = (typeof buildPayload === 'function')
+        ? buildPayload(original, dirtyFields, current)
+        : null;
+    if (!payload) {
+        showToast('Không thể dựng dữ liệu để lưu', 'error');
+        return;
+    }
+
+    // Các ô nằm trong blob mã hoá đã đổi; tài khoản có được bảo vệ hay không.
+    const dirtyBlob = dirtyFields.filter(f => QUICK_EDIT_BLOB_FIELDS.includes(f));
+    const isProtected = acc.protectedByMasterPassword === true;
+    // Chỉ cần Master khi có ô thuộc blob dirty VÀ tài khoản được bảo vệ.
+    const needsMaster = isProtected && dirtyBlob.length > 0;
+
+    // Bật cờ saving; đảm bảo luôn tắt lại nếu vẫn còn Chế độ sửa nhanh (finally).
+    qe.saving = true;
+    try {
+        // Lấy dữ liệu đã giải mã hiện có (đã cache trong activeDecryptedAccount) để
+        // BẢO TOÀN các trường trong blob không đổi (vd rawInput) khi mã hoá lại.
+        const decrypted = (window.appState.activeDecryptedAccount?.id === accId)
+            ? window.appState.activeDecryptedAccount.data
+            : await getSensitiveAccountData(acc, 'Mở khoá để lưu sửa nhanh');
+        if (!decrypted) {
+            // Không mở khoá được → giữ nguyên Chế độ sửa nhanh, không lưu.
+            return;
+        }
+
+        // Dựng sensitiveData mới: giữ nguyên trường cũ, ghi đè các ô blob đã đổi.
+        const newSensitive = { ...decrypted };
+        dirtyBlob.forEach(f => { newSensitive[f] = payload[f]; });
+
+        // Dựng patch ghi DB. sellerName là trường thường → luôn ghi plaintext.
+        let dbPatch = {};
+        if (dirtyFields.includes('sellerName')) {
+            dbPatch.sellerName = payload.sellerName;
+        }
+
+        if (needsMaster) {
+            // Có Trường nhạy cảm dirty + tài khoản được bảo vệ → mã hoá lại toàn bộ blob
+            // (giống luồng saveEditedAccount). Bắt lỗi mã hoá riêng để không gọi DB.
+            const unlocked = await requireMasterPassword('Mã hoá lại tài khoản trước khi lưu');
+            if (!unlocked) {
+                // Huỷ/sai Master → giữ nguyên Chế độ sửa nhanh và giá trị đang nhập.
+                return;
+            }
+            let encryptedPayload;
+            try {
+                encryptedPayload = await encryptAccountData(newSensitive, window.appState.masterPassword);
+            } catch (encErr) {
+                // Yêu cầu 4.7: mã hoá thất bại → KHÔNG gọi updateAccountInDB, giữ nguyên state.
+                console.error('Quick edit encrypt error:', encErr);
+                showToast('Mã hoá không thành công', 'error');
+                return;
+            }
+            dbPatch = { ...dbPatch, ...encryptedPayload, displayUsername: maskUsername(newSensitive.username) };
+        } else if (dirtyBlob.length > 0) {
+            // Tài khoản không mã hoá → ghi plaintext các ô blob đã đổi.
+            dirtyBlob.forEach(f => { dbPatch[f] = payload[f]; });
+            if (dirtyFields.includes('username')) {
+                dbPatch.displayUsername = maskUsername(newSensitive.username);
+            }
+        }
+
+        // Phòng thủ: nếu vì lý do nào đó không có gì để ghi thì coi như không đổi.
+        if (Object.keys(dbPatch).length === 0) {
+            exitQuickEditToViewMode(accId);
+            return;
+        }
+
+        // --- Lưu NGUYÊN TỬ, bọc timeout 5 giây ---
+        if (window.appState.isDemo) {
+            // Chế độ demo không ghi DB thật → áp trực tiếp lên bộ nhớ.
+            Object.assign(acc, dbPatch);
+        } else {
+            const TIMEOUT_MS = 5000;
+            let timer = null;
+            const timeoutPromise = new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error('quick-edit-timeout')), TIMEOUT_MS);
+            });
+            let ok = false;
+            try {
+                // Promise.race giữa thao tác lưu và hẹn giờ 5s.
+                ok = await Promise.race([updateAccountInDB(accId, dbPatch), timeoutPromise]);
+            } catch (saveErr) {
+                if (saveErr && saveErr.message === 'quick-edit-timeout') {
+                    // Yêu cầu 7.2, 7.4: quá 5 giây → giữ nguyên, giữ giá trị đang nhập.
+                    showToast('Đã quá thời gian chờ, vui lòng thử lại', 'error');
+                } else {
+                    // Yêu cầu 4.6, 7.3: ghi DB ném lỗi → giữ nguyên state.
+                    console.error('Quick edit save error:', saveErr);
+                    showToast('Lưu không thành công', 'error');
+                }
+                return;
+            } finally {
+                if (timer) clearTimeout(timer);
+            }
+            if (!ok) {
+                // updateAccountInDB trả về false → không thay đổi appState (Yêu cầu 4.6, 7.3).
+                showToast('Lưu không thành công', 'error');
+                return;
+            }
+            // Ghi thành công → áp payload lên account trong bộ nhớ.
+            Object.assign(acc, dbPatch);
+        }
+
+        // --- Thành công: cập nhật state & thoát Chế độ sửa nhanh ---
+        // Cập nhật activeDecryptedAccount để lần xem/hiển thị sau dùng giá trị mới.
+        window.appState.activeDecryptedAccount = { id: accId, data: { ...newSensitive } };
+        window.appState.quickEdit = null; // thoát Chế độ sửa nhanh (Trường nhạy cảm về masked)
+        showToast('Đã lưu thay đổi', 'success');
+        if (typeof renderDetail === 'function') renderDetail(accId);
+    } catch (error) {
+        // Nhánh lỗi bất ngờ khác → giữ nguyên mọi thứ, giữ giá trị đang nhập.
+        console.error('Quick edit confirm error:', error);
+        showToast(error?.message || 'Không thể lưu thay đổi', 'error');
+    } finally {
+        // Tắt cờ saving nếu vẫn đang ở Chế độ sửa nhanh (chưa thoát do thành công).
+        if (window.appState.quickEdit && window.appState.quickEdit.accId === accId) {
+            window.appState.quickEdit.saving = false;
+        }
+    }
+}
+
+// Huỷ Chế độ sửa nhanh cho tài khoản `accId` — KHÔNG lưu bất kỳ thay đổi nào.
+// Luồng (Yêu cầu 6.x):
+//   1) Nếu có thay đổi chưa lưu (hasUnsavedQuickEditChanges) thì hiện hộp confirm():
+//        - Người dùng chọn "Huỷ" của confirm (false) → TIẾP TỤC SỬA, giữ nguyên
+//          Chế độ sửa nhanh và mọi giá trị đang nhập (Yêu cầu 6.1, 6.3).
+//        - Người dùng chọn "OK" của confirm (true) → BỎ thay đổi, quay lại Chế độ xem.
+//   2) Khi bỏ thay đổi HOẶC không có thay đổi: xoá appState.quickEdit và renderDetail
+//      về Chế độ xem với Trường nhạy cảm masked (Yêu cầu 6.2, 6.4, 6.5).
+//   3) Nếu khôi phục/render Chế độ xem thất bại thì GIỮ Chế độ sửa nhanh + toast lỗi
+//      "Không thể quay lại Chế độ xem" (Yêu cầu 6.6).
+function cancelQuickEdit(accId) {
+    const qe = window.appState.quickEdit;
+    // Chỉ xử lý khi đang ở Chế độ sửa nhanh đúng tài khoản.
+    if (!qe || !qe.active || qe.accId !== accId) return;
+    // Đang lưu thì không cho huỷ giữa chừng (tránh trạng thái mập mờ).
+    if (qe.saving) return;
+
+    // Yêu cầu 6.1: nếu có thay đổi chưa lưu → hỏi xác nhận trước khi bỏ.
+    if (hasUnsavedQuickEditChanges()) {
+        const confirmFn = (typeof window !== 'undefined' && typeof window.confirm === 'function')
+            ? window.confirm
+            : (typeof confirm === 'function' ? confirm : null);
+        // Hộp confirm: OK = bỏ thay đổi, Cancel = tiếp tục sửa.
+        const discard = confirmFn
+            ? confirmFn('Bạn có thay đổi chưa lưu. Bỏ các thay đổi và quay lại Chế độ xem?')
+            : true;
+        // Yêu cầu 6.3: người dùng chọn tiếp tục sửa → giữ nguyên Chế độ sửa nhanh.
+        if (!discard) return;
+    }
+
+    // Yêu cầu 6.2, 6.4, 6.5: bỏ thay đổi (hoặc không có thay đổi) → về Chế độ xem,
+    // Trường nhạy cảm masked. Bọc try/catch để xử lý nhánh khôi phục thất bại (6.6).
+    try {
+        exitQuickEditToViewMode(accId);
+    } catch (error) {
+        // Yêu cầu 6.6: không render lại được Chế độ xem → giữ Chế độ sửa nhanh + toast lỗi.
+        console.error('Quick edit cancel error:', error);
+        // Khôi phục lại state quickEdit nếu đã bị xoá dở, để vẫn ở Chế độ sửa nhanh.
+        if (!window.appState.quickEdit) window.appState.quickEdit = qe;
+        showToast('Không thể quay lại Chế độ xem', 'error');
+    }
+}
+
 async function updateAccountPreference(id, patch, successMessage) {
     const acc = window.appState.accounts.find(item => item.id === id);
     if (!acc) return;
@@ -1686,27 +2118,43 @@ async function handleAddGroupMember(groupId) {
 function openAcceptGroupInviteModal(groupId) {
     const invite = getGroupInviteById?.(groupId);
     if (!invite) return;
-    if (!groupHasSharedPassword?.(invite)) {
+    // Nhóm chưa đặt Join_Password ⇒ tham gia trực tiếp, không hiển thị ô nhập.
+    if (!isJoinPasswordEnabled?.(invite)) {
         submitAcceptGroupInvite(groupId);
         return;
     }
     openModal('Chấp nhận lời mời', `
         <div class="group-unlock-title">${escapeHtml(invite.name || '')}</div>
-        <div class="form-section-title">Mật khẩu chung</div>
-        <input type="password" id="group-invite-password" class="input" placeholder="Nhập mật khẩu nhóm" style="padding-left:16px" onkeydown="if(event.key==='Enter'){event.preventDefault();submitAcceptGroupInvite('${escapeJsAttr(groupId)}')}">
-        <button class="btn btn-primary" style="margin-top:18px" onclick="submitAcceptGroupInvite('${escapeJsAttr(groupId)}')">Chấp nhận</button>
+        <div class="form-section-title">Mật khẩu vào nhóm</div>
+        <input type="password" id="group-invite-join-password" class="input" placeholder="Nhập mật khẩu vào nhóm" style="padding-left:16px" oninput="updateAcceptGroupInviteButton('${escapeJsAttr(groupId)}')" onkeydown="if(event.key==='Enter'){event.preventDefault();submitAcceptGroupInvite('${escapeJsAttr(groupId)}')}">
+        <button class="btn btn-primary" id="group-invite-submit" style="margin-top:18px" onclick="submitAcceptGroupInvite('${escapeJsAttr(groupId)}')" disabled>Chấp nhận</button>
     `);
-    setTimeout(() => document.getElementById('group-invite-password')?.focus(), 50);
+    setTimeout(() => document.getElementById('group-invite-join-password')?.focus(), 50);
+}
+
+// Hàm thuần quyết định bật nút hoàn tất Join_Flow (Property 12):
+// bật khi và chỉ khi giá trị sau khi trim có độ dài 1..128.
+function isJoinPasswordInputAcceptable(value) {
+    const trimmed = String(value ?? '').trim();
+    return trimmed.length >= 1 && trimmed.length <= 128;
+}
+
+function updateAcceptGroupInviteButton(groupId) {
+    const input = document.getElementById('group-invite-join-password');
+    const btn = document.getElementById('group-invite-submit');
+    if (!btn) return;
+    btn.disabled = !isJoinPasswordInputAcceptable(input?.value || '');
 }
 
 async function submitAcceptGroupInvite(groupId) {
-    const password = document.getElementById('group-invite-password')?.value || '';
+    const joinPassword = document.getElementById('group-invite-join-password')?.value || '';
     try {
-        await acceptGroupInvite(groupId, password);
+        await acceptGroupInvite(groupId, joinPassword);
         closeModal();
         showToast('Đã tham gia nhóm', 'success');
         openGroupDetail(groupId);
     } catch (error) {
+        // Giữ nguyên nội dung ô nhập khi sai mật khẩu để người dùng thử lại (Req 5.5).
         showToast(error.message || 'Không thể tham gia nhóm', 'error');
     }
 }
@@ -1836,6 +2284,52 @@ async function handleRemoveGroupPassword(groupId) {
     } catch (error) {
         console.error('Remove group password error:', error);
         showToast(error.message || 'Không gỡ được mật khẩu', 'error');
+    }
+}
+
+// ===== Join_Password (mật khẩu vào nhóm) — tách biệt với mật khẩu chung =====
+function openJoinPasswordModal(groupId, mode = 'set') {
+    const group = getGroupById?.(groupId);
+    if (!group || group.role !== 'owner') return;
+    const isChange = mode === 'change';
+    openModal(isChange ? 'Đổi mật khẩu vào nhóm' : 'Đặt mật khẩu vào nhóm', `
+        <div class="form-section-title">Mật khẩu vào nhóm mới</div>
+        <input type="password" id="group-join-password" class="input" placeholder="Từ 6 đến 128 ký tự" style="padding-left:16px">
+        <div class="form-section-title">Nhập lại mật khẩu</div>
+        <input type="password" id="group-join-password-confirm" class="input" placeholder="Nhập lại mật khẩu" style="padding-left:16px" onkeydown="if(event.key==='Enter'){event.preventDefault();submitJoinPassword('${escapeJsAttr(groupId)}')}">
+        <div class="form-modal-note">Người được mời sẽ phải nhập mật khẩu này để tham gia nhóm. Mật khẩu vào nhóm tách biệt với mật khẩu chung dùng để xem tài khoản chia sẻ.</div>
+        <button class="btn btn-primary" style="margin-top:18px" onclick="submitJoinPassword('${escapeJsAttr(groupId)}')">${isChange ? 'Đổi mật khẩu' : 'Đặt mật khẩu'}</button>
+    `);
+    setTimeout(() => document.getElementById('group-join-password')?.focus(), 50);
+}
+
+async function submitJoinPassword(groupId) {
+    const pw = document.getElementById('group-join-password')?.value || '';
+    const confirmPw = document.getElementById('group-join-password-confirm')?.value || '';
+    if (pw.length < 6 || pw.length > 128) { showToast('Mật khẩu vào nhóm cần từ 6 đến 128 ký tự', 'error'); return; }
+    if (pw !== confirmPw) { showToast('Mật khẩu nhập lại chưa khớp', 'error'); return; }
+    try {
+        await setGroupJoinPassword(groupId, pw);
+        closeModal();
+        showToast('Đã cập nhật mật khẩu vào nhóm', 'success');
+        renderGroupDetail(groupId);
+    } catch (error) {
+        console.error('Set join password error:', error);
+        showToast(error.message || 'Không cập nhật được mật khẩu vào nhóm', 'error');
+    }
+}
+
+async function handleRemoveGroupJoinPassword(groupId) {
+    const group = getGroupById?.(groupId);
+    if (!group) return;
+    if (!confirm('Gỡ mật khẩu vào nhóm? Người được mời sẽ tham gia mà không cần nhập mật khẩu.')) return;
+    try {
+        await removeGroupJoinPassword(groupId);
+        showToast('Đã gỡ mật khẩu vào nhóm', 'success');
+        renderGroupDetail(groupId);
+    } catch (error) {
+        console.error('Remove join password error:', error);
+        showToast(error.message || 'Không gỡ được mật khẩu vào nhóm', 'error');
     }
 }
 
@@ -4313,8 +4807,20 @@ async function restoreAccount(id) {
         return;
     }
 
-    if (await restoreAccountFromDB(id)) {
-        showToast('Đã khôi phục tài khoản', 'success');
+    // Yêu cầu 1.6, 1.7: giữ hành vi khôi phục hiện tại; nếu tầng lưu trữ trả về false/ném lỗi thì
+    // KHÔNG thay đổi window.appState.trashAccounts (giữ nguyên trạng thái xoá mềm) và báo lỗi.
+    // Ở nhánh non-demo, việc gỡ tài khoản khỏi trashAccounts do listener xử lý sau khi khôi phục
+    // thành công, nên khi thất bại danh sách thùng rác giữ nguyên một cách tự nhiên.
+    try {
+        const ok = await restoreAccountFromDB(id);
+        if (ok) {
+            showToast('Đã khôi phục tài khoản', 'success');
+        } else {
+            showToast('Khôi phục không thành công', 'error');
+        }
+    } catch (error) {
+        console.error('❌ Lỗi khôi phục tài khoản:', error);
+        showToast('Khôi phục không thành công', 'error');
     }
 }
 

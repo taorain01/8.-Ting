@@ -25,6 +25,8 @@ const GITHUB_RELEASES_URL = `${GITHUB_REPO_URL}/releases`;
 const GITHUB_LATEST_RELEASE_API = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`;
 const IS_TEST = process.argv.includes('--ting-test') || process.env.TING_TEST === '1';
 const QUIT_FOR_INSTALL_ARGS = new Set(['--quit-for-install', '--quit-for-update']);
+const FALLBACK_UPDATES_DIR_NAME = 'updates';
+const ELECTRON_UPDATER_CACHE_DIR_NAME = 'ting-updater';
 
 function hasQuitForInstallArg(argv = []) {
   return argv.some(arg => QUIT_FOR_INSTALL_ARGS.has(String(arg || '').toLowerCase()));
@@ -813,6 +815,7 @@ function startUpdateDownload(updater) {
     testLog('update download skipped (single-flight lock held)');
     return false;
   }
+  cleanupDesktopUpdateArtifacts({ force: true, includeFallback: false, includeElectronCache: true });
   updateDownloadInFlight = true;
   testLog('update download start');
   Promise.resolve()
@@ -1100,13 +1103,87 @@ function sha512FileBase64(filePath) {
   });
 }
 
+function isPathInside(parentDir, targetPath) {
+  const parent = path.resolve(parentDir);
+  const target = path.resolve(targetPath);
+  const relative = path.relative(parent, target);
+  return relative && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+function getFallbackUpdatesDir() {
+  return path.join(app.getPath('userData'), FALLBACK_UPDATES_DIR_NAME);
+}
+
+function getElectronUpdaterPendingDir() {
+  return path.join(app.getPath('userData'), ELECTRON_UPDATER_CACHE_DIR_NAME, 'pending');
+}
+
+function cleanupFallbackUpdateArtifacts(options = {}) {
+  const updatesDir = path.resolve(getFallbackUpdatesDir());
+  if (!fs.existsSync(updatesDir)) return 0;
+
+  const keepPath = options.keepPath ? path.resolve(options.keepPath).toLowerCase() : '';
+  let removed = 0;
+  for (const entry of fs.readdirSync(updatesDir, { withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const name = entry.name;
+    const isUpdateArtifact = /^ting-setup-.*\.exe$/i.test(name)
+      || /^latest.*\.ya?ml$/i.test(name)
+      || /\.blockmap$/i.test(name);
+    if (!isUpdateArtifact) continue;
+
+    const artifactPath = path.resolve(updatesDir, name);
+    if (!isPathInside(updatesDir, artifactPath)) continue;
+    if (keepPath && artifactPath.toLowerCase() === keepPath) continue;
+    try {
+      fs.rmSync(artifactPath, { force: true });
+      removed += 1;
+    } catch (_cleanupError) {}
+  }
+  return removed;
+}
+
+function cleanupElectronUpdaterPendingArtifacts() {
+  const userDataDir = path.resolve(app.getPath('userData'));
+  const pendingDir = path.resolve(getElectronUpdaterPendingDir());
+  const parentName = path.basename(path.dirname(pendingDir)).toLowerCase();
+  const dirName = path.basename(pendingDir).toLowerCase();
+  if (!isPathInside(userDataDir, pendingDir)
+      || parentName !== ELECTRON_UPDATER_CACHE_DIR_NAME
+      || dirName !== 'pending'
+      || !fs.existsSync(pendingDir)) {
+    return 0;
+  }
+
+  try {
+    fs.rmSync(pendingDir, { recursive: true, force: true });
+    return 1;
+  } catch (_cleanupError) {
+    return 0;
+  }
+}
+
+function cleanupDesktopUpdateArtifacts(options = {}) {
+  if (updateDownloadInFlight && !options.force) return 0;
+  let removed = 0;
+  if (options.includeFallback !== false) {
+    removed += cleanupFallbackUpdateArtifacts(options);
+  }
+  if (options.includeElectronCache !== false) {
+    removed += cleanupElectronUpdaterPendingArtifacts();
+  }
+  if (removed > 0) testLog('update artifacts cleanup', `removed=${removed}`);
+  return removed;
+}
+
 async function downloadGithubFallbackInstaller(meta) {
   if (!meta?.latestYmlUrl || !meta?.installerUrl) {
     throw new Error('GitHub release thiếu latest.yml hoặc installer .exe');
   }
 
-  const updatesDir = path.join(app.getPath('userData'), 'updates');
+  const updatesDir = getFallbackUpdatesDir();
   fs.mkdirSync(updatesDir, { recursive: true });
+  cleanupDesktopUpdateArtifacts({ force: true, includeElectronCache: false });
 
   const latestYmlName = safeAssetFileName(meta.latestYmlName || 'latest.yml', 'latest.yml');
   const installerName = safeAssetFileName(meta.installerName || `ting-setup-${meta.latestVersion}.exe`);
@@ -1652,6 +1729,7 @@ if (gotSingleInstanceLock && !SHOULD_QUIT_FOR_INSTALL) {
 
     // Chạy setupIpc trước — IPC handlers cần sẵn sàng khi renderer load
     setupIpc();
+    cleanupDesktopUpdateArtifacts({ force: true });
 
     // Tạo window — server đã pre-start nên rất nhanh
     // Không await — để tray, shortcuts, auto-lock chạy song song

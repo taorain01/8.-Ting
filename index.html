@@ -233,6 +233,8 @@
                             <div class="d-search-wrap">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
                                 <input type="text" id="search-input" class="d-search-input" placeholder="Tìm tài khoản... (Ctrl+K)" oninput="handleSearch(this.value)">
+                                <!-- Container chứa Nut_Loc/Nut_Loc_Nen_Tang; nút được chèn/gỡ động bởi mountSearchToolbarButtons (chỉ ở màn hình TK Mua/Cá nhân) -->
+                                <div id="search-toolbar-buttons" class="d-search-toolbar-btns"></div>
                             </div>
                             <div id="quick-platform-filter" class="quick-platform-filter" aria-label="Lọc nhanh theo dịch vụ"></div>
                         </div>
@@ -333,6 +335,8 @@
     <script defer src="js/shared/platform-detector.js"></script>
     <script defer src="js/mobile-updater.js"></script>
     <script defer src="js/background-check.js"></script>
+    <!-- Quick_Edit: lớp logic thuần cho tính năng sửa nhanh inline — nạp trước UI/app. -->
+    <script defer src="js/quick-edit-core.js"></script>
     <script defer src="js/desktop-ui.js"></script>
     <script defer src="js/crypto.js"></script>
     <script defer src="js/db.js"></script>

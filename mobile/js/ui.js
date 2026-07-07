@@ -473,7 +473,7 @@ function renderSettings() {
         </div>
     </div>
 
-    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.4.2')}</p>`;
+    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.4.3')}</p>`;
 }
 
 // ===== MOBILE DESKTOP-PARITY RENDERERS =====
@@ -811,6 +811,21 @@ function renderAccountList(type) {
     if (platformFilter) filtered = filtered.filter(a => (getResolvedPlatform(a) || '') === platformFilter);
     if (search) filtered = filtered.filter(a => typeof accountMatchesSearch === 'function' ? accountMatchesSearch(a, search) : (a.name || '').toLowerCase().includes(search.toLowerCase()));
 
+    // Toggle "Hiển thị tài khoản hết hạn" — chỉ tác động ở tab "Tất cả" (filter === 'all'),
+    // không đụng các bộ lọc trạng thái cụ thể (active/expiring/expired/favorite).
+    //  - TẮT: loại bỏ mọi tài khoản hết hạn.
+    //  - BẬT: giữ nguyên nhưng xếp còn hạn trước, hết hạn sau (để làm mờ ở dưới).
+    const showExpired = typeof getShowExpiredState === 'function' ? getShowExpiredState(type) : false;
+    if (filter === 'all') {
+        if (showExpired && typeof partitionActiveThenExpired === 'function') {
+            filtered = partitionActiveThenExpired(filtered);
+        } else if (!showExpired && typeof filterAccountsByExpiredToggle === 'function') {
+            filtered = filterAccountsByExpiredToggle(filtered, false);
+        }
+    }
+    // Chỉ làm mờ tài khoản hết hạn khi đang BẬT toggle ở tab "Tất cả".
+    const dimExpired = showExpired && filter === 'all';
+
     const title = type === 'bought' ? 'Tài khoản mua' : 'Tài khoản cá nhân';
     const hasActiveFilter = filter !== 'all' || tagFilter || platformFilter;
     const filterLabel = getActiveFilterLabel(filter, tagFilter, platformFilter);
@@ -821,6 +836,7 @@ function renderAccountList(type) {
                 <span class="section-badge">${filtered.length}</span>
             </div>
             <div class="list-toolbar-right">
+                ${renderShowExpiredToggle(type, showExpired)}
                 <button class="toolbar-filter-btn ${hasActiveFilter ? 'has-filter' : ''}" onclick="toggleFilterPanel()" title="Lọc">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
                     ${hasActiveFilter ? `<span class="toolbar-filter-dot"></span>` : ''}
@@ -838,7 +854,9 @@ function renderAccountList(type) {
     if (filtered.length > 0) {
         html += `<div class="account-list anim-stagger">`;
         buildAccountDisplayItems(filtered).forEach(item => {
-            html += item.accounts ? renderAccountGroup(item, type === 'personal') : renderAccountCard(item, type === 'personal');
+            html += item.accounts
+                ? renderAccountGroup(item, type === 'personal', dimExpired)
+                : renderAccountCard(item, type === 'personal', false, dimExpired && typeof isExpiredAccount === 'function' && isExpiredAccount(item));
         });
         html += `</div>`;
     } else {
@@ -846,6 +864,17 @@ function renderAccountList(type) {
         html += `<div class="empty-state anim-fade-in-up"><div class="empty-state-icon">${emptyIcon}</div><div class="empty-state-title">Không có tài khoản nào</div><div class="empty-state-desc">${hasActiveFilter ? 'Thử đổi bộ lọc khác' : 'Bấm + để thêm mới'}</div></div>`;
     }
     document.getElementById('page-content').innerHTML = html;
+}
+
+// Nút bật/tắt "Hiển thị tài khoản hết hạn" cho màn hình bought/personal.
+// BẬT: aria-pressed="true" + class is-on; TẮT: aria-pressed="false".
+// onclick gọi toggleShowExpired(type) để đảo cờ và render lại đúng màn hình.
+function renderShowExpiredToggle(type, showExpired) {
+    const on = !!showExpired;
+    const label = on ? 'Đang hiện hết hạn' : 'Hiện hết hạn';
+    return `<button type="button" class="show-expired-toggle ${on ? 'is-on' : ''}" aria-pressed="${on ? 'true' : 'false'}" onclick="toggleShowExpired('${escapeJsAttr(type)}')" title="${escapeHtml(label)}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+    </button>`;
 }
 
 function renderAccountGroupSummaryChips(accounts = []) {
@@ -874,7 +903,47 @@ function renderAccountGroupSummaryChips(accounts = []) {
     return `<div class="account-group-summary">${chips.join('')}</div>`;
 }
 
-function renderAccountGroup(group, isPersonal = false) {
+function getAccountGroupReadableNote(acc) {
+    const active = window.appState?.activeDecryptedAccount;
+    const cached = active?.id === acc?.id ? active.data : null;
+    return String(cached?.note || acc?.note || '').trim();
+}
+
+function getAccountGroupNoteRows(accounts = []) {
+    return accounts
+        .map(acc => ({ acc, note: getAccountGroupReadableNote(acc) }))
+        .filter(item => item.note);
+}
+
+function renderAccountGroupNoteToggle(groupKey, checked) {
+    return `<label class="account-group-note-toggle" onclick="event.stopPropagation()" title="Hiện ghi chú">
+        <input type="checkbox" onchange="toggleAccountGroupNotes('${escapeJsAttr(groupKey)}')" ${checked ? 'checked' : ''}>
+        <span>Ghi chú</span>
+    </label>`;
+}
+
+function renderAccountGroupNotes(noteRows = []) {
+    if (!noteRows.length) return '';
+    return `<div class="account-group-notes" onclick="event.stopPropagation()">
+        ${noteRows.map(({ acc, note }) => {
+            const name = typeof getAccountDisplayName === 'function'
+                ? getAccountDisplayName(acc)
+                : (acc?.name || 'Tài khoản');
+            const username = typeof getAccountUsernameForDisplay === 'function'
+                ? getAccountUsernameForDisplay(acc)
+                : (acc?.displayUsername || acc?.username || '');
+            return `<div class="account-group-note-item">
+                <div class="account-group-note-head">
+                    <span class="account-group-note-name">${escapeHtml(name)}</span>
+                    ${username ? `<span class="account-group-note-user">${escapeHtml(username)}</span>` : ''}
+                </div>
+                <div class="account-group-note-body">${renderSmartNote(note)}</div>
+            </div>`;
+        }).join('')}
+    </div>`;
+}
+
+function renderAccountGroup(group, isPersonal = false, dimExpired = false) {
     const accounts = group.accounts;
     const label = getPlatformLabel(group.platform, accounts);
     const emoji = getPlatformEmoji(group.platform);
@@ -882,27 +951,33 @@ function renderAccountGroup(group, isPersonal = false) {
         ? getPlatformLogoStyle(group.platform, label)
         : `background:${stringToColor(label)}20;color:${stringToColor(label)}`;
     const logoMark = typeof renderPlatformLogoMark === 'function' ? renderPlatformLogoMark(group.platform, emoji) : emoji;
-    const status = getWorstGroupStatus(accounts);
     const expanded = Boolean(window.appState.expandedGroups?.[group.key]);
+    const noteRows = getAccountGroupNoteRows(accounts);
+    const notesVisible = Boolean(window.appState.visibleGroupNotes?.[group.key] && noteRows.length);
     return `
     <div class="account-group anim-fade-in-up">
-        <button class="account-group-header" onclick="toggleAccountGroup('${escapeJsAttr(group.key)}')">
-            <div class="account-logo group-logo" style="${logoStyle}">${logoMark}</div>
-            <div class="account-group-info">
-                <div class="account-group-title">${escapeHtml(label)} <span class="account-group-count">${accounts.length} TK</span></div>
-                ${renderAccountGroupSummaryChips(accounts)}
+        <div class="account-group-header">
+            <button type="button" class="account-group-main" onclick="toggleAccountGroup('${escapeJsAttr(group.key)}')">
+                <div class="account-logo group-logo" style="${logoStyle}">${logoMark}</div>
+                <div class="account-group-info">
+                    <div class="account-group-title">${escapeHtml(label)} <span class="account-group-count">${accounts.length} TK</span></div>
+                    ${renderAccountGroupSummaryChips(accounts)}
+                </div>
+            </button>
+            <div class="account-group-actions" onclick="event.stopPropagation()">
+                ${noteRows.length ? renderAccountGroupNoteToggle(group.key, notesVisible) : ''}
+                <button type="button" class="account-group-toggle ${expanded ? 'open' : ''}" onclick="toggleAccountGroup('${escapeJsAttr(group.key)}')">
+                    <span class="account-group-toggle-text">${expanded ? 'Thu gọn' : `Xem ${accounts.length} TK`}</span>
+                    <svg class="account-group-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
             </div>
-            <span class="account-badge ${getStatusBadgeClass(status)}">${getStatusText(status)}</span>
-            <span class="account-group-toggle ${expanded ? 'open' : ''}">
-                <span class="account-group-toggle-text">${expanded ? 'Thu gọn' : `Xem ${accounts.length} TK`}</span>
-                <svg class="account-group-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg>
-            </span>
-        </button>
-        ${expanded ? `<div class="account-group-children">${accounts.map(acc => renderAccountCard(acc, isPersonal, true)).join('')}</div>` : ''}
+        </div>
+        ${notesVisible ? renderAccountGroupNotes(noteRows) : ''}
+        ${expanded ? `<div class="account-group-children">${accounts.map(acc => renderAccountCard(acc, isPersonal, true, dimExpired && typeof isExpiredAccount === 'function' && isExpiredAccount(acc))).join('')}</div>` : ''}
     </div>`;
 }
 
-function renderAccountCard(acc, isPersonal = false, isChild = false) {
+function renderAccountCard(acc, isPersonal = false, isChild = false, dimmed = false) {
     const days = daysUntil(acc.expiryDate);
     const daysText = acc.expiryType === 'lifetime' ? 'Vĩnh viễn' : days < 0 ? `Hết ${Math.abs(days)} ngày` : days === 0 ? 'Hết hạn hôm nay' : `Còn ${days} ngày`;
     const platformRef = getResolvedPlatform(acc) || acc.platform || acc;
@@ -916,7 +991,7 @@ function renderAccountCard(acc, isPersonal = false, isChild = false) {
     const mutedClass = isMutedAccountInQuickFilter(acc) ? 'is-muted-account' : '';
     const authBadge = renderAuthMethodBadge(acc);
     return `
-    <div class="account-card ${isChild ? 'account-child-card' : ''} ${acc.pendingSync ? 'sync-pending' : ''} ${isAccountFavorite(acc) ? 'is-favorite' : ''} ${isAccountPinned(acc) ? 'is-pinned' : ''} ${mutedClass} anim-fade-in-up" onclick="showDetail('${escapeJsAttr(acc.id)}')">
+    <div class="account-card ${isChild ? 'account-child-card' : ''} ${acc.pendingSync ? 'sync-pending' : ''} ${isAccountFavorite(acc) ? 'is-favorite' : ''} ${isAccountPinned(acc) ? 'is-pinned' : ''} ${mutedClass} ${dimmed ? 'is-expired-dimmed' : ''} anim-fade-in-up" onclick="showDetail('${escapeJsAttr(acc.id)}')">
         <div class="account-card-top">
             <div class="account-logo" style="${logoStyle}">${logoMark}</div>
             <div class="account-info">
@@ -2056,7 +2131,7 @@ function renderGroupDetail(groupId) {
         <button class="back-btn" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15,18 9,12 15,6"/></svg> Nhóm</button>
         <div class="group-detail-head anim-fade-in-up">
             <div class="group-detail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
-            <div class="group-detail-main"><div class="group-detail-title">${escapeHtml(group.name || 'Nhóm')}</div><div class="group-card-meta">${escapeHtml(getGroupRoleLabel(group))} · ${(group.memberEmails || []).length} thành viên · ${accountCount} tài khoản</div></div>
+            <div class="group-detail-main"><div class="group-card-meta">${escapeHtml(getGroupRoleLabel(group))} · ${(group.memberEmails || []).length} thành viên · ${accountCount} tài khoản</div></div>
             <button class="icon-btn group-detail-settings-btn" title="Cài đặt nhóm" onclick="setGroupDetailTab('settings')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" width="18" height="18"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
         </div>
         ${renderGroupTabs(group)}
@@ -2193,6 +2268,26 @@ function renderMobileUpdateProgress(status) {
     </div>`;
 }
 
+// Cập nhật tiến độ tải NGAY TẠI CHỖ trong DOM thay vì dựng lại toàn bộ trang cài
+// đặt. Sự kiện `downloadProgress` bắn rất nhiều lần/giây; nếu mỗi lần đều gọi
+// renderSettings() (gán lại innerHTML cả trang) thì màn hình sẽ chớp/nhấp nháy
+// liên tục. Hàm này chỉ đổi width thanh tiến độ, phần trăm và câu trạng thái.
+// Trả về true nếu cập nhật được (thanh tiến độ đang hiển thị), false nếu cần
+// render đầy đủ (lần đầu chuyển sang trạng thái downloading).
+function updateMobileUpdateProgressDom(status) {
+    if (status?.status !== 'downloading') return false;
+    const progressEl = document.querySelector('.settings-update-progress');
+    if (!progressEl) return false;
+    const rounded = Math.round(clampMobileUpdatePercent(status.progress?.percent ?? status.percent));
+    const fill = progressEl.querySelector('.settings-update-progress-fill');
+    if (fill) fill.style.width = `${rounded}%`;
+    const strong = progressEl.querySelector('.settings-update-progress-head strong');
+    if (strong) strong.textContent = `${rounded}%`;
+    const heroMsg = document.querySelector('.settings-update-hero .settings-update-heading p');
+    if (heroMsg) heroMsg.textContent = getMobileUpdateStatusMessage(status);
+    return true;
+}
+
 function renderMobileUpdateLog() {
     const log = (window.appState.updateLog || []).filter(shouldRenderMobileUpdateLogEntry);
     if (!log.length) return '<div class="settings-empty-log">Chưa có lịch sử cập nhật</div>';
@@ -2207,7 +2302,7 @@ function renderUpdateSection() {
     const version = escapeHtml(
         window.appState.appVersion
         || window.TingMobileUpdater?.INSTALLED_VERSION_NAME
-        || '1.4.2'
+        || '1.4.3'
     );
     const platform = getMobileUpdatePlatform();
     const cap = getMobileUpdateCapability(platform);
@@ -2335,7 +2430,7 @@ function renderSettings() {
             <div class="settings-item" onclick="signOut()"><div class="settings-item-icon" style="background:var(--danger-bg)">🚪</div><div class="settings-item-content"><div class="settings-item-title" style="color:var(--danger)">Đăng xuất</div></div></div>
         </div>
     </div></div>
-    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.4.2')}</p>`;
+    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.4.3')}</p>`;
     switchSettingsTab(window._settingsActiveTab || 'update');
 }
 

@@ -468,10 +468,21 @@ function isAccountPinned(acc) {
     return acc?.isPinned === true || Boolean(acc?.pinnedAt && acc?.isPinned !== false);
 }
 
+function isAccountExpiredForSort(acc) {
+    if (!acc) return false;
+    if (acc.status === 'expired') return true;
+    if (acc.expiryType === 'lifetime') return false;
+    if (!acc.expiryDate) return false;
+    return daysUntil(acc.expiryDate) < 0;
+}
+
 function sortAccountsByPriority(accounts = []) {
     return [...(accounts || [])]
         .map((acc, index) => ({ acc, index }))
         .sort((a, b) => {
+            const expiredDiff = Number(isAccountExpiredForSort(a.acc)) - Number(isAccountExpiredForSort(b.acc));
+            if (expiredDiff) return expiredDiff;
+
             const pinnedDiff = Number(isAccountPinned(b.acc)) - Number(isAccountPinned(a.acc));
             if (pinnedDiff) return pinnedDiff;
 
@@ -541,6 +552,80 @@ function buildAccountDisplayItems(accounts) {
     return [...groupMap.values()]
         .sort((a, b) => a.firstIndex - b.firstIndex)
         .map(group => group.accounts.length > 1 ? group : group.accounts[0]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lớp logic thuần cho tính năng "expired-toggle-trash-grouping":
+// bật/tắt hiển thị tài khoản hết hạn + đếm ngược thời hạn giữ trong thùng rác.
+// Tất cả là hàm thuần: làm việc trên bản sao mảng, KHÔNG mutate đầu vào,
+// KHÔNG chạm DOM. Khai báo ở phạm vi module nên tự động là hàm global lúc chạy
+// (giống buildAccountDisplayItems / sortAccountsByPriority) và test nạp được qua sandbox.
+//
+// Ghi chú tái dùng: buildAccountDisplayItems ở trên dùng chung nguyên trạng cho
+// cả màn hình danh sách lẫn thùng rác — cùng khoá nhóm (getAccountGroupKey) và
+// cùng quy tắc sắp xếp (sortAccountsByPriority), không cần thay đổi gì thêm.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Xác định một tài khoản có phải tài khoản đã hết hạn hay không.
+ * Nguồn chân lý: getStatusFromExpiry trả về 'expired' (số ngày còn lại < 0).
+ * Tài khoản có expiryType = 'lifetime' luôn được coi là còn hạn (trả về false).
+ */
+function isExpiredAccount(acc) {
+    if (!acc) return false;
+    if (acc.expiryType === 'lifetime') return false;
+    return getStatusFromExpiry(acc.expiryDate, acc.expiryType) === 'expired';
+}
+
+/**
+ * Lọc tập tài khoản hiển thị theo trạng thái nút "Hiển thị tài khoản hết hạn".
+ *  - showExpired = false: loại bỏ mọi tài khoản hết hạn, giữ đủ tài khoản còn hạn.
+ *  - showExpired = true : giữ nguyên toàn bộ tài khoản.
+ * Trả về mảng mới (bản sao), không mutate mảng đầu vào.
+ */
+function filterAccountsByExpiredToggle(accounts, showExpired) {
+    const list = Array.isArray(accounts) ? accounts : [];
+    if (showExpired) return [...list];
+    return list.filter(acc => !isExpiredAccount(acc));
+}
+
+/**
+ * Sắp xếp: toàn bộ tài khoản còn hạn đứng trước, hết hạn đứng sau.
+ * Ổn định (stable): giữ nguyên thứ tự tương đối ban đầu trong từng phân nhóm
+ * (thứ tự giữa các tài khoản còn hạn không đổi và giữa các tài khoản hết hạn không đổi).
+ * Không thêm/bớt phần tử, trả về mảng mới, không mutate đầu vào.
+ */
+function partitionActiveThenExpired(accounts) {
+    const list = Array.isArray(accounts) ? accounts : [];
+    const active = [];
+    const expired = [];
+    list.forEach(acc => {
+        if (isExpiredAccount(acc)) expired.push(acc);
+        else active.push(acc);
+    });
+    return [...active, ...expired];
+}
+
+/**
+ * Tính số lượng hiển thị của một nhóm nền tảng theo trạng thái toggle.
+ *  - showExpired = false: chỉ đếm tài khoản còn hạn (bỏ mọi tài khoản hết hạn).
+ *  - showExpired = true : đếm tổng (còn hạn + hết hạn) trong nhóm.
+ */
+function countGroupVisible(accounts, showExpired) {
+    const list = Array.isArray(accounts) ? accounts : [];
+    if (showExpired) return list.length;
+    return list.filter(acc => !isExpiredAccount(acc)).length;
+}
+
+/**
+ * Định dạng chuỗi đếm ngược thời hạn giữ (Dem_Nguoc_Giu) trong thùng rác.
+ * Dùng getTrashDaysLeft(acc) — hàm này luôn trả số nguyên >= 0 (đã kẹp Math.max(0, ...)):
+ *  - daysLeft >= 1: trả "còn X ngày giữ".
+ *  - daysLeft = 0 : trả trạng thái hết hạn giữ, không bao giờ hiển thị số âm.
+ */
+function formatTrashCountdown(acc) {
+    const daysLeft = getTrashDaysLeft(acc);
+    return daysLeft >= 1 ? `còn ${daysLeft} ngày giữ` : 'hết hạn giữ';
 }
 
 function parseCombinedNoteAction(raw) {
@@ -837,6 +922,12 @@ function handleQuickPasteGuidance() {
         const paste = document.getElementById('paste-input');
         const guide = getAddFormGuideState();
         if (!paste?.value.trim() || guide.dateSkipped || guide.dateGuided) return;
+        // Nếu người dùng đã chủ động rời ô dán sang ô khác, coi như skip:
+        // không ép cuộn/focus về ô "Thời hạn", tôn trọng focus hiện tại.
+        if (document.activeElement !== paste) {
+            guide.dateSkipped = true; // ghi nhận skip khi đã rời ô dán
+            return;                   // không ép focus/cuộn
+        }
         guide.dateGuided = true;
         guideAddFormTo('add-smart-date');
     }, 0);

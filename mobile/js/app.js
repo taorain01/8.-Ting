@@ -28,10 +28,15 @@ window.appState = {
     isOnline: typeof navigator === 'undefined' ? true : navigator.onLine !== false,
     firestoreFromCache: false,
     pendingSyncCount: 0,
-    appVersion: '1.4.2',
+    appVersion: '1.4.3',
     updateStatus: null,
     updateLog: [],
     expandedGroups: {},
+    visibleGroupNotes: {},
+    // Cờ BẬT/TẮT "Hiển thị tài khoản hết hạn" cho màn hình TK Mua và Cá nhân.
+    // Lưu theo phiên (KHÔNG persist); mặc định TẮT mỗi lần mở app. Hai màn hình
+    // dùng cờ riêng, độc lập nhau. Chỉ tác động ở tab "Tất cả" (không lọc trạng thái).
+    showExpired: { bought: false, personal: false },
     masterPassword: null,
     masterPasswordMode: 'unlock',
     masterPinLength: 4,
@@ -52,6 +57,25 @@ window.appState = {
         notifyOverdueDays: 3,
     },
 };
+
+// ===== HIỂN THỊ TÀI KHOẢN HẾT HẠN (theo phiên, riêng từng màn hình) =====
+// Đọc cờ showExpired của một màn hình ('bought'/'personal'); mặc định false.
+function getShowExpiredState(type) {
+    const flags = window.appState.showExpired;
+    if (!flags || (type !== 'bought' && type !== 'personal')) return false;
+    return !!flags[type];
+}
+
+// Đảo cờ showExpired của đúng màn hình rồi render lại đúng màn hình hiện tại
+// (không tác động màn hình còn lại).
+function toggleShowExpired(type) {
+    if (type !== 'bought' && type !== 'personal') return;
+    if (!window.appState.showExpired) window.appState.showExpired = { bought: false, personal: false };
+    window.appState.showExpired[type] = !getShowExpiredState(type);
+    if (window.appState.currentPage === type && typeof renderAccountList === 'function') {
+        renderAccountList(type);
+    }
+}
 
 // ===== INIT =====
 function bootstrapInitialAppShell() {
@@ -74,7 +98,10 @@ function navigateTo(page) {
     window.appState.previousPage = window.appState.currentPage;
     window.appState.currentPage = page;
     if (page !== 'detail') window.appState.activeDecryptedAccount = null;
-    if (page !== window.appState.previousPage) window.appState.expandedGroups = {};
+    if (page !== window.appState.previousPage) {
+        window.appState.expandedGroups = {};
+        window.appState.visibleGroupNotes = {};
+    }
     window.appState.currentFilter = 'all';
     window.appState.searchQuery = '';
 
@@ -110,6 +137,10 @@ function cloneNavExpandedGroups(value = window.appState.expandedGroups) {
     return { ...(value && typeof value === 'object' ? value : {}) };
 }
 
+function cloneNavVisibleGroupNotes(value = window.appState.visibleGroupNotes) {
+    return { ...(value && typeof value === 'object' ? value : {}) };
+}
+
 function createNavEntry() {
     const page = window.appState.currentPage;
     if (!page) return null;
@@ -123,6 +154,7 @@ function createNavEntry() {
         currentPlatformFilter: window.appState.currentPlatformFilter || '',
         searchQuery: window.appState.searchQuery || '',
         expandedGroups: cloneNavExpandedGroups(),
+        visibleGroupNotes: cloneNavVisibleGroupNotes(),
         scrollTop: content ? content.scrollTop : 0,
         windowScrollY: window.scrollY || window.pageYOffset || 0,
     };
@@ -152,6 +184,7 @@ function applyNavEntryState(entry) {
     window.appState.currentPlatformFilter = entry.currentPlatformFilter || '';
     window.appState.searchQuery = entry.searchQuery || '';
     window.appState.expandedGroups = cloneNavExpandedGroups(entry.expandedGroups);
+    window.appState.visibleGroupNotes = cloneNavVisibleGroupNotes(entry.visibleGroupNotes);
     const searchInput = document.getElementById('search-input');
     if (searchInput) searchInput.value = window.appState.searchQuery;
 }
@@ -204,7 +237,7 @@ async function handleBackIntent() {
     const entry = stack[stack.length - 1];
     if (!entry?.page) {
         if (window.appState.currentPage !== 'dashboard') {
-            applyNavEntryState({ currentFilter: 'all', currentTagFilter: '', currentPlatformFilter: '', searchQuery: '', expandedGroups: {} });
+            applyNavEntryState({ currentFilter: 'all', currentTagFilter: '', currentPlatformFilter: '', searchQuery: '', expandedGroups: {}, visibleGroupNotes: {} });
             navigateTo('dashboard', true);
             resetNavScroll();
             return true;
@@ -306,6 +339,8 @@ function toggleSearch() {
 }
 function handleSearch(value) {
     window.appState.searchQuery = value;
+    window.appState.expandedGroups = {};
+    window.appState.visibleGroupNotes = {};
     const page = window.appState.currentPage;
     if (page === 'bought') renderAccountList('bought');
     else if (page === 'personal') renderAccountList('personal');
@@ -320,6 +355,7 @@ function clearSearch() {
 function setFilter(filter) {
     window.appState.currentFilter = filter;
     window.appState.expandedGroups = {};
+    window.appState.visibleGroupNotes = {};
     const page = window.appState.currentPage;
     if (page === 'bought') renderAccountList('bought');
     else if (page === 'personal') renderAccountList('personal');
@@ -327,6 +363,15 @@ function setFilter(filter) {
 
 function toggleAccountGroup(groupKey) {
     window.appState.expandedGroups[groupKey] = !window.appState.expandedGroups[groupKey];
+    const page = window.appState.currentPage;
+    if (page === 'bought') renderAccountList('bought');
+    else if (page === 'personal') renderAccountList('personal');
+}
+
+function toggleAccountGroupNotes(groupKey) {
+    window.appState.visibleGroupNotes = window.appState.visibleGroupNotes || {};
+    if (window.appState.visibleGroupNotes[groupKey]) delete window.appState.visibleGroupNotes[groupKey];
+    else window.appState.visibleGroupNotes[groupKey] = true;
     const page = window.appState.currentPage;
     if (page === 'bought') renderAccountList('bought');
     else if (page === 'personal') renderAccountList('personal');
@@ -954,6 +999,7 @@ function showNotifications() {
 Object.assign(window.appState, {
     currentTagFilter: window.appState.currentTagFilter || '',
     currentPlatformFilter: window.appState.currentPlatformFilter || '',
+    visibleGroupNotes: window.appState.visibleGroupNotes || {},
     addFormTags: window.appState.addFormTags || [],
     addFormAutoTags: window.appState.addFormAutoTags || [],
     addFormPlatform: window.appState.addFormPlatform || null,
@@ -989,7 +1035,10 @@ function navigateTo(page, isBack = false) {
     if (page !== 'detail') window.appState.activeDecryptedAccount = null;
     if (page !== 'detail') window.appState.currentDetailId = null;
     if (!isRestoring) {
-        if (page !== window.appState.previousPage) window.appState.expandedGroups = {};
+        if (page !== window.appState.previousPage) {
+            window.appState.expandedGroups = {};
+            window.appState.visibleGroupNotes = {};
+        }
         window.appState.currentFilter = 'all';
         window.appState.currentTagFilter = '';
         window.appState.currentPlatformFilter = '';
@@ -1027,6 +1076,8 @@ function navigateTo(page, isBack = false) {
 
 function handleSearch(value) {
     window.appState.searchQuery = String(value || '');
+    window.appState.expandedGroups = {};
+    window.appState.visibleGroupNotes = {};
     const page = window.appState.currentPage;
     if (page === 'bought') renderAccountList('bought');
     else if (page === 'personal') renderAccountList('personal');
@@ -1042,6 +1093,7 @@ function handleSearch(value) {
 function setFilter(filter) {
     window.appState.currentFilter = filter;
     window.appState.expandedGroups = {};
+    window.appState.visibleGroupNotes = {};
     const page = window.appState.currentPage;
     if (page === 'bought') renderAccountList('bought');
     else if (page === 'personal') renderAccountList('personal');
@@ -1051,6 +1103,7 @@ function setFilter(filter) {
 function setTagFilter(tag) {
     window.appState.currentTagFilter = String(tag || '');
     window.appState.expandedGroups = {};
+    window.appState.visibleGroupNotes = {};
     const page = window.appState.currentPage;
     if (page === 'bought') renderAccountList('bought');
     else if (page === 'personal') renderAccountList('personal');
@@ -1061,6 +1114,7 @@ function setTagFilter(tag) {
 function setPlatformFilter(platform) {
     window.appState.currentPlatformFilter = String(platform || '');
     window.appState.expandedGroups = {};
+    window.appState.visibleGroupNotes = {};
     const page = window.appState.currentPage;
     if (page === 'bought') renderAccountList('bought');
     else if (page === 'personal') renderAccountList('personal');
@@ -1078,6 +1132,7 @@ function setGlobalPlatformFilter(platform) {
     window.appState.currentPlatformFilter = next;
     window.appState.searchQuery = '';
     window.appState.expandedGroups = {};
+    window.appState.visibleGroupNotes = {};
     const input = document.getElementById('search-input');
     if (input) input.value = '';
     const bar = document.getElementById('search-bar');
@@ -1094,6 +1149,7 @@ function setGlobalTagFilter(tag) {
     window.appState.currentTagFilter = next;
     window.appState.currentPlatformFilter = '';
     window.appState.expandedGroups = {};
+    window.appState.visibleGroupNotes = {};
     const page = window.appState.currentPage;
     if (page === 'bought') renderAccountList('bought');
     else if (page === 'personal') renderAccountList('personal');
@@ -1109,6 +1165,7 @@ function setGlobalQuickFilter(platform, tag) {
     window.appState.currentPlatformFilter = String(platform || '');
     window.appState.currentTagFilter = String(tag || '');
     window.appState.expandedGroups = {};
+    window.appState.visibleGroupNotes = {};
     const page = window.appState.currentPage;
     if (page === 'bought') renderAccountList('bought');
     else if (page === 'personal') renderAccountList('personal');
@@ -1119,6 +1176,16 @@ function setGlobalQuickFilter(platform, tag) {
 
 function toggleAccountGroup(groupKey) {
     window.appState.expandedGroups[groupKey] = !window.appState.expandedGroups[groupKey];
+    const page = window.appState.currentPage;
+    if (page === 'bought') renderAccountList('bought');
+    else if (page === 'personal') renderAccountList('personal');
+    else if (page.startsWith('category:')) renderCategoryDetail(page.slice('category:'.length));
+}
+
+function toggleAccountGroupNotes(groupKey) {
+    window.appState.visibleGroupNotes = window.appState.visibleGroupNotes || {};
+    if (window.appState.visibleGroupNotes[groupKey]) delete window.appState.visibleGroupNotes[groupKey];
+    else window.appState.visibleGroupNotes[groupKey] = true;
     const page = window.appState.currentPage;
     if (page === 'bought') renderAccountList('bought');
     else if (page === 'personal') renderAccountList('personal');
@@ -1591,7 +1658,14 @@ async function startUpdateDownload() {
             message: 'Đang tải bản cập nhật...',
             progress: { percent: Number.isFinite(percent) ? percent : 0 },
         };
-        if (window.appState.currentPage === 'settings') renderSettings();
+        if (window.appState.currentPage !== 'settings') return;
+        // Cập nhật tiến độ tại chỗ để tránh dựng lại toàn bộ DOM mỗi tick (gây
+        // chớp màn hình). Chỉ render đầy đủ lần đầu khi thanh tiến độ chưa có.
+        if (typeof updateMobileUpdateProgressDom === 'function'
+            && updateMobileUpdateProgressDom(window.appState.updateStatus)) {
+            return;
+        }
+        renderSettings();
     };
     setDownloading(0);
     const offProgress = updater.onProgress?.(percent => setDownloading(Number(percent)));
