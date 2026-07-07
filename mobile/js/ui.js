@@ -473,7 +473,7 @@ function renderSettings() {
         </div>
     </div>
 
-    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.4.3')}</p>`;
+    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.5.0')}</p>`;
 }
 
 // ===== MOBILE DESKTOP-PARITY RENDERERS =====
@@ -1845,10 +1845,22 @@ function renderGroupCategorySection(group, category, accounts) {
     </section>`;
 }
 
+// Nút bút chì (Edit_Toggle_Button) trên Group_Tab của Android — dùng chung nguyên tắc với desktop.
+function renderGroupEditToggle(group, editMode) {
+    // Nút bút chì chỉ render cho người có Design_Permission (Req 2.1, 2.2).
+    if (!shouldShowEditToggleButton(group)) return '';
+    // aria-pressed phản ánh mode; class 'is-active' làm nổi bật khi đang Edit_Mode (Req 2.6).
+    const active = Boolean(editMode);
+    return `<button type="button" class="group-edit-toggle${active ? ' is-active' : ''}" aria-pressed="${active}" onclick="toggleGroupEditMode('${escapeJsAttr(group.id)}')" title="Chỉnh sửa">${renderEditIconSvg()}</button>`;
+}
+
 function renderGroupBoard(group) {
     const accounts = getGroupSharedAccounts(group);
     const categories = getGroupAccountCategories?.(group) || [];
     const canDesign = group.role === 'owner';
+    // Xác định Edit_Mode hiện tại của bảng nhóm dựa trên trạng thái phiên + quyền thiết kế (Req 2.x).
+    // Dùng chung hàm thuần resolveGroupEditMode từ js/utils.js (đã nạp vào web wrapper Android).
+    const editMode = resolveGroupEditMode(window.appState.groupEditMode, group.id, canDesign);
     const sections = categories.map(category => ({
         ...category,
         accounts: accounts.filter(account => account.groupCategoryId === category.id),
@@ -1860,12 +1872,15 @@ function renderGroupBoard(group) {
                 <div class="section-title">${escapeHtml(group.name || 'Nhóm')}</div>
                 <div class="group-page-desc">${categories.length} danh mục · ${visibleAccountCount}/${accounts.length} tài khoản đã xếp</div>
             </div>
-            ${canDesign ? `<button class="btn btn-primary btn-sm" onclick="openGroupDesign('${escapeJsAttr(group.id)}')">Thiết kế</button>` : ''}
+            <div class="group-board-head-actions">
+                ${renderGroupEditToggle(group, editMode)}
+                ${isCategoryEditControlVisible(editMode, canDesign) ? `<button class="btn btn-primary btn-sm" onclick="openGroupDesign('${escapeJsAttr(group.id)}')">Thiết kế</button>` : ''}
+            </div>
         </div>
         <div class="group-category-list">
             ${sections.length
                 ? sections.map(section => renderGroupCategorySection(group, section, section.accounts)).join('')
-                : `<div class="empty-state compact"><div class="empty-state-title">Chưa có danh mục</div><div class="empty-state-desc">${canDesign ? 'Mở Thiết kế để tạo danh mục đầu tiên.' : 'Chủ nhóm chưa tạo danh mục.'}</div></div>`}
+                : `<div class="empty-state compact"><div class="empty-state-title">Chưa có danh mục</div><div class="empty-state-desc">${canDesign ? 'Bật chế độ chỉnh sửa rồi mở Thiết kế để tạo danh mục đầu tiên.' : 'Chủ nhóm chưa tạo danh mục.'}</div></div>`}
         </div>
     </div>`;
 }
@@ -2302,7 +2317,7 @@ function renderUpdateSection() {
     const version = escapeHtml(
         window.appState.appVersion
         || window.TingMobileUpdater?.INSTALLED_VERSION_NAME
-        || '1.4.3'
+        || '1.5.0'
     );
     const platform = getMobileUpdatePlatform();
     const cap = getMobileUpdateCapability(platform);
@@ -2430,7 +2445,7 @@ function renderSettings() {
             <div class="settings-item" onclick="signOut()"><div class="settings-item-icon" style="background:var(--danger-bg)">🚪</div><div class="settings-item-content"><div class="settings-item-title" style="color:var(--danger)">Đăng xuất</div></div></div>
         </div>
     </div></div>
-    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.4.3')}</p>`;
+    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.5.0')}</p>`;
     switchSettingsTab(window._settingsActiveTab || 'update');
 }
 

@@ -1132,3 +1132,68 @@ body.is-electron .d-auth-left button { -webkit-app-region:no-drag; }
 .show-expired-toggle.is-on:hover {
     background:var(--accent); color:#fff;
 }
+
+/* ============================================================
+   Group_Detail_View — bố cục cố định header + thanh tab con
+   (group-tab-redesign, Task 9.1 · Req 2.1, 11.6)
+   ============================================================ */
+
+/* Req 11.6: Trong màn hình chi tiết nhóm, giữ cố định nút quay lại + header
+   + thanh tab con, chỉ cho phép cuộn dọc riêng vùng nội dung tab con.
+   Chỉ áp dụng khi #page-content đang chứa .group-detail-root (dùng :has),
+   nên các trang khác vẫn cuộn cả trang như bình thường. */
+.d-content:has(.group-detail-root) {
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;      /* Vùng nội dung chính không tự cuộn cả trang nữa */
+    min-height:0;         /* Cho phép co lại để con cuộn được trong flex */
+}
+
+/* Wrapper chi tiết nhóm trở thành cột flex lấp đầy chiều cao khả dụng */
+.group-detail-root {
+    display:flex;
+    flex-direction:column;
+    flex:1 1 auto;
+    min-height:0;         /* Bắt buộc để phần tử con có overflow cuộn được */
+}
+
+/* Nút quay lại + header + thanh tab con: cố định, không co, không cuộn theo */
+.group-detail-root > .back-btn,
+.group-detail-root > .group-detail-head,
+.group-detail-root > .group-tabs {
+    flex:0 0 auto;
+}
+
+/* Vùng nội dung tab con (phần tử ngay sau .group-tabs) là phần cuộn dọc duy nhất.
+   Board dùng .group-board, các tab khác dùng .group-panel — cả hai đều là một
+   wrapper đơn nên bộ chọn ~ * áp đúng vào vùng nội dung. */
+.group-detail-root > .group-tabs ~ * {
+    flex:1 1 auto;
+    min-height:0;
+    overflow-y:auto;
+    overflow-x:hidden;
+}
+
+/* Req 2.1 / 2.4 / 2.5: Lớp chặn Entrance_Animation khi Quiet_Render.
+   Khi render lại do dữ liệu thay đổi, wrapper .group-detail-root được gắn thêm
+   .group-detail-quiet. Rule dưới vô hiệu hoá mọi hiệu ứng xuất hiện
+   (anim-fade-in-up, anim-stagger) của các phần tử con để nội dung hiện ngay ở
+   trạng thái cuối, không fade-in/dịch chuyển gây nháy. Vì giới hạn trong wrapper
+   nên khi điều hướng sang trang khác, trang đích vẫn phát Entrance_Animation. */
+.group-detail-quiet .anim-fade-in-up,
+.group-detail-quiet .anim-stagger > *,
+.group-detail-quiet.anim-fade-in-up {
+    animation:none !important;
+    opacity:1 !important;
+    transform:none !important;
+}
+
+/* Bảng nhóm (desktop): cho phép đầu bảng xuống dòng khi bề ngang hẹp để cụm
+   Edit_Toggle_Button + nút "Thêm danh mục" không tràn/ép tiêu đề. Cụm điều
+   khiển luôn dồn về phải. */
+.group-board-head {
+    flex-wrap:wrap;
+}
+.group-board-head-actions {
+    margin-left:auto;
+}

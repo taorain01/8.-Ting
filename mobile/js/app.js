@@ -25,10 +25,14 @@ window.appState = {
     groupUnlocked: {},
     currentGroupId: null,
     currentGroupTab: 'board',
+    // Trạng thái Edit_Mode của Group_Tab (bản Android dùng chung nguyên tắc với desktop).
+    // groupId: nhóm mà cờ active đang gắn tới; active: true = Edit_Mode, false = View_Mode.
+    // Group_Tab chỉ là Edit_Mode khi active=true VÀ groupId === currentGroupId VÀ có Design_Permission.
+    groupEditMode: { groupId: null, active: false },
     isOnline: typeof navigator === 'undefined' ? true : navigator.onLine !== false,
     firestoreFromCache: false,
     pendingSyncCount: 0,
-    appVersion: '1.4.3',
+    appVersion: '1.5.0',
     updateStatus: null,
     updateLog: [],
     expandedGroups: {},
@@ -2051,6 +2055,8 @@ function openGroupDetail(groupId, isBack = false) {
     if (!isBack) recordNavHistory();
     window.appState.previousPage = window.appState.currentPage;
     if (window.appState.currentGroupId !== groupId) window.appState.currentGroupTab = 'board';
+    // Mở/đổi nhóm ⇒ đặt lại Group_Tab về View_Mode (Req 5.2, 2.3), không kế thừa Edit_Mode của nhóm trước.
+    window.appState.groupEditMode = resetGroupEditState();
     window.appState.currentPage = 'group-detail';
     window.appState.currentGroupId = groupId;
     window.appState.currentGroupTab = window.appState.currentGroupTab || 'board';
@@ -2252,7 +2258,24 @@ async function handleDeleteGroup(groupId) {
 function setGroupDetailTab(tab = 'board') {
     const allowed = new Set(['board', 'accounts', 'members', 'settings']);
     window.appState.currentGroupTab = allowed.has(tab) ? tab : 'board';
+    // Chuyển tab con ⇒ đặt lại Group_Tab về View_Mode TRƯỚC khi render lại (Req 5.1, 2.3),
+    // tránh vô tình để lộ cụm Edit_Control khi quay lại tab "Bảng".
+    window.appState.groupEditMode = resetGroupEditState();
     renderGroupDetail(window.appState.currentGroupId);
+}
+
+// Bật/tắt Edit_Mode của Group_Tab qua nút bút chì (Edit_Toggle_Button) — Req 2.4, 2.5, 4.7.
+// Hàm global (top-level) nên dùng trực tiếp trong inline onclick="toggleGroupEditMode('<groupId>')".
+function toggleGroupEditMode(groupId) {
+    // Chỉ tác động lên nhóm đang xem: nếu bấm nút của nhóm khác (không hiển thị) thì bỏ qua.
+    if (window.appState.currentGroupId !== groupId) return;
+    // Chặn khi không có Design_Permission (thực tế nút cũng không render cho người không có quyền — Req 2.2).
+    const group = getGroupById?.(groupId);
+    if (!shouldShowEditToggleButton(group)) return;
+    // Đảo cờ Edit_Mode và neo trạng thái vào groupId hiện tại (hàm thuần, không mutate state cũ).
+    window.appState.groupEditMode = nextGroupEditState(window.appState.groupEditMode, groupId);
+    // Render lại để hiển thị/ẩn cụm Edit_Control theo mode mới.
+    renderGroupDetail(groupId);
 }
 
 function openGroupPasswordModal(groupId) {

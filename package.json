@@ -1,6 +1,6 @@
 {
   "name": "ting",
-  "version": "1.4.3",
+  "version": "1.5.0",
   "private": true,
   "description": "Ting! account manager desktop, web, and Android wrapper",
   "author": "Ting!",
@@ -10,7 +10,7 @@
     "web:test": "node scripts/serve-web-test.cjs",
     "electron:dev": "electron .",
     "electron:test": "node scripts/run-electron-test.cjs",
-    "dist:win": "npm run icons:sync && electron-builder --win --x64 && node scripts/keep-single-installer.js",
+    "dist:win": "npm run icons:sync && electron-builder --win --x64 --publish never && node scripts/keep-single-installer.js",
     "publish:win": "npm run icons:sync && electron-builder --win --x64 --publish always",
     "dist:unpacked": "npm run icons:sync && electron-builder --win --x64 --dir",
     "prepare:android-web": "node scripts/prepare-android-web.js",

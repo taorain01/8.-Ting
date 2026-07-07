@@ -19,6 +19,10 @@ window.appState = {
     groupUnlocked: {},
     currentGroupId: null,
     currentGroupTab: 'board',
+    // Trạng thái Edit_Mode của Group_Tab theo phiên (KHÔNG persist qua các lần khởi động app).
+    // groupId: nhóm mà cờ active đang gắn tới; active: true = Edit_Mode, false = View_Mode.
+    // Group_Tab chỉ được coi là Edit_Mode khi active=true VÀ groupId === currentGroupId VÀ có Design_Permission.
+    groupEditMode: { groupId: null, active: false },
     isOnline: typeof navigator === 'undefined' ? true : navigator.onLine !== false,
     firestoreFromCache: false,
     pendingSyncCount: 0,
@@ -64,7 +68,7 @@ window.appState = {
         notifyOverdueDays: 3,
         shortcuts: { openApp: 'Control+Shift+T', quickAdd: 'Control+Shift+S' },
     },
-    appVersion: '1.4.3',
+    appVersion: '1.5.0',
     updateStatus: null,
     updateLog: [],
     visibleGroupNotes: {},
@@ -386,8 +390,8 @@ function initSmartNavigationInputs() {
 
 // ===== HEADER / SIDEBAR =====
 function formatSidebarVersion(version) {
-    const raw = String(version || '1.4.3').trim().replace(/^v/i, '');
-    return raw ? `v${raw}` : 'v1.4.3';
+    const raw = String(version || '1.5.0').trim().replace(/^v/i, '');
+    return raw ? `v${raw}` : 'v1.5.0';
 }
 
 function updateSidebarVersion() {
@@ -2041,6 +2045,9 @@ function openGroupDetail(groupId, isBack = false) {
     if (!isBack) recordNavHistory();
     window.appState.previousPage = window.appState.currentPage;
     if (window.appState.currentGroupId !== groupId) window.appState.currentGroupTab = 'board';
+    // Mở/đổi nhóm ⇒ đặt lại Group_Tab về View_Mode (Req 5.2, 2.3). Đặt cùng chỗ reset currentGroupTab
+    // để mọi nhóm luôn mở ở chế độ xem gọn gàng, không kế thừa Edit_Mode của nhóm trước.
+    window.appState.groupEditMode = resetGroupEditState();
     window.appState.currentPage = 'group-detail';
     window.appState.currentGroupId = groupId;
     window.appState.currentGroupTab = window.appState.currentGroupTab || 'board';
@@ -2094,7 +2101,9 @@ async function unlockGroupWithPassword(groupId, password) {
             Object.entries(window.appState.decryptedSharedAccounts || {}).filter(([key]) => !key.startsWith(`${groupId}:`))
         );
         showToast('Đã mở khoá nhóm', 'success');
-        if (window.appState.currentPage === 'group-detail') renderGroupDetail(groupId);
+        // Mở khoá xong: render lại ở chế độ quiet để hiển thị dữ liệu đã giải mã mà KHÔNG phát lại
+        // Entrance_Animation cho toàn bộ danh sách (Req 4.2). Sai mật khẩu đã return sớm ở trên (giữ locked, Req 4.5).
+        if (window.appState.currentPage === 'group-detail') renderGroupDetail(groupId, { quiet: true });
         return true;
     } catch (error) {
         console.error('Unlock group error:', error);
@@ -2106,11 +2115,33 @@ async function unlockGroupWithPassword(groupId, password) {
 async function handleAddGroupMember(groupId) {
     const input = document.getElementById('group-member-email');
     const email = input?.value || '';
+    const group = getGroupById?.(groupId);
+    // Req 8.3-8.6: validate ở tầng UI TRƯỚC khi ghi bằng lớp logic thuần validateInviteEmail.
+    // Truyền memberEmails + pendingMemberEmails hiện tại của nhóm; maxPending để undefined để hàm
+    // tự dùng mặc định MAX_PENDING_INVITES (tránh phụ thuộc hằng số ở scope này).
+    const validation = typeof validateInviteEmail === 'function'
+        ? validateInviteEmail(email, group?.memberEmails, group?.pendingMemberEmails, undefined)
+        : { valid: Boolean(String(email).trim()), reason: String(email).trim() ? undefined : 'empty', email: String(email).trim().toLowerCase() };
+    if (!validation.valid) {
+        // Từ chối lời mời: GIỮ nguyên nội dung ô nhập để người dùng sửa lại, chỉ toast lý do tiếng Việt.
+        const reasonMessages = {
+            empty: 'Nhập email thành viên',
+            too_long: 'Email tối đa 254 ký tự',
+            invalid_format: 'Email không hợp lệ',
+            limit_reached: 'Đã đạt giới hạn 100 lời mời đang chờ',
+            already_member: 'Email đã có trong nhóm',
+            already_pending: 'Email này đã được mời',
+        };
+        showToast(reasonMessages[validation.reason] || 'Email không hợp lệ', 'error');
+        return;
+    }
     try {
-        await addGroupMember(groupId, email);
-        if (input) input.value = '';
+        // Hợp lệ (Req 8.2): ghi lời mời với email đã chuẩn hoá.
+        await addGroupMember(groupId, validation.email || email);
+        if (input) input.value = ''; // Thành công: XOÁ TRỐNG ô nhập.
         showToast('Đã gửi lời mời', 'success');
     } catch (error) {
+        // Lỗi ghi: GIỮ nguyên nội dung ô nhập để thử lại + toast lỗi.
         showToast(error.message || 'Không thêm được thành viên', 'error');
     }
 }
@@ -2206,9 +2237,43 @@ async function handleDeleteGroup(groupId) {
 }
 
 function setGroupDetailTab(tab = 'board') {
-    const allowed = new Set(['board', 'accounts', 'members', 'settings']);
-    window.appState.currentGroupTab = allowed.has(tab) ? tab : 'board';
+    // Chuẩn hoá về đúng 3 tab con hợp lệ (board/accounts/members) qua hàm thuần normalizeGroupTab.
+    // 'settings' KHÔNG phải tab con ⇒ sẽ bị đưa về 'board'; muốn mở cài đặt hãy dùng openGroupSettings (Req 3.4, 3.6).
+    const normalized = typeof normalizeGroupTab === 'function'
+        ? normalizeGroupTab(tab)
+        : (['board', 'accounts', 'members'].includes(tab) ? tab : 'board');
+    // Chọn lại đúng tab đang active ⇒ giữ nguyên, KHÔNG render lại, không phát lại hiệu ứng (Req 3.5).
+    if (normalized === window.appState.currentGroupTab) return;
+    // Chuyển sang tab con khác ⇒ cập nhật Active_Subtab và render animated để phát Entrance_Animation đúng một lần (Req 2.3, 3.2).
+    window.appState.currentGroupTab = normalized;
+    // Chuyển tab con ⇒ đặt lại Group_Tab về View_Mode TRƯỚC khi render lại (Req 5.1, 2.3),
+    // tránh vô tình để lộ cụm Edit_Control khi quay lại tab "Bảng".
+    window.appState.groupEditMode = resetGroupEditState();
     renderGroupDetail(window.appState.currentGroupId);
+}
+
+// Bật/tắt Edit_Mode của Group_Tab qua nút bút chì (Edit_Toggle_Button) — Req 2.4, 2.5, 4.7.
+// Là hàm global (top-level) nên dùng được trực tiếp trong inline onclick="toggleGroupEditMode('<groupId>')".
+function toggleGroupEditMode(groupId) {
+    // Chỉ tác động lên nhóm đang xem: nếu bấm nút của nhóm khác (không hiển thị) thì bỏ qua.
+    if (window.appState.currentGroupId !== groupId) return;
+    // Chặn khi không có Design_Permission (thực tế nút cũng không render cho người không có quyền — Req 2.2).
+    const group = getGroupById?.(groupId);
+    if (!shouldShowEditToggleButton(group)) return;
+    // Đảo cờ Edit_Mode và neo trạng thái vào groupId hiện tại (hàm thuần, không mutate state cũ).
+    window.appState.groupEditMode = nextGroupEditState(window.appState.groupEditMode, groupId);
+    // Render lại (KHÔNG quiet) để hiển thị/ẩn cụm Edit_Control theo mode mới.
+    renderGroupDetail(groupId);
+}
+
+
+// nên không đi qua normalizeGroupTab. Render animated để phát hiệu ứng vào đúng một lần.
+function openGroupSettings(groupId) {
+    const id = groupId || window.appState.currentGroupId;
+    // Đang ở view cài đặt rồi ⇒ giữ nguyên, không render lại.
+    if (window.appState.currentGroupTab === 'settings') return;
+    window.appState.currentGroupTab = 'settings';
+    renderGroupDetail(id);
 }
 
 function getGroupAccountTargetId(groupId, accountId) {
@@ -2375,13 +2440,27 @@ function openGroupCategoryModal(groupId, categoryId = '') {
 async function submitGroupCategory(groupId, categoryId = '') {
     const group = getGroupById?.(groupId);
     if (!group) return;
+    // Giữ mô hình phân quyền: chỉ Group_Owner được thêm/sửa danh mục (Req 6.1, 6.2).
+    if (group.role !== 'owner') return;
     const categories = getGroupAccountCategories?.(group) || [];
     const existing = categories.find(item => item.id === categoryId) || null;
-    const name = String(document.getElementById('group-category-name')?.value || '').trim();
-    if (!name) {
-        showToast('Nhập tên danh mục', 'error');
+    const rawName = String(document.getElementById('group-category-name')?.value || '');
+    // Req 6.3, 6.4: kiểm tra tên TRƯỚC khi ghi bằng lớp logic thuần.
+    // existingNames truyền cả mảng { id, name } và editingId = categoryId đang sửa (rỗng khi thêm) để loại chính nó khỏi so trùng.
+    const validation = typeof validateCategoryName === 'function'
+        ? validateCategoryName(rawName, categories, categoryId || '')
+        : { valid: Boolean(rawName.trim()), reason: rawName.trim() ? undefined : 'empty', name: rawName.trim() };
+    if (!validation.valid) {
+        // Giữ nguyên danh sách danh mục hiện tại (không ghi), báo lỗi tiếng Việt tương ứng.
+        const reasonMessages = {
+            empty: 'Nhập tên danh mục',
+            too_long: 'Tên danh mục tối đa 50 ký tự',
+            duplicate: 'Tên danh mục đã tồn tại',
+        };
+        showToast(reasonMessages[validation.reason] || 'Tên danh mục không hợp lệ', 'error');
         return;
     }
+    const name = validation.name;
     const nextCategory = {
         id: existing?.id || createUniqueGroupCategoryId(name, categories),
         name,
@@ -2398,6 +2477,7 @@ async function submitGroupCategory(groupId, categoryId = '') {
         closeModal();
         showToast(existing ? 'Đã cập nhật danh mục nhóm' : 'Đã thêm danh mục nhóm', 'success');
     } catch (error) {
+        // Lỗi ghi -> giữ nguyên danh sách hiện tại + toast.
         showToast(error.message || 'Không lưu được danh mục nhóm', 'error');
     }
 }
@@ -2405,16 +2485,22 @@ async function submitGroupCategory(groupId, categoryId = '') {
 async function handleMoveGroupCategory(groupId, categoryId, direction) {
     const group = getGroupById?.(groupId);
     if (!group) return;
+    // Giữ mô hình phân quyền: chỉ Group_Owner được sắp xếp danh mục (Req 6.1, 6.2).
+    if (group.role !== 'owner') return;
     const categories = getGroupAccountCategories?.(group) || [];
-    const index = categories.findIndex(item => item.id === categoryId);
-    const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    if (index < 0 || targetIndex < 0 || targetIndex >= categories.length) return;
-    const next = [...categories];
-    [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+    // Req 6.7, 6.8: dùng lớp logic thuần để hoán đổi với danh mục liền kề; ở biên giữ nguyên trật tự.
+    const next = typeof moveCategoryOrder === 'function'
+        ? moveCategoryOrder(categories, categoryId, direction)
+        : categories.map((item, order) => ({ ...item, order }));
+    // Nếu thứ tự không đổi (ở biên) -> bỏ qua ghi (no-op).
+    const unchanged = next.length === categories.length
+        && next.every((item, index) => item.id === categories[index]?.id);
+    if (unchanged) return;
     try {
-        await updateGroupAccountCategories(groupId, next.map((item, order) => ({ ...item, order })));
+        await updateGroupAccountCategories(groupId, next);
         showToast('Đã sắp xếp danh mục', 'success');
     } catch (error) {
+        // Lỗi ghi -> giữ nguyên thứ tự cũ (không thay đổi cục bộ) + toast.
         showToast(error.message || 'Không sắp xếp được danh mục', 'error');
     }
 }
@@ -2425,13 +2511,21 @@ async function handleDeleteGroupCategory(groupId, categoryId) {
     const categories = getGroupAccountCategories?.(group) || [];
     const category = categories.find(item => item.id === categoryId);
     if (!category) return;
-    const affected = (window.appState.sharedAccounts?.[groupId] || []).filter(account => account.groupCategoryId === categoryId);
+    const accounts = window.appState.sharedAccounts?.[groupId] || [];
+    // Req 6.6: dùng lớp logic thuần để xác định các tài khoản cần đưa về "Chưa phân loại" (groupCategoryId = null).
+    const reassigned = typeof reassignAccountsOnCategoryDelete === 'function'
+        ? reassignAccountsOnCategoryDelete(accounts, categoryId)
+        : accounts.map(account => (account.groupCategoryId === categoryId ? { ...account, groupCategoryId: null } : { ...account }));
+    // Chỉ những tài khoản thực sự đổi danh mục (từ categoryId về null) mới cần ghi.
+    const affected = reassigned.filter((account, index) => account.groupCategoryId !== accounts[index]?.groupCategoryId);
+    // Req 6.5: hộp xác nhận trước khi xoá.
     if (!confirm(`Xoá danh mục "${category.name}"?${affected.length ? ` ${affected.length} tài khoản sẽ về Chưa phân loại.` : ''}`)) return;
     try {
         await updateGroupAccountCategories(groupId, categories.filter(item => item.id !== categoryId).map((item, order) => ({ ...item, order })));
         await Promise.all(affected.map(account => updateSharedAccountGroupMeta(groupId, account.id, { groupCategoryId: null })));
         showToast('Đã xoá danh mục nhóm', 'success');
     } catch (error) {
+        // Lỗi ghi -> giữ nguyên trạng thái cũ (không thay đổi cục bộ) + toast.
         showToast(error.message || 'Không xoá được danh mục nhóm', 'error');
     }
 }
@@ -2442,10 +2536,24 @@ function canManageSharedAccountForUi(group, account) {
 }
 
 async function handleSetSharedAccountCategory(groupId, accountId, categoryId = '') {
+    const group = getGroupById?.(groupId);
+    const account = getSharedAccountById(groupId, accountId);
+    if (!group || !account) return;
+    // Giữ mô hình phân quyền: chỉ người có quyền quản lý tài khoản mới đổi danh mục (Req 5.1, 5.2).
+    if (!canManageSharedAccountForUi(group, account)) return;
+    // Danh mục hiện tại của tài khoản (chuẩn hoá về '' cho "Chưa phân loại").
+    const currentId = account.groupCategoryId || '';
+    // Req 5.5: chọn đúng danh mục đang áp dụng -> no-op (không ghi, không toast).
+    const reassignNeeded = typeof isCategoryReassignNeeded === 'function'
+        ? isCategoryReassignNeeded(currentId, categoryId)
+        : (currentId || '') !== (categoryId || '');
+    if (!reassignNeeded) return;
     try {
+        // Req 5.4: gán tài khoản vào danh mục đã chọn; giao diện tự cập nhật qua realtime.
         await updateSharedAccountGroupMeta(groupId, accountId, { groupCategoryId: categoryId || null });
         showToast('Đã chuyển danh mục tài khoản', 'success');
     } catch (error) {
+        // Req 5.7: lỗi -> giữ nguyên danh mục trước đó (không thay đổi cục bộ) + toast.
         showToast(error.message || 'Không chuyển được danh mục', 'error');
     }
 }
@@ -2471,9 +2579,24 @@ function closeCategoryDropdown() {
     menu.classList.remove('open');
     document.removeEventListener('mousedown', _catMenuOutsideHandler, true);
     document.removeEventListener('keydown', _catMenuKeyHandler, true);
-    window.removeEventListener('scroll', closeCategoryDropdown, true);
-    window.removeEventListener('resize', closeCategoryDropdown, true);
+    // Req 5.9: khi cuộn/resize ta CẬP NHẬT VỊ TRÍ (repositionCategoryDropdown) thay vì đóng menu,
+    // nên phải gỡ đúng listener đã đăng ký (không còn gỡ closeCategoryDropdown cho scroll/resize).
+    window.removeEventListener('scroll', repositionCategoryDropdown, true);
+    window.removeEventListener('resize', repositionCategoryDropdown, true);
     setTimeout(() => menu.remove(), 120);
+}
+
+// Req 5.9: cập nhật vị trí menu danh mục đang mở để nó luôn bám đúng cat-select tương ứng
+// khi vùng chứa cuộn hoặc cửa sổ đổi kích thước. Không đóng menu (khác hành vi cũ).
+// Nếu trigger không còn trong DOM (thẻ tài khoản đã bị vẽ lại/xoá) thì đóng menu để tránh menu mồ côi.
+function repositionCategoryDropdown() {
+    if (!_activeCatMenu) return;
+    const { menu, trigger } = _activeCatMenu;
+    if (!trigger || !document.contains(trigger)) {
+        closeCategoryDropdown();
+        return;
+    }
+    _positionCatMenu(menu, trigger);
 }
 
 function _positionCatMenu(menu, trigger) {
@@ -2505,15 +2628,21 @@ function openCategoryDropdown(trigger, groupId, accountId) {
     const account = (window.appState.sharedAccounts?.[groupId] || []).find(item => item.id === accountId);
     const currentId = account?.groupCategoryId || '';
     const categories = getGroupAccountCategories?.(group) || [];
-    const options = [{ id: '', name: 'Chưa phân loại', color: '#9CA3AF' }, ...categories];
+    // Dựng danh sách lựa chọn bằng lớp logic thuần (Req 5.3): gồm mọi Account_Category + "Chưa phân loại",
+    // đánh dấu active cho ĐÚNG MỘT mục theo danh mục hiện tại (nhất quán với renderGroupAccountCategorySelect).
+    const options = typeof buildCategoryDropdownOptions === 'function'
+        ? buildCategoryDropdownOptions(categories, currentId)
+        : [{ id: null, name: 'Chưa phân loại', active: true }];
 
     const menu = document.createElement('div');
     menu.className = 'cat-menu';
     menu.innerHTML = options.map(option => {
-        const id = option.id || '';
-        const active = (id === (currentId || ''));
-        return `<button type="button" class="cat-menu-option${active ? ' is-active' : ''}" data-id="${escapeHtml(id)}">
-            <span class="cat-menu-dot" style="background:${escapeHtml(option.color || '#9CA3AF')}"></span>
+        // buildCategoryDropdownOptions trả option.id có thể null cho "Chưa phân loại" -> chuẩn hoá về '' cho data-id.
+        const id = option.id == null ? '' : String(option.id);
+        // Màu chấm: buildCategoryDropdownOptions không kèm color -> tra từ categories gốc theo id, fallback '#9CA3AF'.
+        const color = id ? (categories.find(item => item.id === option.id)?.color || '#9CA3AF') : '#9CA3AF';
+        return `<button type="button" class="cat-menu-option${option.active ? ' is-active' : ''}" data-id="${escapeHtml(id)}">
+            <span class="cat-menu-dot" style="background:${escapeHtml(color)}"></span>
             <span class="cat-menu-name">${escapeHtml(option.name)}</span>
             <svg class="cat-menu-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" width="15" height="15"><polyline points="20,6 9,17 4,12"/></svg>
         </button>`;
@@ -2524,7 +2653,9 @@ function openCategoryDropdown(trigger, groupId, accountId) {
         btn.addEventListener('click', () => {
             const id = btn.getAttribute('data-id') || '';
             closeCategoryDropdown();
-            if ((id || '') !== (currentId || '')) handleSetSharedAccountCategory(groupId, accountId, id);
+            // handleSetSharedAccountCategory tự guard qua isCategoryReassignNeeded (Req 5.5):
+            // chọn đúng danh mục hiện tại sẽ là no-op (không ghi, không toast).
+            handleSetSharedAccountCategory(groupId, accountId, id);
         });
     });
 
@@ -2535,26 +2666,37 @@ function openCategoryDropdown(trigger, groupId, accountId) {
     setTimeout(() => {
         document.addEventListener('mousedown', _catMenuOutsideHandler, true);
         document.addEventListener('keydown', _catMenuKeyHandler, true);
-        window.addEventListener('scroll', closeCategoryDropdown, true);
-        window.addEventListener('resize', closeCategoryDropdown, true);
+        // Req 5.9: cuộn/resize -> CẬP NHẬT VỊ TRÍ menu (bám cat-select) thay vì đóng menu.
+        // Dùng passive cho scroll vì handler không gọi preventDefault.
+        window.addEventListener('scroll', repositionCategoryDropdown, { capture: true, passive: true });
+        window.addEventListener('resize', repositionCategoryDropdown, true);
     }, 0);
 }
 
 async function handleMoveSharedAccount(groupId, accountId, direction, categoryId = '') {
+    const group = getGroupById?.(groupId);
+    const account = getSharedAccountById(groupId, accountId);
+    if (!group || !account) return;
+    // Giữ mô hình phân quyền: chỉ người có quyền quản lý tài khoản mới sắp xếp (Req 7.1).
+    if (!canManageSharedAccountForUi(group, account)) return;
+    // Tập tài khoản cùng danh mục để hoán đổi thứ tự trong phạm vi danh mục đó.
     const accounts = (window.appState.sharedAccounts?.[groupId] || [])
-        .filter(account => (account.groupCategoryId || '') === (categoryId || ''));
-    const sorted = typeof sortSharedAccountsForGroup === 'function' ? sortSharedAccountsForGroup(accounts) : accounts;
-    const index = sorted.findIndex(account => account.id === accountId);
-    const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    if (index < 0 || targetIndex < 0 || targetIndex >= sorted.length) return;
-    const ordered = [...sorted];
-    [ordered[index], ordered[targetIndex]] = [ordered[targetIndex], ordered[index]];
+        .filter(item => (item.groupCategoryId || '') === (categoryId || ''));
+    // Req 7.5: dùng lớp logic thuần để hoán đổi groupSortOrder với tài khoản liền kề theo hướng.
+    const next = typeof swapAccountSortOrder === 'function'
+        ? swapAccountSortOrder(accounts, accountId, direction)
+        : accounts.map(item => ({ ...item }));
+    // Chỉ ghi các tài khoản có groupSortOrder thực sự thay đổi; ở biên không có thay đổi -> no-op.
+    const beforeById = new Map(accounts.map(item => [item.id, item.groupSortOrder]));
+    const changed = next.filter(item => beforeById.get(item.id) !== item.groupSortOrder);
+    if (!changed.length) return;
     try {
-        await Promise.all(ordered.map((account, order) => (
-            updateSharedAccountGroupMeta(groupId, account.id, { groupSortOrder: (order + 1) * 1000 })
+        await Promise.all(changed.map(item => (
+            updateSharedAccountGroupMeta(groupId, item.id, { groupSortOrder: item.groupSortOrder })
         )));
         showToast('Đã sắp xếp tài khoản', 'success');
     } catch (error) {
+        // Req 7.6: lỗi lưu -> giữ nguyên thứ tự cũ (không thay đổi cục bộ) + toast.
         showToast(error.message || 'Không sắp xếp được tài khoản', 'error');
     }
 }
@@ -2582,12 +2724,29 @@ async function submitSharedAccountGroupNote(groupId, accountId) {
 }
 
 async function handleToggleGroupAccountManager(groupId, email, checked) {
+    const group = getGroupById?.(groupId);
+    // Req 9.7: chỉ Group_Owner mới được phân quyền. Non-owner -> từ chối, KHÔNG ghi,
+    // và render lại (quiet) để đưa công tắc về đúng trạng thái danh sách hiện tại.
+    if (!group || group.role !== 'owner') {
+        showToast('Chỉ chủ nhóm mới có quyền phân quyền', 'error');
+        renderGroupDetail(groupId, { quiet: true });
+        return;
+    }
+    // Req 9.2, 9.3: dùng lớp logic thuần để xác định danh sách quản lý mong muốn (round-trip bật/tắt).
+    // Nếu danh sách không thay đổi (đã ở đúng trạng thái) thì bỏ qua ghi thừa (no-op).
+    if (typeof toggleAccountManager === 'function' && typeof getGroupAccountManagerEmails === 'function') {
+        const current = getGroupAccountManagerEmails(group);
+        const desired = toggleAccountManager(current, email, checked);
+        const unchanged = desired.length === current.length && desired.every(item => current.includes(item));
+        if (unchanged) return;
+    }
     try {
         await setGroupAccountManager(groupId, email, checked);
         showToast(checked ? 'Đã cấp quyền quản lý tài khoản' : 'Đã gỡ quyền quản lý tài khoản', 'success');
     } catch (error) {
+        // Req 9.6: lỗi -> giữ nguyên trạng thái cũ + toast; render lại (quiet) để đồng bộ lại công tắc.
         showToast(error.message || 'Không cập nhật được quyền quản lý', 'error');
-        renderGroupDetail(groupId);
+        renderGroupDetail(groupId, { quiet: true });
     }
 }
 
@@ -2608,8 +2767,9 @@ async function decryptSharedAccountForDisplay(groupId, accountId) {
     try {
         const decrypted = await decryptSharedAccount(account, password);
         window.appState.decryptedSharedAccounts[key] = decrypted;
+        // Giải mã xong 1 tài khoản: render lại ở chế độ quiet để không nháy/không phát lại hiệu ứng (Req 4.2).
         if (window.appState.currentPage === 'group-detail' && window.appState.currentGroupId === groupId) {
-            renderGroupDetail(groupId);
+            renderGroupDetail(groupId, { quiet: true });
         }
         return decrypted;
     } catch (error) {
@@ -2803,22 +2963,51 @@ async function submitSharedAccountEdit(groupId, accountId) {
 
 async function handleAcceptSharedEditRequest(groupId, requestId) {
     const request = getSharedEditRequestById?.(groupId, requestId);
-    if (!request || !confirm('Duyệt thay đổi này?')) return;
+    // Req 10.8: kiểm tra tính idempotent bằng lớp logic thuần applyEditRequestDecision TRƯỚC khi gọi backend.
+    // Danh sách Edit_Request hiện tại của nhóm lấy từ appState; nếu changed === false nghĩa là
+    // request không còn 'pending' (đã được người duyệt khác xử lý) hoặc không tồn tại.
+    const currentRequests = window.appState.sharedEditRequests?.[groupId] || [];
+    const decision = typeof applyEditRequestDecision === 'function'
+        ? applyEditRequestDecision(currentRequests, requestId, 'approved')
+        : { changed: Boolean(request && request.status === 'pending') };
+    if (!decision.changed) {
+        // No-op idempotent: không gọi backend, chỉ báo yêu cầu đã được xử lý.
+        showToast('Yêu cầu đã được xử lý', 'info');
+        return;
+    }
+    // Giữ hộp xác nhận hiện có; huỷ xác nhận -> không làm gì.
+    if (!confirm('Duyệt thay đổi này?')) return;
     try {
         await acceptSharedEditRequest(groupId, requestId);
-        if (request.accountId) delete window.appState.decryptedSharedAccounts?.[getSharedAccountCacheKey(groupId, request.accountId)];
+        // Xoá cache đã giải mã của account để buộc giải mã lại theo dữ liệu vừa được duyệt.
+        if (request?.accountId) delete window.appState.decryptedSharedAccounts?.[getSharedAccountCacheKey(groupId, request.accountId)];
+        // Req 10.4: giao diện cập nhật đúng một lần qua realtime/notifyGroupsChanged sẵn có (không tự render thêm).
         showToast('Đã duyệt thay đổi', 'success');
     } catch (error) {
+        // Req 10.6: lỗi -> giữ Edit_Request ở trạng thái pending (không đổi state cục bộ), không đổi Shared_Account + toast lỗi.
         showToast(error.message || 'Không duyệt được yêu cầu', 'error');
     }
 }
 
 async function handleRejectSharedEditRequest(groupId, requestId) {
+    // Req 10.8: kiểm tra tính idempotent bằng applyEditRequestDecision TRƯỚC khi gọi backend.
+    const currentRequests = window.appState.sharedEditRequests?.[groupId] || [];
+    const decision = typeof applyEditRequestDecision === 'function'
+        ? applyEditRequestDecision(currentRequests, requestId, 'rejected')
+        : { changed: Boolean(getSharedEditRequestById?.(groupId, requestId)?.status === 'pending') };
+    if (!decision.changed) {
+        // No-op idempotent: yêu cầu đã được xử lý hoặc không còn tồn tại.
+        showToast('Yêu cầu đã được xử lý', 'info');
+        return;
+    }
+    // Giữ hộp xác nhận hiện có; huỷ xác nhận -> không làm gì.
     if (!confirm('Từ chối yêu cầu sửa này?')) return;
     try {
         await rejectSharedEditRequest(groupId, requestId);
+        // Req 10.5: giao diện cập nhật đúng một lần qua realtime/notifyGroupsChanged sẵn có.
         showToast('Đã từ chối yêu cầu', 'success');
     } catch (error) {
+        // Req 10.7: lỗi -> giữ Edit_Request ở trạng thái pending (không đổi state cục bộ) + toast lỗi.
         showToast(error.message || 'Không từ chối được yêu cầu', 'error');
     }
 }

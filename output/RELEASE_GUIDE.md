@@ -7,19 +7,20 @@ Tai lieu nay la quy trinh release tu cac ban sau `1.3.5`. Lam theo checklist de 
 - Khong commit token, PAT, `google-services.json`, file secret, hay log co token.
 - Khong revert file dirty khong lien quan. Luon xem `git diff --name-only` truoc khi stage.
 - Neu dang co user changes, chi `git add` dung file cua release.
-- Dung `npm.cmd` tren PowerShell, tranh loi policy voi `npm.ps1`.
+- Dung `npm.cmd` tren PowerShell, tranh loi policy voi `npm.ps1`. Tuong tu, neu can chay `npx`, dung `npx.cmd` (khong dung `npx.ps1` vi bi chan execution policy).
 - Tang version moi moi lan publish. Vi du da public `1.3.5` thi hotfix tiep theo la `1.3.6`, khong ghi de cung version.
 - Android `versionCode` dung cong thuc: `major * 10000 + minor * 100 + patch`.
   - `1.3.6` -> `10306`
   - `1.4.0` -> `10400`
+  - `1.5.0` -> `10500`
 
 ## 1. Chon version moi
 
 Dat bien tam trong dau de tranh nham:
 
 ```powershell
-$VERSION = "1.3.6"
-$CODE = 10306
+$VERSION = "1.5.0"
+$CODE = 10500
 $TAG = "v$VERSION"
 ```
 
@@ -61,6 +62,20 @@ Dieu kien pass:
 - Tat ca test passed.
 - Neu test fail do version expected, update test dung version moi.
 - Neu fail do logic release/update, sua code truoc khi build.
+
+### Luu y test flaky (property-based join-password)
+
+Cac test property o `tests/property/join-password-*.test.js` dung PBKDF2 600000 vong (rat nang CPU) voi `numRuns` cao. Khi chay full suite song song, chung co the fail ngau nhien (flaky) do nghen CPU, khong phai bug that. Dau hieu:
+
+- Fail o `join-password-crypto.test.js` / `join-password-flow.test.js` voi loi kieu `expect(ok).toBe(true)` hoac `Mat khau vao nhom khong dung`, nhung chay lai lai pass.
+
+Cach xac nhan la flaky (khong phai bug):
+
+```powershell
+npx.cmd vitest run tests/property/join-password-crypto.test.js tests/property/join-password-flow.test.js
+```
+
+Neu chay rieng (it song song hon) ma pass het, coi nhu suite da xanh, tiep tuc release. Chi coi la bug that khi loi tai hien duoc mot cach xac dinh (deterministic) khi chay rieng.
 
 ## 4. Build Android APK
 
@@ -452,6 +467,18 @@ Kiem output `npm.cmd run dist:win`.
 - Loi macro/function khong referenced trong uninstaller: boc UI custom trong `!ifndef BUILD_UNINSTALLER`.
 - Loi `MUI_HEADER_TEXT` khong co: khong dung macro nay trong include qua som; tu render header trong custom page.
 - Loi `warning treated as error`: xu ly warning, khong bo qua.
+
+### Build dist:win fail voi "GitHub Personal Access Token is not set" / GH_TOKEN
+
+Trieu chung: cuoi log co `Implicit publishing triggered by CI detection` roi `GitHub Personal Access Token is not set` va exit code 1, du chi muon build local. Nguyen nhan: chay trong moi truong co bien `CI` nen electron-builder tu kich hoat publish.
+
+Cach xu ly (da fix gan trong repo): script `dist:win` da them `--publish never` nen build local khong bao gio tu publish. Neu van gap loi nay (vi du chay electron-builder truc tiep), phai truyen `--publish never`:
+
+```powershell
+npx.cmd electron-builder --win --x64 --publish never
+```
+
+Publish that su van lam thu cong qua REST API o muc 9, khong dua vao auto-publish cua electron-builder.
 
 ## 13. Checklist ngan truoc khi bao xong
 

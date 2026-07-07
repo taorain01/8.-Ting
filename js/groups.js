@@ -139,17 +139,51 @@ function getKnownGroupById(groupId) {
 
 let _groupsRenderTimer = null;
 let _pendingGroupRenderId = null;
+// Cờ tích luỹ cho cả cụm (burst): true nếu có bất kỳ Snapshot_Event nào đổi nội dung.
+// Sự kiện chỉ đổi Snapshot_Metadata (fromCache/hasPendingWrites) không bật cờ này (Req 1.5).
+let _pendingContentChanged = false;
+
+// Bản đồ lưu "content signature" gần nhất theo nhóm để phát hiện thay đổi chỉ-metadata.
+// So sánh nội dung đã map (bỏ qua pendingSync/metadata) giữa các Snapshot_Event.
+const _sharedAccountsContentSig = new Map();
+const _sharedEditRequestsContentSig = new Map();
+
+// Chuỗi hoá nội dung danh sách để so sánh, loại bỏ trường metadata (pendingSync)
+// nhằm chỉ phát hiện thay đổi nội dung hiển thị chứ không phải thay đổi fromCache/hasPendingWrites.
+function computeGroupContentSignature(list) {
+    try {
+        return JSON.stringify((Array.isArray(list) ? list : []).map(item => {
+            const clone = { ...(item || {}) };
+            delete clone.pendingSync; // bỏ cờ metadata (hasPendingWrites) khỏi chữ ký nội dung
+            return clone;
+        }));
+    } catch (e) {
+        // Fallback an toàn: coi như luôn thay đổi để không bỏ sót render.
+        return `__sig_${Date.now()}_${Math.random()}`;
+    }
+}
 
 function runGroupsChangedRender() {
     _groupsRenderTimer = null;
     const groupId = _pendingGroupRenderId;
+    const contentChanged = _pendingContentChanged;
     _pendingGroupRenderId = null;
+    _pendingContentChanged = false;
     if (typeof updateHeader === 'function') updateHeader();
     const page = window.appState?.currentPage || '';
     if (page === 'groups' && typeof renderGroupList === 'function') renderGroupList();
-    if (page === 'group-detail' && (!groupId || window.appState.currentGroupId === groupId) && typeof renderGroupDetail === 'function') {
-        // Data-driven refresh: render without replaying entrance animations to avoid flicker.
-        renderGroupDetail(window.appState.currentGroupId || groupId, { quiet: true });
+
+    // Cổng render Group_Detail_View: dùng hàm thuần shouldRenderGroupDetail để quyết định.
+    // Khi groupId là null (cập nhật chung, ví dụ danh sách nhóm) coi như nhắm đúng nhóm đang mở.
+    const state = {
+        currentPage: page,
+        currentGroupId: window.appState?.currentGroupId || null,
+    };
+    const eventGroupId = (groupId === null) ? state.currentGroupId : groupId;
+    const event = { groupId: eventGroupId, contentChanged };
+    if (shouldRenderGroupDetail(state, event) && typeof renderGroupDetail === 'function') {
+        // Data-driven refresh: render ở chế độ quiet để không phát lại entrance animation (tránh nháy).
+        renderGroupDetail(state.currentGroupId, { quiet: true });
     }
     if (page === 'group-design' && (!groupId || window.appState.currentGroupId === groupId) && typeof renderGroupDesign === 'function') {
         renderGroupDesign(window.appState.currentGroupId || groupId);
@@ -159,10 +193,14 @@ function runGroupsChangedRender() {
 // Firestore snapshots (with includeMetadataChanges) + the group doc "updatedAt" write
 // can fire this several times in a very short burst. Debounce so a burst collapses into
 // a single repaint instead of the interface jittering 2-3 times.
-function notifyGroupsChanged(groupId = null) {
+// meta.contentChanged: false nếu Snapshot_Event chỉ đổi metadata (fromCache/hasPendingWrites);
+// mặc định coi là có thay đổi nội dung để giữ tương thích ngược với các lời gọi cũ.
+function notifyGroupsChanged(groupId = null, meta = {}) {
     if (groupId !== null) _pendingGroupRenderId = groupId;
+    // undefined/không truyền => true (tương thích ngược); chỉ false khi khai báo tường minh.
+    if ((meta && meta.contentChanged) !== false) _pendingContentChanged = true;
     if (_groupsRenderTimer) clearTimeout(_groupsRenderTimer);
-    _groupsRenderTimer = setTimeout(runGroupsChangedRender, 50);
+    _groupsRenderTimer = setTimeout(runGroupsChangedRender, GROUP_RENDER_DEBOUNCE_MS);
 }
 
 function cleanGroupFirestoreData(data = {}) {
@@ -782,11 +820,16 @@ function loadSharedAccountsRealtime(groupId) {
             window.appState.sharedAccountCounts[groupId] = sortedAccounts.length;
             const group = getGroupById(groupId);
             if (group) group.sharedAccountCount = sortedAccounts.length;
-            notifyGroupsChanged(groupId);
+            // Phát hiện Snapshot_Event chỉ đổi metadata: so chữ ký nội dung với lần trước (Req 1.5).
+            const sig = computeGroupContentSignature(sortedAccounts);
+            const contentChanged = sig !== _sharedAccountsContentSig.get(groupId);
+            _sharedAccountsContentSig.set(groupId, sig);
+            notifyGroupsChanged(groupId, { contentChanged });
         }, (error) => {
             console.error('Load shared accounts error:', error);
             window.appState.sharedAccounts[groupId] = [];
             window.appState.sharedAccountCounts[groupId] = 0;
+            _sharedAccountsContentSig.set(groupId, computeGroupContentSignature([]));
             if (typeof showToast === 'function') showToast(error.message || 'Không tải được tài khoản chia sẻ', 'error');
             notifyGroupsChanged(groupId);
         });
@@ -798,6 +841,7 @@ function stopSharedAccountsRealtime(groupId) {
     const unsubscribe = sharedAccountsUnsubscribes.get(groupId);
     if (typeof unsubscribe === 'function') unsubscribe();
     sharedAccountsUnsubscribes.delete(groupId);
+    _sharedAccountsContentSig.delete(groupId); // xoá chữ ký để lần listen sau coi là mới
 }
 
 function loadSharedEditRequestsRealtime(groupId) {
@@ -823,11 +867,16 @@ function loadSharedEditRequestsRealtime(groupId) {
             window.appState.sharedEditRequestCounts[groupId] = pendingCount;
             const group = getGroupById(groupId);
             if (group) group.editRequestCount = pendingCount;
-            notifyGroupsChanged(groupId);
+            // Phát hiện Snapshot_Event chỉ đổi metadata: so chữ ký nội dung với lần trước (Req 1.5).
+            const sig = computeGroupContentSignature(requests);
+            const contentChanged = sig !== _sharedEditRequestsContentSig.get(groupId);
+            _sharedEditRequestsContentSig.set(groupId, sig);
+            notifyGroupsChanged(groupId, { contentChanged });
         }, (error) => {
             console.error('Load shared edit requests error:', error);
             window.appState.sharedEditRequests[groupId] = [];
             window.appState.sharedEditRequestCounts[groupId] = 0;
+            _sharedEditRequestsContentSig.set(groupId, computeGroupContentSignature([]));
             if (typeof showToast === 'function') showToast(error.message || 'Không tải được yêu cầu sửa', 'error');
             notifyGroupsChanged(groupId);
         });
@@ -839,6 +888,7 @@ function stopSharedEditRequestsRealtime(groupId) {
     const unsubscribe = sharedEditRequestsUnsubscribes.get(groupId);
     if (typeof unsubscribe === 'function') unsubscribe();
     sharedEditRequestsUnsubscribes.delete(groupId);
+    _sharedEditRequestsContentSig.delete(groupId); // xoá chữ ký để lần listen sau coi là mới
 }
 
 function hasSharedSourceAccount(groupId, sourceAccountId) {
@@ -1398,3 +1448,310 @@ window.sortSharedAccountsForGroup = sortSharedAccountsForGroup;
 window.getSharedEditRequestById = getSharedEditRequestById;
 window.getSharedEditRequestsForAccount = getSharedEditRequestsForAccount;
 window.hasSharedSourceAccount = hasSharedSourceAccount;
+
+/* =============================================================================
+   Lớp logic thuần (pure functions) cho re-design tab Nhóm (group-tab-redesign).
+
+   Các hàm dưới đây là THUẦN: không chạm DOM, không gọi Firestore, không side-effect
+   (không đọc/ghi window.appState, không hẹn giờ). Chúng nhận đầu vào và trả về kết
+   quả mới, dùng chung cho lớp render + handler và là đối tượng của property test.
+   Xem "Correctness Properties 1-17" trong design.md để biết hợp đồng từng hàm.
+   ============================================================================ */
+
+// --- Hằng số cấu hình --------------------------------------------------------
+const GROUP_RENDER_DEBOUNCE_MS = 50;       // Cửa sổ gộp cụm Snapshot_Event (Req 1.1, 1.3)
+const DECRYPTION_TIMEOUT_MS = 5000;        // Ngưỡng timeout giải mã 1 tài khoản (Req 4.7)
+const MAX_PENDING_INVITES = 100;           // Giới hạn số lời mời đang chờ (Req 8.5)
+const MAX_INVITE_EMAIL_LENGTH = 254;       // Độ dài email mời tối đa (Req 8.2, 8.3)
+const CATEGORY_NAME_MIN = 1;               // Độ dài tên danh mục tối thiểu (Req 6.3)
+const CATEGORY_NAME_MAX = 50;              // Độ dài tên danh mục tối đa (Req 6.3, 6.4)
+const VALID_GROUP_TABS = ['board', 'accounts', 'members']; // Ba tab con hợp lệ (Req 3.1)
+
+// Chuẩn hoá một giá trị số về số nguyên không âm; mặc định 0 khi không hợp lệ.
+function toNonNegativeInt(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) return 0;
+    return Math.floor(n);
+}
+
+// --- Property 1: Điều kiện render Group_Detail_View (Req 1.4, 1.5, 1.6) ------
+// Trả về true KHI VÀ CHỈ KHI: đang ở trang 'group-detail', đúng nhóm đang mở,
+// và nội dung thực sự thay đổi (contentChanged === true). Sự kiện chỉ đổi
+// Snapshot_Metadata (fromCache/hasPendingWrites) có contentChanged !== true.
+function shouldRenderGroupDetail(state, event) {
+    const s = state || {};
+    const e = event || {};
+    return s.currentPage === 'group-detail'
+        && e.groupId === s.currentGroupId
+        && e.contentChanged === true;
+}
+
+// --- Property 2: Chuẩn hoá Active_Subtab (Req 3.4, 3.6) ----------------------
+// Luôn trả về một tab nằm trong danh sách khả dụng. Nếu tab hợp lệ và khả dụng
+// thì giữ nguyên; ngược lại trả về 'board' (tab mặc định).
+function normalizeGroupTab(tab, availableTabs) {
+    // Lọc danh sách khả dụng về đúng tập tab hợp lệ; nếu rỗng thì dùng cả 3 tab.
+    const filtered = (Array.isArray(availableTabs) ? availableTabs : [])
+        .filter(item => VALID_GROUP_TABS.includes(item));
+    const available = filtered.length ? filtered : VALID_GROUP_TABS.slice();
+    const fallback = available.includes('board') ? 'board' : available[0];
+    if (typeof tab === 'string' && VALID_GROUP_TABS.includes(tab) && available.includes(tab)) {
+        return tab;
+    }
+    return fallback;
+}
+
+// --- Property 3: Danh sách lựa chọn của Category_Dropdown (Req 5.3) ----------
+// Trả về mọi Account_Category cộng lựa chọn "Chưa phân loại" (id = null), độ dài
+// = categories.length + 1, và đánh dấu active cho ĐÚNG MỘT lựa chọn khớp currentId
+// (coi null/'' và id lạ là "Chưa phân loại").
+function buildCategoryDropdownOptions(categories, currentId) {
+    const list = Array.isArray(categories) ? categories : [];
+    const current = normalizeGroupCategoryId(currentId);
+    let matched = false;
+    const options = list.map(cat => {
+        const id = normalizeGroupCategoryId(cat?.id);
+        const active = Boolean(current) && !matched && id === current;
+        if (active) matched = true;
+        return {
+            id: cat?.id != null ? cat.id : (id || null),
+            name: String(cat?.name || '').trim(),
+            active,
+        };
+    });
+    // "Chưa phân loại" active khi currentId rỗng hoặc không khớp danh mục nào.
+    options.push({ id: null, name: 'Chưa phân loại', active: !matched });
+    return options;
+}
+
+// --- Property 4: Chỉ gán lại danh mục khi thực sự đổi (Req 5.5) --------------
+// Trả về true KHI VÀ CHỈ KHI hai id khác nhau sau khi chuẩn hoá null/'' về cùng
+// dạng "Chưa phân loại".
+function isCategoryReassignNeeded(currentId, selectedId) {
+    return normalizeGroupCategoryId(currentId) !== normalizeGroupCategoryId(selectedId);
+}
+
+// --- Property 6: Validation tên Account_Category (Req 6.3, 6.4) --------------
+// Chấp nhận KHI VÀ CHỈ KHI độ dài sau trim nằm trong [CATEGORY_NAME_MIN,
+// CATEGORY_NAME_MAX] và không trùng tên (không phân biệt hoa/thường) với danh mục
+// KHÁC trong cùng nhóm. `existingNames` có thể là mảng chuỗi tên hoặc mảng đối
+// tượng { id, name }; khi là đối tượng và có `editingId` thì loại trừ chính danh
+// mục đang sửa theo id. Trả về { valid, reason?, name }.
+function validateCategoryName(name, existingNames, editingId) {
+    const trimmed = String(name == null ? '' : name).trim();
+    const length = trimmed.length;
+    if (length < CATEGORY_NAME_MIN) return { valid: false, reason: 'empty', name: trimmed };
+    if (length > CATEGORY_NAME_MAX) return { valid: false, reason: 'too_long', name: trimmed };
+
+    const editing = editingId == null ? '' : normalizeGroupCategoryId(editingId);
+    const key = trimmed.toLowerCase();
+    const others = (Array.isArray(existingNames) ? existingNames : []).filter(entry => {
+        // Loại chính danh mục đang sửa (chỉ áp dụng khi entry là đối tượng có id).
+        if (editing && entry && typeof entry === 'object') {
+            return normalizeGroupCategoryId(entry.id) !== editing;
+        }
+        return true;
+    });
+    const duplicated = others.some(entry => {
+        const otherName = entry && typeof entry === 'object' ? entry.name : entry;
+        return String(otherName == null ? '' : otherName).trim().toLowerCase() === key;
+    });
+    if (duplicated) return { valid: false, reason: 'duplicate', name: trimmed };
+    return { valid: true, name: trimmed };
+}
+
+// Gán lại trường `order` theo đúng vị trí trong mảng (0..n-1) trên bản sao nông,
+// để thứ tự lưu trữ khớp với thứ tự hiển thị sau khi di chuyển.
+function reindexCategoryOrder(categories) {
+    return (Array.isArray(categories) ? categories : []).map((cat, index) => ({ ...cat, order: index }));
+}
+
+// --- Property 7: Di chuyển thứ tự danh mục là hoán vị bảo toàn (Req 6.7, 6.8) -
+// Trả về một hoán vị của cùng tập danh mục, chỉ hoán đổi danh mục chỉ định với
+// danh mục liền kề theo hướng ('up'/'down'). Ở biên (đầu + up hoặc cuối + down)
+// giữ nguyên trật tự. Trường `order` được đánh lại theo vị trí mới.
+function moveCategoryOrder(categories, categoryId, direction) {
+    const list = Array.isArray(categories) ? categories.slice() : [];
+    const targetId = normalizeGroupCategoryId(categoryId);
+    const index = list.findIndex(cat => normalizeGroupCategoryId(cat?.id) === targetId);
+    const delta = direction === 'up' ? -1 : direction === 'down' ? 1 : 0;
+    if (index === -1 || delta === 0) return reindexCategoryOrder(list);
+    const swapIndex = index + delta;
+    if (swapIndex < 0 || swapIndex >= list.length) return reindexCategoryOrder(list);
+    [list[index], list[swapIndex]] = [list[swapIndex], list[index]];
+    return reindexCategoryOrder(list);
+}
+
+// --- Property 8: Xoá danh mục chuyển account về "Chưa phân loại" (Req 6.6) ---
+// Đặt groupCategoryId = null cho ĐÚNG các tài khoản thuộc danh mục bị xoá, giữ
+// nguyên groupCategoryId của các tài khoản khác. Trả về mảng bản sao mới.
+function reassignAccountsOnCategoryDelete(accounts, deletedId) {
+    const target = normalizeGroupCategoryId(deletedId);
+    return (Array.isArray(accounts) ? accounts : []).map(account => {
+        const accCat = normalizeGroupCategoryId(account?.groupCategoryId);
+        if (target && accCat === target) return { ...account, groupCategoryId: null };
+        return { ...account };
+    });
+}
+
+// --- Property 9: Board sections + "Chưa phân loại" ở cuối (Req 6.9, 6.10) ----
+// Sinh các section theo thứ tự danh mục (sắp theo `order`), luôn thêm section
+// "Chưa phân loại" ở cuối chứa các tài khoản không thuộc danh mục nào (kể cả
+// tài khoản trỏ tới id danh mục không tồn tại). Hợp các section = đúng tập tài
+// khoản đầu vào (không mất, không nhân bản).
+function buildGroupBoardSections(accounts, categories) {
+    const accountList = Array.isArray(accounts) ? accounts : [];
+    const categoryList = (Array.isArray(categories) ? categories.slice() : [])
+        .map((cat, index) => ({ cat, index }))
+        .sort((a, b) => {
+            const ao = Number(a.cat?.order);
+            const bo = Number(b.cat?.order);
+            const av = Number.isFinite(ao) ? ao : a.index;
+            const bv = Number.isFinite(bo) ? bo : b.index;
+            return av - bv || a.index - b.index;
+        })
+        .map(item => item.cat);
+
+    const byId = new Map();
+    const sections = categoryList.map(cat => {
+        const id = normalizeGroupCategoryId(cat?.id);
+        const section = { id: cat?.id != null ? cat.id : (id || null), name: String(cat?.name || '').trim(), accounts: [] };
+        if (id) byId.set(id, section);
+        return section;
+    });
+
+    const uncategorized = { id: null, name: 'Chưa phân loại', accounts: [] };
+    accountList.forEach(account => {
+        const catId = normalizeGroupCategoryId(account?.groupCategoryId);
+        const section = catId && byId.has(catId) ? byId.get(catId) : uncategorized;
+        section.accounts.push(account);
+    });
+
+    sections.push(uncategorized);
+    // Sắp xếp tài khoản trong từng section theo groupSortOrder để hiển thị.
+    sections.forEach(section => { section.accounts = sortSharedAccountsForGroup(section.accounts); });
+    return sections;
+}
+
+// --- Property 10: Trạng thái nút di chuyển account theo vị trí (Req 7.2-7.4) --
+// upDisabled === (index === 0); downDisabled === (index === total - 1). Khi
+// total === 1 cả hai nút đều bị vô hiệu hoá.
+function computeAccountMoveButtons(index, total) {
+    const i = Number(index);
+    const size = Number(total);
+    const safeIndex = Number.isFinite(i) ? i : 0;
+    const safeTotal = Number.isFinite(size) ? size : 0;
+    return {
+        upDisabled: safeIndex <= 0,
+        downDisabled: safeIndex >= safeTotal - 1,
+    };
+}
+
+// --- Property 11: Hoán đổi thứ tự account bảo toàn tập giá trị order (Req 7.5) -
+// Chỉ hoán đổi giá trị groupSortOrder giữa tài khoản chỉ định và tài khoản liền
+// kề theo hướng (xác định theo thứ tự hiển thị hiện tại). Tập giá trị
+// groupSortOrder sau thao tác bằng đúng tập trước thao tác. Trả về mảng bản sao
+// mới (giữ nguyên vị trí phần tử trong mảng gốc, chỉ đổi giá trị order).
+function swapAccountSortOrder(accounts, accountId, direction) {
+    const list = Array.isArray(accounts) ? accounts : [];
+    const ordered = sortSharedAccountsForGroup(list);
+    const pos = ordered.findIndex(acc => acc?.id === accountId);
+    const delta = direction === 'up' ? -1 : direction === 'down' ? 1 : 0;
+    if (pos === -1 || delta === 0) return list.map(acc => ({ ...acc }));
+    const swapPos = pos + delta;
+    if (swapPos < 0 || swapPos >= ordered.length) return list.map(acc => ({ ...acc }));
+    const a = ordered[pos];
+    const b = ordered[swapPos];
+    const aOrder = getSharedAccountSortValue(a, pos);
+    const bOrder = getSharedAccountSortValue(b, swapPos);
+    return list.map(acc => {
+        if (acc?.id === a?.id) return { ...acc, groupSortOrder: bOrder };
+        if (acc?.id === b?.id) return { ...acc, groupSortOrder: aOrder };
+        return { ...acc };
+    });
+}
+
+// --- Property 12: Validation email mời thành viên (Req 8.2-8.6) --------------
+// Chấp nhận KHI VÀ CHỈ KHI: email khác rỗng, độ dài <= MAX_INVITE_EMAIL_LENGTH,
+// đúng định dạng, chưa có trong memberEmails, chưa có trong pendingEmails, và
+// pendingEmails.length < maxPending. Trả về { valid, reason?, email? }.
+function validateInviteEmail(email, memberEmails, pendingEmails, maxPending) {
+    const normalized = normalizeGroupEmail(email);
+    const members = normalizeGroupEmailList(memberEmails);
+    const pending = normalizeGroupEmailList(pendingEmails);
+    const parsedLimit = Number(maxPending);
+    const limit = Number.isFinite(parsedLimit) ? parsedLimit : MAX_PENDING_INVITES;
+
+    if (!normalized) return { valid: false, reason: 'empty' };
+    if (normalized.length > MAX_INVITE_EMAIL_LENGTH) return { valid: false, reason: 'too_long' };
+    if (!isValidGroupEmail(normalized)) return { valid: false, reason: 'invalid_format' };
+    if (pending.length >= limit) return { valid: false, reason: 'limit_reached' };
+    if (members.includes(normalized)) return { valid: false, reason: 'already_member' };
+    if (pending.includes(normalized)) return { valid: false, reason: 'already_pending' };
+    return { valid: true, email: normalized };
+}
+
+// --- Property 13: Bật/tắt quyền Account_Manager là round-trip (Req 9.2, 9.3) -
+// Bật (enable=true): email có mặt ĐÚNG MỘT LẦN (không nhân đôi). Tắt (enable=false):
+// loại email khỏi danh sách. Từ danh sách không chứa email, bật rồi tắt khôi phục
+// đúng trạng thái ban đầu (không tính thứ tự). Trả về danh sách email đã chuẩn hoá.
+function toggleAccountManager(managerEmails, email, enable) {
+    const list = normalizeGroupEmailList(managerEmails);
+    const normalized = normalizeGroupEmail(email);
+    if (!normalized) return list;
+    const without = list.filter(item => item !== normalized);
+    return enable ? [...without, normalized] : without;
+}
+
+// --- Property 14: Nhãn vai trò xác định duy nhất (Req 9.4) -------------------
+// Ưu tiên: 'Chủ nhóm' nếu isOwner; ngược lại 'Quản lý TK' nếu isManager; ngược
+// lại 'Thành viên'.
+function computeRoleLabel(isOwner, isManager) {
+    if (isOwner) return 'Chủ nhóm';
+    if (isManager) return 'Quản lý TK';
+    return 'Thành viên';
+}
+
+// --- Property 15: Quyết định duyệt/từ chối Edit_Request idempotent (Req 10.4, 10.5, 10.8) -
+// Chỉ đổi trạng thái của request đang 'pending' thành quyết định ('approved'/
+// 'rejected') và loại nó khỏi danh sách chờ. Nếu request đã được xử lý trước đó
+// (approved/rejected) thì kết quả KHÔNG đổi (idempotence). Trả về
+// { requests, pending, changed, request }.
+function applyEditRequestDecision(requests, requestId, decision) {
+    const list = Array.isArray(requests) ? requests : [];
+    const normalizedDecision = (decision === 'approved' || decision === 'rejected') ? decision : null;
+    let changed = false;
+    let request = null;
+    const updated = list.map(req => {
+        if (req?.id === requestId && req?.status === 'pending' && normalizedDecision) {
+            changed = true;
+            request = { ...req, status: normalizedDecision };
+            return request;
+        }
+        return req;
+    });
+    const pending = updated.filter(req => req?.status === 'pending');
+    return { requests: updated, pending, changed, request };
+}
+
+// --- Property 16: Chỉ báo số Edit_Request trên thẻ account (Req 10.9, 10.10) --
+// Hiện chỉ báo với đúng số khi count >= 1; ẩn khi count === 0. Trả về
+// { visible, count } với count là số nguyên không âm.
+function computeEditRequestBadge(count) {
+    const safe = toNonNegativeInt(count);
+    return { visible: safe >= 1, count: safe };
+}
+
+// --- Property 17: Số đếm header luôn là số nguyên không âm (Req 11.1, 11.2) --
+// Trả về { memberCount, sharedAccountCount } đều là số nguyên >= 0, dùng 0 làm
+// mặc định khi không lấy được (thiếu hoặc dữ liệu bẩn).
+function computeGroupHeaderCounts(group) {
+    const g = group || {};
+    const memberCount = Array.isArray(g.memberEmails)
+        ? g.memberEmails.length
+        : toNonNegativeInt(g.memberCount);
+    let sharedRaw = g.sharedAccountCount;
+    if (sharedRaw == null && Array.isArray(g.sharedAccounts)) sharedRaw = g.sharedAccounts.length;
+    const sharedAccountCount = toNonNegativeInt(sharedRaw);
+    return { memberCount, sharedAccountCount };
+}

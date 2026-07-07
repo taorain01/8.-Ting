@@ -2815,7 +2815,7 @@
     white-space:nowrap;
 }
 .d-account-card.sync-pending {
-    border-color:rgba(108,92,231,0.34);
+    border-color:color-mix(in srgb, var(--accent) 34%, var(--border-light));
 }
 .sync-pending-badge {
     display:inline-flex;
@@ -2823,7 +2823,8 @@
     min-height:22px;
     padding:4px 8px;
     border-radius:999px;
-    background:rgba(108,92,231,0.1);
+    /* Huy hiệu (số chờ duyệt / chờ đồng bộ) bám accent theo theme, không giữ màu tím cũ */
+    background:color-mix(in srgb, var(--accent) 12%, transparent);
     color:var(--accent);
     font-size:11px;
     font-weight:900;
@@ -3048,6 +3049,44 @@
     grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));
     gap:12px;
 }
+.group-grid-3 {
+    grid-template-columns:repeat(3, 1fr);
+}
+.group-grid-card {
+    flex-direction:column;
+    align-items:stretch;
+    gap:14px;
+    padding:18px;
+    min-height:150px;
+}
+.group-grid-card .group-card-top {
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:10px;
+}
+.group-grid-card .group-card-main {
+    flex:0 0 auto;
+}
+.group-grid-card .group-card-title {
+    white-space:normal;
+    display:-webkit-box;
+    -webkit-line-clamp:2;
+    -webkit-box-orient:vertical;
+    overflow:hidden;
+}
+.group-grid-card .group-card-meta {
+    margin-top:4px;
+}
+.group-grid-card .group-card-platforms {
+    min-width:0;
+    margin-top:auto;
+    justify-content:flex-start;
+}
+.group-grid-card .group-platform-stack {
+    flex-wrap:wrap;
+    justify-content:flex-start;
+}
 .group-list {
     display:flex;
     flex-direction:column;
@@ -3239,6 +3278,61 @@
     gap:14px;
     margin-bottom:14px;
 }
+/* Cụm điều khiển bên phải đầu Bảng nhóm: gom Edit_Toggle_Button + nút "Thêm
+   danh mục" thành một khối, luôn dồn về phải và không co lại. */
+.group-board-head-actions {
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-shrink:0;
+}
+/* --- Edit_Toggle_Button (nút biểu tượng cây bút chì bật/tắt Edit_Mode) ---
+   Đặt trong .group-board-head cạnh nút "Thêm danh mục". Dùng biến theme để
+   khớp cả theme sáng/tối, kích thước gọn cho vừa header (Req 2.6). */
+.group-edit-toggle {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:34px;
+    height:34px;
+    flex:0 0 34px;
+    padding:0;
+    border:1.5px solid var(--border);
+    border-radius:var(--radius-full);
+    background:var(--bg-secondary);
+    color:var(--text-tertiary);
+    cursor:pointer;
+    transition:color var(--duration-fast), border-color var(--duration-fast), background var(--duration-fast), transform var(--duration-fast), box-shadow var(--duration-fast);
+}
+.group-edit-toggle svg {
+    width:16px;
+    height:16px;
+}
+.group-edit-toggle:hover {
+    color:var(--accent);
+    border-color:rgba(108,92,231,0.4);
+    background:var(--accent-bg);
+    transform:scale(1.08);
+}
+.group-edit-toggle:focus-visible {
+    outline:2px solid var(--accent);
+    outline-offset:2px;
+}
+/* Trạng thái Edit_Mode: nút được làm nổi bật (active) để phân biệt trực quan
+   với View_Mode. Khớp với class .is-active mà renderGroupEditToggle gắn khi
+   editMode bật (Req 2.6). */
+.group-edit-toggle.is-active {
+    color:#fff;
+    border-color:transparent;
+    background:var(--accent-gradient);
+    box-shadow:0 4px 12px rgba(108,92,231,0.25);
+}
+/* Lớp tiện ích ẩn cụm Edit_Control bằng CSS (phương án dự phòng cho các cụm
+   .group-category-actions / .group-board-account-actions khi cần ẩn ở View_Mode
+   thay vì bỏ hẳn HTML). */
+.edit-control-hidden {
+    display:none !important;
+}
 .group-category-list {
     display:flex;
     flex-direction:column;
@@ -3267,7 +3361,8 @@
     justify-content:center;
     border-radius:var(--radius-md);
     color:var(--category-color);
-    background:color-mix(in srgb, var(--category-color) 12%, white);
+    /* Trộn với nền thẻ theo theme (thay vì white cứng) để tint danh mục đúng cả theme sáng/tối */
+    background:color-mix(in srgb, var(--category-color) 12%, var(--bg-card));
     font-size:12px;
     font-weight:900;
 }
@@ -3352,7 +3447,9 @@
     font-size:12px;
     font-weight:700;
 }
-/* --- Custom category dropdown --- */
+/* --- Custom category dropdown (Category_Dropdown) ---
+   Nền/viền/chữ đều dùng biến theme (--bg-card, --border, --text-primary, --accent...)
+   nên khớp với phần còn lại của giao diện và đổi đúng khi chuyển theme (Req 5.10). */
 .cat-select {
     min-width:150px;
     max-width:200px;
@@ -3551,6 +3648,8 @@
     gap:8px;
     min-height:38px;
     padding:8px 10px;
+    /* Đồng bộ viền surface với thẻ/hàng ở tab Bảng danh mục và Tài khoản để 3 tab con nhất quán */
+    border:1px solid var(--border-light);
     border-radius:var(--radius-md);
     background:var(--bg-secondary);
 }
@@ -3660,7 +3759,8 @@
 }
 .group-member-row.pending {
     border:1px dashed var(--border);
-    background:rgba(108,92,231,0.06);
+    /* Tint theo accent hiện hành để đổi theme không giữ màu tím cũ */
+    background:color-mix(in srgb, var(--accent) 8%, transparent);
 }
 .group-member-email {
     overflow:hidden;
@@ -3694,7 +3794,8 @@
     justify-content:space-between;
     gap:10px;
     padding:10px;
-    border:1px solid rgba(108,92,231,0.18);
+    /* Viền theo accent hiện hành (không dùng màu tím cứng) để nhất quán khi đổi theme */
+    border:1px solid color-mix(in srgb, var(--accent) 22%, transparent);
     border-radius:var(--radius-md);
     background:var(--accent-bg);
 }
@@ -3877,7 +3978,15 @@
     border-color:color-mix(in srgb, var(--accent) 45%, var(--border-light));
 }
 @keyframes groupAccountHighlight {
-    0% { box-shadow:0 0 0 0 rgba(108,92,231,0.28), var(--shadow-3d); }
-    45% { box-shadow:0 0 0 6px rgba(108,92,231,0.12), var(--shadow-card-hover); }
+    0% { box-shadow:0 0 0 0 color-mix(in srgb, var(--accent) 28%, transparent), var(--shadow-3d); }
+    45% { box-shadow:0 0 0 6px color-mix(in srgb, var(--accent) 12%, transparent), var(--shadow-card-hover); }
     100% { box-shadow:var(--shadow-3d); }
+}
+
+/* Nhóm PC: lưới 3 cột co giãn theo bề rộng cửa sổ */
+@media (max-width: 1080px) {
+    .group-grid-3 { grid-template-columns:repeat(2, 1fr); }
+}
+@media (max-width: 680px) {
+    .group-grid-3 { grid-template-columns:1fr; }
 }

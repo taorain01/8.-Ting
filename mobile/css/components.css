@@ -3081,6 +3081,39 @@
     margin-bottom:12px;
     flex-wrap:wrap;
 }
+/* Cụm hành động đầu bảng nhóm: chứa nút bút chì (Edit_Toggle_Button) và nút "Thiết kế". */
+.group-board-head-actions {
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex:0 0 auto;
+}
+/* Nút bút chì bật/tắt Edit_Mode của Group_Tab (Req 2.6). */
+.group-edit-toggle {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:34px;
+    height:34px;
+    flex:0 0 auto;
+    padding:0;
+    border:1px solid var(--border-light);
+    border-radius:var(--radius-md);
+    background:var(--bg-card);
+    color:var(--text-secondary);
+    cursor:pointer;
+    transition:background .18s ease, color .18s ease, border-color .18s ease;
+}
+.group-edit-toggle:hover {
+    color:var(--primary);
+    border-color:var(--primary);
+}
+/* Trạng thái active làm nổi bật Edit_Mode so với View_Mode (Req 2.6). */
+.group-edit-toggle.is-active {
+    background:var(--primary);
+    border-color:var(--primary);
+    color:#fff;
+}
 .group-category-list {
     display:flex;
     flex-direction:column;

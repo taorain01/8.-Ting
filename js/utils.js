@@ -1173,6 +1173,72 @@ function formatPriceField(input) {
     input.value = digits ? Number(digits).toLocaleString('vi-VN') : '';
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Lớp logic thuần cho tính năng "group-tab-edit-mode":
+// quyết định trạng thái Edit_Mode/View_Mode và việc hiển thị các Edit_Control
+// trong Group_Tab. Tất cả là HÀM THUẦN: không chạm DOM, không mutate đầu vào,
+// chỉ nhận/trả về giá trị nguyên thủy hoặc object nhỏ mới — thuận lợi cho
+// property-based testing (giống pattern của khối expired-toggle ở trên).
+//
+// Trạng thái Edit_Mode được lưu dạng { groupId, active } trong window.appState.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Quyết định Group_Tab của groupId hiện tại có đang ở Edit_Mode hay không.
+ * Chỉ là Edit_Mode khi VÀ CHỈ KHI: người dùng có quyền thiết kế (canDesign),
+ * cờ active đang bật, VÀ trạng thái đang neo đúng groupId đang xem.
+ * Nhờ ràng buộc groupId, mở nhóm khác sẽ tự về View_Mode (an toàn kép).
+ */
+function resolveGroupEditMode(editState, groupId, canDesign) {
+    return Boolean(canDesign)
+        && Boolean(editState)
+        && editState.active === true
+        && editState.groupId === groupId;
+}
+
+/**
+ * Nút bút chì (Edit_Toggle_Button) chỉ hiển thị với người có Design_Permission
+ * (hiện tại tương ứng vai trò chủ nhóm: group.role === 'owner').
+ */
+function shouldShowEditToggleButton(group) {
+    return Boolean(group) && group.role === 'owner';
+}
+
+/**
+ * Edit_Control cấu trúc danh mục (mũi tên sắp xếp danh mục, sửa, xóa, thêm danh mục)
+ * hiển thị khi VÀ CHỈ KHI đang Edit_Mode VÀ người dùng có quyền thiết kế nhóm.
+ */
+function isCategoryEditControlVisible(editMode, canDesign) {
+    return Boolean(editMode) && Boolean(canDesign);
+}
+
+/**
+ * Edit_Control của một tài khoản (mũi tên sắp xếp tài khoản, dropdown đổi danh mục)
+ * hiển thị khi VÀ CHỈ KHI đang Edit_Mode VÀ người dùng được phép quản lý tài khoản đó.
+ */
+function isAccountEditControlVisible(editMode, canManage) {
+    return Boolean(editMode) && Boolean(canManage);
+}
+
+/**
+ * Bấm Edit_Toggle_Button: đảo cờ active và neo trạng thái vào groupId hiện tại.
+ * Nếu trạng thái đang thuộc nhóm khác (hoặc chưa active), coi như đang tắt rồi
+ * bật cho nhóm hiện tại. Trả về object mới, KHÔNG mutate editState đầu vào.
+ */
+function nextGroupEditState(editState, groupId) {
+    const sameGroupActive = Boolean(editState)
+        && editState.groupId === groupId
+        && editState.active === true;
+    return { groupId, active: !sameGroupActive };
+}
+
+/**
+ * Trạng thái View_Mode chuẩn (dùng khi reset lúc chuyển tab con hoặc đổi nhóm).
+ */
+function resetGroupEditState() {
+    return { groupId: null, active: false };
+}
+
 if (typeof window !== 'undefined') {
     window.getAddPlatformUsageStore = getAddPlatformUsageStore;
     window.recordAddPlatformSelection = recordAddPlatformSelection;

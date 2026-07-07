@@ -1905,16 +1905,18 @@ function renderGroupCard(group) {
     const count = accounts.length || window.appState.sharedAccountCounts?.[group.id] || group.sharedAccountCount || 0;
     const editCount = window.appState.sharedEditRequestCounts?.[group.id] ?? group.editRequestCount ?? 0;
     const unlocked = Boolean(isGroupUnlocked?.(group.id));
-    return `<button class="group-card group-list-card anim-fade-in-up" onclick="openGroupDetail('${escapeJsAttr(group.id)}')">
-        <div class="group-card-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+    return `<button class="group-card group-grid-card anim-fade-in-up" onclick="openGroupDetail('${escapeJsAttr(group.id)}')">
+        <div class="group-card-top">
+            <div class="group-card-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+            </div>
+            <span class="group-lock-badge ${unlocked ? 'unlocked' : ''}">${escapeHtml(getGroupLockLabel(group.id))}</span>
         </div>
         <div class="group-card-main">
             <div class="group-card-title">${escapeHtml(group.name || 'Nhóm')}</div>
             <div class="group-card-meta">${escapeHtml(getGroupRoleLabel(group))} · ${(group.memberEmails || []).length} thành viên · ${count} tài khoản${editCount ? ` · ${editCount} chờ duyệt` : ''}</div>
         </div>
         <div class="group-card-platforms">${renderGroupPlatformStack(group)}</div>
-        <span class="group-lock-badge ${unlocked ? 'unlocked' : ''}">${escapeHtml(getGroupLockLabel(group.id))}</span>
     </button>`;
 }
 
@@ -1968,18 +1970,19 @@ function renderGroupList() {
         </div>
         ${renderGroupInviteSection(filteredInvites)}
         ${filtered.length
-            ? `<div class="group-list">${filtered.map(renderGroupCard).join('')}</div>`
+            ? `<div class="group-grid group-grid-3">${filtered.map(renderGroupCard).join('')}</div>`
             : `<div class="d-empty-state anim-fade-in-up"><div class="d-empty-state-title">Chưa có nhóm</div><div class="d-empty-state-desc">Tạo nhóm để chia sẻ tài khoản dùng chung.</div></div>`}
     `;
 }
 
 function renderGroupTabs(group) {
     const active = window.appState.currentGroupTab || 'board';
+    // Tab bar rút còn đúng 3 tab con (Req 3.1); phần "Cài đặt nhóm" chuyển sang
+    // nút bánh răng ở header, không còn là tab con.
     const tabs = [
-        { id: 'board', label: group.name || 'Nhóm' },
+        { id: 'board', label: 'Bảng danh mục' },
         { id: 'accounts', label: 'Tài khoản' },
         { id: 'members', label: 'Thành viên' },
-        { id: 'settings', label: 'Cài đặt' },
     ];
     return `<div class="group-tabs" role="tablist">
         ${tabs.map(tab => `<button type="button" class="group-tab ${active === tab.id ? 'active' : ''}" onclick="setGroupDetailTab('${escapeJsAttr(tab.id)}')" title="${escapeHtml(tab.label)}">${escapeHtml(tab.label)}</button>`).join('')}
@@ -1998,14 +2001,27 @@ function renderEditIconSvg() {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4Z"/></svg>';
 }
 
-function renderGroupAccountCategorySelect(group, account) {
+function renderGroupAccountCategorySelect(group, account, editMode = true) {
+    // Ẩn hoàn toàn Category_Dropdown khi người dùng không có quyền quản lý tài khoản (Req 5.1, 5.2).
     const canManage = typeof canManageSharedAccountForUi === 'function' ? canManageSharedAccountForUi(group, account) : false;
-    if (!canManage) return '';
+    // Chỉ hiển thị dropdown đổi danh mục khi đang Edit_Mode VÀ có quyền quản lý (Req 3.6, 4.6).
+    // Mặc định editMode = true để giữ nguyên hành vi ở Account_Tab (caller không truyền editMode,
+    // nơi dropdown luôn hiển thị theo quyền quản lý, không thuộc phạm vi Edit_Mode của Group_Tab board).
+    if (!isAccountEditControlVisible(editMode, canManage)) return '';
     const categories = getGroupAccountCategories?.(group) || [];
-    const current = categories.find(category => category.id === account.groupCategoryId) || null;
-    const label = current ? current.name : 'Chưa phân loại';
-    const dotColor = current?.color || '#9CA3AF';
-    return `<div class="cat-select${current ? '' : ' is-uncategorized'}">
+    // Dựng danh sách lựa chọn bằng lớp logic thuần: gồm mọi Account_Category + "Chưa phân loại",
+    // đánh dấu active cho ĐÚNG MỘT mục theo danh mục hiện tại của tài khoản (Req 5.3).
+    const options = typeof buildCategoryDropdownOptions === 'function'
+        ? buildCategoryDropdownOptions(categories, account.groupCategoryId)
+        : [];
+    // Mục đang áp dụng để hiển thị trên nút mở dropdown (cat-select).
+    const activeOption = options.find(option => option.active) || null;
+    const isUncategorized = !activeOption || activeOption.id == null;
+    const label = activeOption && activeOption.name ? activeOption.name : 'Chưa phân loại';
+    // Màu chấm lấy từ dữ liệu danh mục gốc (buildCategoryDropdownOptions không kèm màu).
+    const currentCategory = !isUncategorized ? categories.find(item => item.id === activeOption.id) : null;
+    const dotColor = currentCategory?.color || '#9CA3AF';
+    return `<div class="cat-select${isUncategorized ? ' is-uncategorized' : ''}">
         <button type="button" class="cat-select-trigger" title="Đổi danh mục" onclick="event.stopPropagation();openCategoryDropdown(this,'${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}')">
             <span class="cat-select-dot" style="background:${escapeHtml(dotColor)}"></span>
             <span class="cat-select-label">${escapeHtml(label)}</span>
@@ -2014,9 +2030,14 @@ function renderGroupAccountCategorySelect(group, account) {
     </div>`;
 }
 
-function renderGroupBoardAccount(group, account, categoryId, index, total) {
+function renderGroupBoardAccount(group, account, categoryId, index, total, editMode) {
     const meta = renderSharedAccountMeta(account);
     const canManage = typeof canManageSharedAccountForUi === 'function' ? canManageSharedAccountForUi(group, account) : false;
+    // Trạng thái nút đưa lên/xuống theo vị trí trong danh mục (Req 7.2, 7.3, 7.4):
+    // ở đầu -> khoá "đưa lên"; ở cuối -> khoá "đưa xuống"; chỉ 1 tài khoản -> khoá cả hai.
+    const moveButtons = typeof computeAccountMoveButtons === 'function'
+        ? computeAccountMoveButtons(index, total)
+        : { upDisabled: index <= 0, downDisabled: index >= total - 1 };
     return `<div class="group-board-account">
         <button type="button" class="group-board-account-hit" onclick="openGroupAccountInAccountsTab('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}')" title="Xem tài khoản">
             <div class="account-logo" style="${meta.logoStyle}">${meta.logoMark}</div>
@@ -2026,16 +2047,16 @@ function renderGroupBoardAccount(group, account, categoryId, index, total) {
             </div>
             <span class="group-board-jump" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M9 18l6-6-6-6"/></svg></span>
         </button>
-        ${renderGroupAccountCategorySelect(group, account)}
-        ${canManage ? `<div class="group-board-account-actions">
-            <button type="button" class="copy-btn" onclick="handleMoveSharedAccount('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','up','${escapeJsAttr(categoryId || '')}')" title="Đưa lên" ${index <= 0 ? 'disabled' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18,15 12,9 6,15"/></svg></button>
-            <button type="button" class="copy-btn" onclick="handleMoveSharedAccount('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','down','${escapeJsAttr(categoryId || '')}')" title="Đưa xuống" ${index >= total - 1 ? 'disabled' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6,9 12,15 18,9"/></svg></button>
+        ${renderGroupAccountCategorySelect(group, account, editMode)}
+        ${isAccountEditControlVisible(editMode, canManage) ? `<div class="group-board-account-actions">
+            <button type="button" class="copy-btn" onclick="handleMoveSharedAccount('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','up','${escapeJsAttr(categoryId || '')}')" title="Đưa lên" ${moveButtons.upDisabled ? 'disabled' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18,15 12,9 6,15"/></svg></button>
+            <button type="button" class="copy-btn" onclick="handleMoveSharedAccount('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','down','${escapeJsAttr(categoryId || '')}')" title="Đưa xuống" ${moveButtons.downDisabled ? 'disabled' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6,9 12,15 18,9"/></svg></button>
             <button type="button" class="copy-btn" onclick="openSharedAccountGroupNoteModal('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}')" title="Ghi chú"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v12H7l-3 3z"/></svg></button>
         </div>` : ''}
     </div>`;
 }
 
-function renderGroupCategorySection(group, category, accounts, index, total, canDesign) {
+function renderGroupCategorySection(group, category, accounts, index, total, canDesign, editMode) {
     const isUncategorized = !category.id;
     const color = category.color || '#6C5CE7';
     return `<section class="group-category-section anim-fade-in-up">
@@ -2046,7 +2067,7 @@ function renderGroupCategorySection(group, category, accounts, index, total, can
                 ${category.note ? `<div class="group-category-note">${escapeHtml(category.note)}</div>` : ''}
             </div>
             <span class="section-badge">${accounts.length}</span>
-            ${canDesign && !isUncategorized ? `<div class="group-category-actions">
+            ${isCategoryEditControlVisible(editMode, canDesign) && !isUncategorized ? `<div class="group-category-actions">
                 <button type="button" class="copy-btn" onclick="handleMoveGroupCategory('${escapeJsAttr(group.id)}','${escapeJsAttr(category.id)}','up')" title="Đưa lên" ${index <= 0 ? 'disabled' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18,15 12,9 6,15"/></svg></button>
                 <button type="button" class="copy-btn" onclick="handleMoveGroupCategory('${escapeJsAttr(group.id)}','${escapeJsAttr(category.id)}','down')" title="Đưa xuống" ${index >= total - 1 ? 'disabled' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6,9 12,15 18,9"/></svg></button>
                 <button type="button" class="copy-btn" onclick="openGroupCategoryModal('${escapeJsAttr(group.id)}','${escapeJsAttr(category.id)}')" title="Sửa danh mục">${renderEditIconSvg()}</button>
@@ -2055,35 +2076,59 @@ function renderGroupCategorySection(group, category, accounts, index, total, can
         </div>
         <div class="group-board-account-list">
             ${accounts.length
-                ? accounts.map((account, accountIndex) => renderGroupBoardAccount(group, account, category.id, accountIndex, accounts.length)).join('')
+                ? accounts.map((account, accountIndex) => renderGroupBoardAccount(group, account, category.id, accountIndex, accounts.length, editMode)).join('')
                 : `<div class="group-board-empty">Trống</div>`}
         </div>
     </section>`;
+}
+
+function renderGroupEditToggle(group, editMode) {
+    // Nút bút chì chỉ render cho người có Design_Permission (Req 2.1, 2.2).
+    if (!shouldShowEditToggleButton(group)) return '';
+    // aria-pressed phản ánh mode; class 'is-active' làm nổi bật khi đang Edit_Mode (Req 2.6).
+    const active = Boolean(editMode);
+    return `<button type="button" class="group-edit-toggle${active ? ' is-active' : ''}" aria-pressed="${active}" onclick="toggleGroupEditMode('${escapeJsAttr(group.id)}')" title="Chỉnh sửa">${renderEditIconSvg()}</button>`;
 }
 
 function renderGroupBoard(group) {
     const accounts = getGroupSharedAccounts(group);
     const categories = getGroupAccountCategories?.(group) || [];
     const canDesign = group.role === 'owner';
-    const sections = categories.map(category => ({
-        ...category,
-        accounts: accounts.filter(account => account.groupCategoryId === category.id),
-    }));
-    const uncategorized = accounts.filter(account => !account.groupCategoryId || !categories.some(category => category.id === account.groupCategoryId));
-    // Chỉ hiện mục "Chưa phân loại" khi thực sự có tài khoản chưa xếp danh mục.
-    if (uncategorized.length) {
-        sections.push({ id: '', name: 'Chưa phân loại', note: '', icon: 'folder', color: '#6B7280', order: 9999, accounts: uncategorized });
-    }
+    // Xác định Edit_Mode hiện tại của bảng nhóm dựa trên trạng thái phiên + quyền thiết kế (Req 2.x).
+    const editMode = resolveGroupEditMode(window.appState.groupEditMode, group.id, canDesign);
+    // Dựng các section bằng lớp logic thuần: mục "Chưa phân loại" luôn nằm cuối,
+    // chứa các tài khoản không thuộc danh mục nào (Req 6.9, 6.10).
+    const sections = typeof buildGroupBoardSections === 'function'
+        ? buildGroupBoardSections(accounts, categories)
+        : [];
+    // Ánh xạ id danh mục -> dữ liệu gốc để lấy màu/icon/ghi chú khi hiển thị.
+    const categoryById = new Map(categories.map(category => [category.id, category]));
+    // Số danh mục thực (không tính "Chưa phân loại") để tính trạng thái nút di chuyển danh mục.
+    const categoryCount = categories.length;
+    // Trạng thái rỗng: không có danh mục lẫn tài khoản -> hiển thị tiêu đề mô tả
+    // ngay trong vùng nội dung của tab (Req 11.4).
+    const isEmpty = !categoryCount && !accounts.length;
+    const boardBody = isEmpty
+        ? `<div class="d-empty-state compact"><div class="d-empty-state-title">Chưa có danh mục hay tài khoản chia sẻ</div><div class="d-empty-state-desc">Thêm danh mục để sắp xếp các tài khoản chia sẻ của nhóm.</div></div>`
+        : sections.map((section, index) => {
+            const original = section.id != null ? categoryById.get(section.id) : null;
+            // Danh mục hiển thị: ưu tiên dữ liệu gốc; với "Chưa phân loại" dùng mặc định.
+            const category = original || { id: section.id || '', name: section.name || 'Chưa phân loại', note: '', icon: 'folder', color: '#6B7280', order: 9999 };
+            return renderGroupCategorySection(group, category, section.accounts, index, categoryCount, canDesign, editMode);
+        }).join('');
     return `<div class="group-board">
         <div class="group-board-head">
             <div>
                 <div class="section-title">${escapeHtml(group.name || 'Nhóm')}</div>
-                <div class="group-page-desc">${categories.length} danh mục · ${accounts.length} tài khoản</div>
+                <div class="group-page-desc">${categoryCount} danh mục · ${accounts.length} tài khoản</div>
             </div>
-            ${canDesign ? `<button class="btn btn-primary btn-sm" onclick="openGroupCategoryModal('${escapeJsAttr(group.id)}')">Thêm danh mục</button>` : ''}
+            <div class="group-board-head-actions">
+                ${renderGroupEditToggle(group, editMode)}
+                ${isCategoryEditControlVisible(editMode, canDesign) ? `<button class="btn btn-primary btn-sm" onclick="openGroupCategoryModal('${escapeJsAttr(group.id)}')">Thêm danh mục</button>` : ''}
+            </div>
         </div>
         <div class="group-category-list">
-            ${sections.map((section, index) => renderGroupCategorySection(group, section, section.accounts, index, categories.length, canDesign)).join('')}
+            ${boardBody}
         </div>
     </div>`;
 }
@@ -2111,10 +2156,19 @@ function renderSharedAccountCard(group, account) {
     const unlocked = Boolean(isGroupUnlocked?.(group.id));
     const key = `${group.id}:${account.id}`;
     const decrypted = window.appState.decryptedSharedAccounts?.[key];
+    // Trạng thái giải mã/lỗi tra theo TỪNG tài khoản (key riêng) nên lỗi của một
+    // tài khoản không ảnh hưởng tài khoản khác (Req 4.6).
+    const decryptFailed = Boolean(window.appState.decryptFailedSharedAccounts?.[key]);
     const categories = getGroupAccountCategories?.(group) || [];
     const category = categories.find(item => item.id === account.groupCategoryId);
+    // Badge số Edit_Request đang chờ: hiện khi >= 1, ẩn khi = 0 (Req 10.9, 10.10).
     const pendingCount = (getSharedEditRequestsForAccount?.(group.id, account.id) || []).filter(request => request.status === 'pending').length;
-    if (unlocked && !decrypted) {
+    const editBadge = typeof computeEditRequestBadge === 'function'
+        ? computeEditRequestBadge(pendingCount)
+        : { visible: pendingCount >= 1, count: pendingCount };
+    // Chỉ kích hoạt giải mã khi đã mở khoá, chưa có dữ liệu VÀ chưa bị đánh dấu lỗi
+    // (tránh lặp lại giải mã vô hạn khi tài khoản này giải mã thất bại/timeout) (Req 4.6).
+    if (unlocked && !decrypted && !decryptFailed) {
         window.appState.decryptingSharedAccounts = window.appState.decryptingSharedAccounts || {};
         if (!window.appState.decryptingSharedAccounts[key]) {
             window.appState.decryptingSharedAccounts[key] = true;
@@ -2126,11 +2180,26 @@ function renderSharedAccountCard(group, account) {
     const targetId = typeof getGroupAccountTargetId === 'function'
         ? getGroupAccountTargetId(group.id, account.id)
         : `group-account-${group.id}-${account.id}`;
+    // Phân nhánh nội dung nhạy cảm theo trạng thái riêng của tài khoản này:
+    // 1) chưa mở khoá -> ẩn dữ liệu + nút mở khoá (Req 4.1)
+    // 2) lỗi/timeout giải mã -> vẫn ẩn dữ liệu + chỉ báo lỗi riêng account (Req 4.6)
+    // 3) đã có dữ liệu -> hiện dữ liệu đã giải mã
+    // 4) còn lại (đang giải mã) -> chỉ báo "Đang giải mã" (Req 4.4)
+    let secretHtml;
+    if (!unlocked) {
+        secretHtml = `<div class="shared-locked-note"><span>Nội dung nhạy cảm đang ẩn</span><button class="btn btn-sm btn-outline" onclick="openUnlockGroupModal('${escapeJsAttr(group.id)}')">Nhập mật khẩu nhóm</button></div>`;
+    } else if (decryptFailed) {
+        secretHtml = `<div class="shared-locked-note shared-decrypt-error"><span>Không giải mã được tài khoản này</span></div>`;
+    } else if (decrypted) {
+        secretHtml = renderSharedSecretRows(group, account, decrypted);
+    } else {
+        secretHtml = '<div class="shared-locked-note">Đang giải mã...</div>';
+    }
     return `<div id="${escapeHtml(targetId)}" class="d-account-card group-account-card shared-account-card anim-fade-in-up" data-shared-account-id="${escapeHtml(account.id)}">
         <div class="d-account-card-top shared-account-top">
             <div class="account-logo" style="${meta.logoStyle}">${meta.logoMark}</div>
             <div class="shared-account-info">
-                <div class="account-name">${escapeHtml(account.name || account.serviceName || 'Tài khoản')}${pendingCount ? ` <span class="sync-pending-badge">${pendingCount} chờ duyệt</span>` : ''}</div>
+                <div class="account-name">${escapeHtml(account.name || account.serviceName || 'Tài khoản')}${editBadge.visible ? ` <span class="sync-pending-badge">${editBadge.count} chờ duyệt</span>` : ''}</div>
                 <div class="account-user">${escapeHtml(account.displayUsername || '')}</div>
                 <div class="shared-account-meta">${escapeHtml(meta.expiryText || '')}${category ? ` · ${escapeHtml(category.name)}` : ''}${account.sharedByEmail ? ` · ${escapeHtml(account.sharedByEmail)}` : ''}</div>
             </div>
@@ -2140,9 +2209,7 @@ function renderSharedAccountCard(group, account) {
         <div class="group-account-card-tools" onclick="event.stopPropagation()">
             ${renderGroupAccountCategorySelect(group, account)}
         </div>
-        ${unlocked
-            ? (decrypted ? renderSharedSecretRows(group, account, decrypted) : '<div class="shared-locked-note">Đang giải mã...</div>')
-            : `<div class="shared-locked-note"><span>Nội dung nhạy cảm đang ẩn</span><button class="btn btn-sm btn-outline" onclick="openUnlockGroupModal('${escapeJsAttr(group.id)}')">Nhập mật khẩu nhóm</button></div>`}
+        ${secretHtml}
     </div>`;
 }
 
@@ -2170,19 +2237,29 @@ function renderGroupMembers(group) {
     const ownerEmail = normalizeGroupEmail?.(group.ownerEmail) || group.ownerEmail || '';
     const managers = new Set(getGroupAccountManagerEmails?.(group) || []);
     const pending = group.pendingMemberEmails || [];
+    const memberEmails = group.memberEmails || [];
+    // Trạng thái rỗng: chưa có thành viên nào và không có lời mời đang chờ hiển thị
+    // -> hiện tiêu đề mô tả ngay trong vùng danh sách thành viên (Req 11.4).
+    const membersEmpty = !memberEmails.length && !(isOwner && pending.length);
     return `<div class="group-panel group-members-panel group-tab-panel anim-fade-in-up">
         <div class="group-panel-head">
             <div class="section-title">Thành viên</div>
-            <span class="section-badge">${(group.memberEmails || []).length}${pending.length ? `+${pending.length}` : ''}</span>
+            <span class="section-badge">${memberEmails.length}${pending.length ? `+${pending.length}` : ''}</span>
         </div>
         <div class="group-member-list">
-            ${(group.memberEmails || []).map(email => {
+            ${membersEmpty ? `<div class="d-empty-state compact"><div class="d-empty-state-title">Chưa có thành viên</div></div>` : ''}
+            ${memberEmails.map(email => {
                 const normalized = normalizeGroupEmail?.(email) || email;
                 const isGroupOwnerEmail = normalized === ownerEmail;
                 const isManager = managers.has(normalized);
+                // Nhãn vai trò qua lớp logic thuần (Req 9.4): owner -> 'Chủ nhóm',
+                // manager -> 'Quản lý TK', còn lại -> 'Thành viên'.
+                const roleLabel = typeof computeRoleLabel === 'function'
+                    ? computeRoleLabel(isGroupOwnerEmail, isManager)
+                    : (isGroupOwnerEmail ? 'Chủ nhóm' : isManager ? 'Quản lý TK' : 'Thành viên');
                 return `<div class="group-member-row">
                     <span class="group-member-email" title="${escapeHtml(email)}">${escapeHtml(email)}</span>
-                    <span class="group-member-role">${isGroupOwnerEmail ? 'Chủ nhóm' : isManager ? 'Quản lý TK' : 'Thành viên'}</span>
+                    <span class="group-member-role">${roleLabel}</span>
                     ${isOwner && !isGroupOwnerEmail ? `<label class="group-manager-toggle" title="Quyền quản lý tài khoản"><input type="checkbox" ${isManager ? 'checked' : ''} onchange="handleToggleGroupAccountManager('${escapeJsAttr(group.id)}','${escapeJsAttr(email)}',this.checked)"><span>Quản lý</span></label><button class="copy-btn" onclick="handleRemoveGroupMember('${escapeJsAttr(group.id)}','${escapeJsAttr(email)}')" title="Xoá thành viên"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>` : ''}
                 </div>`;
             }).join('')}
@@ -2260,6 +2337,97 @@ function renderGroupSettings(group) {
 // refreshes bail out when nothing visible changed, avoiding the 2-3 blink jitter.
 let _lastGroupDetailSignature = null;
 
+// Danh sách selector ứng viên cho vùng cuộn nội dung tab con của Group_Detail_View.
+// Hiện tại #page-content (.d-content) là vùng cuộn thực tế; sau khi cố định header + tab-bar
+// (phần CSS), vùng cuộn có thể là một phần tử con chuyên biệt. Ưu tiên phần tử con nếu có,
+// nếu không thì fallback về chính container để luôn bảo toàn được scrollTop.
+const GROUP_DETAIL_SCROLL_SELECTORS = ['.group-tab-body', '.group-detail-scroll', '.group-detail-body'];
+
+// Lấy phần tử cuộn dọc thực sự bên trong container chi tiết nhóm.
+function getGroupDetailScrollEl(container) {
+    if (!container) return null;
+    for (const sel of GROUP_DETAIL_SCROLL_SELECTORS) {
+        const el = container.querySelector?.(sel);
+        if (el) return el;
+    }
+    // Fallback: chính container là vùng cuộn (trường hợp hiện tại của #page-content).
+    return container;
+}
+
+// Escape giá trị thuộc tính để nhúng an toàn vào selector dạng [attr="..."].
+function cssAttrEscape(value) {
+    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+// Dựng một selector "ổn định" cho phần tử đang focus dựa trên các thuộc tính được
+// render lại giống hệt sau mỗi lần vẽ (id, name, các data-*). Trả về null nếu không đủ
+// thông tin để định vị lại một cách đáng tin cậy.
+function buildStableFocusSelector(el) {
+    if (!el || !el.tagName) return null;
+    const tag = el.tagName.toLowerCase();
+    // Các thuộc tính thường được render lại y hệt và đủ để xác định duy nhất phần tử.
+    const stableAttrs = ['id', 'name', 'data-account-id', 'data-category-id', 'data-field',
+        'data-role', 'data-member-email', 'data-request-id', 'placeholder'];
+    const parts = [];
+    for (const attr of stableAttrs) {
+        const val = el.getAttribute?.(attr);
+        if (val) parts.push(`[${attr}="${cssAttrEscape(val)}"]`);
+    }
+    if (!parts.length) return null;
+    return tag + parts.join('');
+}
+
+// Chụp trạng thái giao diện cần bảo toàn trước khi swap innerHTML ở chế độ quiet:
+// scrollTop của vùng cuộn tab con và phần tử đang focus (selector ổn định + vị trí con trỏ).
+function captureDetailUiState(container) {
+    if (!container) return null;
+    const scrollEl = getGroupDetailScrollEl(container);
+    const snapshot = {
+        scrollTop: scrollEl ? (scrollEl.scrollTop || 0) : 0,
+        focusSelector: null,
+        selStart: null,
+        selEnd: null,
+    };
+    const active = (typeof document !== 'undefined') ? document.activeElement : null;
+    // Chỉ bảo toàn focus nếu phần tử đang focus nằm trong container (không phải chính container).
+    if (active && active !== container && container.contains?.(active)) {
+        const selector = buildStableFocusSelector(active);
+        if (selector) {
+            snapshot.focusSelector = selector;
+            const tag = active.tagName.toLowerCase();
+            if (tag === 'input' || tag === 'textarea') {
+                // Một số loại input (email, number...) không hỗ trợ selectionStart/End.
+                try {
+                    snapshot.selStart = active.selectionStart;
+                    snapshot.selEnd = active.selectionEnd;
+                } catch (_) { /* bỏ qua: input type không hỗ trợ selection */ }
+            }
+        }
+    }
+    return snapshot;
+}
+
+// Khôi phục trạng thái đã chụp sau khi swap innerHTML: đặt lại scrollTop (sai số 0px) và
+// focus lại đúng phần tử cùng vị trí con trỏ, nếu phần tử vẫn còn tồn tại sau render.
+function restoreDetailUiState(container, snapshot) {
+    if (!container || !snapshot) return;
+    const scrollEl = getGroupDetailScrollEl(container);
+    if (scrollEl && typeof snapshot.scrollTop === 'number') {
+        scrollEl.scrollTop = snapshot.scrollTop; // khôi phục scroll offset chính xác 0px
+    }
+    if (snapshot.focusSelector) {
+        let el = null;
+        try { el = container.querySelector(snapshot.focusSelector); } catch (_) { el = null; }
+        if (el) {
+            // preventScroll để việc focus không tự cuộn làm lệch scrollTop vừa khôi phục.
+            try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) { /* noop */ } }
+            if (snapshot.selStart != null && snapshot.selEnd != null && typeof el.setSelectionRange === 'function') {
+                try { el.setSelectionRange(snapshot.selStart, snapshot.selEnd); } catch (_) { /* noop */ }
+            }
+        }
+    }
+}
+
 function renderGroupDetail(groupId, options = {}) {
     const group = getGroupById?.(groupId);
     if (!group) {
@@ -2269,6 +2437,20 @@ function renderGroupDetail(groupId, options = {}) {
     const isOwner = group.role === 'owner';
     const activeTab = window.appState.currentGroupTab || 'board';
     const accountCount = getGroupSharedAccounts(group).length;
+    // Nhãn vai trò của người dùng hiện tại: chủ nhóm / quản lý TK / thành viên (Req 11.1).
+    // Suy ra isManager từ danh sách accountManagerEmails và email người dùng hiện tại.
+    const managerEmails = new Set(getGroupAccountManagerEmails?.(group) || []);
+    const currentEmail = typeof normalizeGroupEmail === 'function'
+        ? normalizeGroupEmail(window.appState.user?.email)
+        : String(window.appState.user?.email || '').toLowerCase();
+    const isManager = managerEmails.has(currentEmail);
+    const roleLabel = typeof computeRoleLabel === 'function'
+        ? computeRoleLabel(isOwner, isManager)
+        : getGroupRoleLabel(group);
+    // Số thành viên + số tài khoản chia sẻ qua hàm thuần, mặc định 0 khi thiếu (Req 11.1, 11.2).
+    const headerCounts = typeof computeGroupHeaderCounts === 'function'
+        ? computeGroupHeaderCounts({ ...group, sharedAccountCount: accountCount })
+        : { memberCount: (group.memberEmails || []).length, sharedAccountCount: accountCount };
     document.getElementById('page-title').textContent = group.name || 'Chi tiết nhóm';
     const tabContent = activeTab === 'members'
         ? renderGroupMembers(group)
@@ -2289,10 +2471,11 @@ function renderGroupDetail(groupId, options = {}) {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
             </div>
             <div class="group-detail-main">
-                <div class="group-card-meta">${escapeHtml(getGroupRoleLabel(group))} · ${(group.memberEmails || []).length} thành viên · ${accountCount} tài khoản</div>
+                <div class="group-detail-title">${escapeHtml(group.name || 'Nhóm')}</div>
+                <div class="group-card-meta">${escapeHtml(roleLabel)} · ${headerCounts.memberCount} thành viên · ${headerCounts.sharedAccountCount} tài khoản</div>
             </div>
             <div class="group-detail-actions">
-                <button class="icon-btn group-detail-settings-btn" title="Cài đặt nhóm" onclick="setGroupDetailTab('settings')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" width="18" height="18"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
+                <button class="icon-btn group-detail-settings-btn" title="Cài đặt nhóm" onclick="openGroupSettings('${escapeJsAttr(groupId)}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" width="18" height="18"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
             </div>
         </div>
         ${renderGroupTabs(group)}
@@ -2310,9 +2493,14 @@ function renderGroupDetail(groupId, options = {}) {
     // The quiet marker lives on a wrapper inside the rendered HTML so it never leaks to other pages.
     const quietClass = options.quiet ? ' group-detail-quiet' : '';
     const headAnim = options.quiet ? '' : ' anim-fade-in-up';
+    // Chế độ quiet (refresh do dữ liệu): chụp scroll + focus + vị trí con trỏ TRƯỚC khi swap,
+    // gán trực tiếp innerHTML (không xoá trắng vùng nội dung), rồi khôi phục lại NGAY sau khi vẽ
+    // để giữ nguyên scroll offset (0px) và phần tử đang focus (Req 1.2, 2.1, 2.4, 2.5).
+    const uiSnapshot = options.quiet ? captureDetailUiState(pageContent) : null;
     pageContent.innerHTML = `
         <div class="group-detail-root${quietClass}">${bodyHtml.replace('@@HEAD@@', headAnim)}</div>
     `;
+    if (options.quiet) restoreDetailUiState(pageContent, uiSnapshot);
 }
 
 function getTrashDeletedDate(acc) {
@@ -3033,7 +3221,7 @@ function renderMinSupportedWarning(platform, status) {
 // hiệu hoá "Kiểm tra" theo Platform_Detector, định tuyến hành động theo nền tảng, và
 // khoá hành động khi đang tải (Requirements 1.1-1.6, 3.4/3.5/3.7, 4.4/4.6/4.8, 10.1-10.4).
 function renderUpdateSection() {
-    const version = escapeHtml(window.appState.appVersion || '1.4.3');
+    const version = escapeHtml(window.appState.appVersion || '1.5.0');
     const platform = getUpdatePlatform();
     const cap = getUpdateCapability(platform);
     const status = window.appState.updateStatus;
