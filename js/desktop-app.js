@@ -68,7 +68,7 @@ window.appState = {
         notifyOverdueDays: 3,
         shortcuts: { openApp: 'Control+Shift+T', quickAdd: 'Control+Shift+S' },
     },
-    appVersion: '1.5.0',
+    appVersion: '1.5.1',
     updateStatus: null,
     updateLog: [],
     visibleGroupNotes: {},
@@ -390,8 +390,8 @@ function initSmartNavigationInputs() {
 
 // ===== HEADER / SIDEBAR =====
 function formatSidebarVersion(version) {
-    const raw = String(version || '1.5.0').trim().replace(/^v/i, '');
-    return raw ? `v${raw}` : 'v1.5.0';
+    const raw = String(version || '1.5.1').trim().replace(/^v/i, '');
+    return raw ? `v${raw}` : 'v1.5.1';
 }
 
 function updateSidebarVersion() {
@@ -580,16 +580,20 @@ function toggleAccountGroupNotes(groupKey) {
 // mặc định TẮT (false) khi cờ chưa được đặt hoặc type không hợp lệ.
 function getShowExpiredState(type) {
     const flags = window.appState.showExpired;
-    if (!flags || (type !== 'bought' && type !== 'personal')) return false;
+    if (!flags || !['bought', 'personal', 'dashboard'].includes(type)) return false;
     return flags[type] === true;
 }
 
 // Đảo cờ Trạng_Thái_Hiện_Hết_Hạn của đúng màn hình `type`, rồi chỉ render lại
 // màn hình hiện tại (nếu đang ở đúng màn hình đó). Không tác động cờ của màn hình còn lại.
 function toggleShowExpired(type) {
-    if (type !== 'bought' && type !== 'personal') return;
+    if (!['bought', 'personal', 'dashboard'].includes(type)) return;
     window.appState.showExpired = window.appState.showExpired || { bought: false, personal: false };
     window.appState.showExpired[type] = !getShowExpiredState(type);
+    if (type === 'dashboard') {
+        renderDashboard();
+        return;
+    }
     // Chỉ render lại đúng màn hình hiện tại để không tác động các màn hình khác.
     if (window.appState.currentPage === type) renderAccountList(type);
 }

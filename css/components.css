@@ -1475,8 +1475,15 @@
     display:flex; align-items:center; justify-content:space-between; padding:12px 0;
 }
 .detail-row:not(:last-child) { border-bottom:1px solid var(--border-light); }
-.detail-label { font-size:13px; color:var(--text-secondary); }
-.detail-value { font-size:15px; font-weight:500; display:flex; align-items:center; gap:8px; }
+.detail-label { font-size:13px; color:var(--text-secondary); flex-shrink:0; }
+.detail-value {
+    min-width:0; max-width:100%; font-size:15px; font-weight:500;
+    display:flex; align-items:center; justify-content:flex-end; gap:8px;
+    overflow-wrap:anywhere; word-break:break-word; text-align:right;
+}
+.detail-value.secret-value { flex:1; }
+.detail-value .copy-btn,
+.detail-value .eye-toggle-btn { flex-shrink:0; }
 .detail-note-row { align-items:flex-start; gap:12px; }
 .detail-note-value { flex:1; min-width:0; }
 .smart-note {
@@ -1737,9 +1744,13 @@
     font-size:7px;
 }
 .seller-info-value {
+    flex:1;
     min-width:0;
+    justify-content:flex-start;
+    text-align:left;
 }
 .seller-source-name {
+    min-width:0;
     overflow:hidden;
     text-overflow:ellipsis;
     white-space:nowrap;
@@ -3680,6 +3691,26 @@
     border:1px solid var(--border-light);
     border-radius:var(--radius-md);
     background:var(--bg-secondary);
+}
+.shared-account-recently-updated {
+    animation: shared-account-update-glow 3s ease-out both;
+}
+.shared-update-badge {
+    display:inline-flex;
+    align-items:center;
+    margin-left:6px;
+    padding:2px 7px;
+    border-radius:999px;
+    background:rgba(46, 204, 113, .14);
+    color:#219653;
+    font-size:11px;
+    font-weight:700;
+    vertical-align:middle;
+}
+@keyframes shared-account-update-glow {
+    0% { border-color:rgba(46, 204, 113, .8); box-shadow:0 0 0 0 rgba(46, 204, 113, .3); background:rgba(46, 204, 113, .12); }
+    35% { box-shadow:0 0 0 6px rgba(46, 204, 113, .08); }
+    100% { border-color:var(--border-light); box-shadow:none; background:var(--bg-secondary); }
 }
 .shared-account-top {
     display:flex;

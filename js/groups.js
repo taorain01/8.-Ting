@@ -4,6 +4,8 @@
 let groupsUnsubscribe = null;
 const sharedAccountsUnsubscribes = new Map();
 const sharedEditRequestsUnsubscribes = new Map();
+const sharedAccountUpdateTimers = new Map();
+const SHARED_ACCOUNT_UPDATE_HIGHLIGHT_MS = 3000;
 
 const GROUP_SENSITIVE_FIELDS = new Set(['username', 'password', 'twoFaCode', 'note', 'rawInput']);
 const GROUP_SYSTEM_FIELDS = new Set([
@@ -99,7 +101,29 @@ function ensureGroupState() {
     if (!window.appState.sharedEditRequests || typeof window.appState.sharedEditRequests !== 'object') window.appState.sharedEditRequests = {};
     if (!window.appState.sharedEditRequestCounts || typeof window.appState.sharedEditRequestCounts !== 'object') window.appState.sharedEditRequestCounts = {};
     if (!window.appState.groupUnlocked || typeof window.appState.groupUnlocked !== 'object') window.appState.groupUnlocked = {};
+    if (!window.appState.recentlyUpdatedSharedAccounts || typeof window.appState.recentlyUpdatedSharedAccounts !== 'object') window.appState.recentlyUpdatedSharedAccounts = {};
     if (window.appState.currentGroupId === undefined) window.appState.currentGroupId = null;
+}
+
+function getSharedAccountUpdateKey(groupId, accountId) {
+    return `${groupId}:${accountId}`;
+}
+
+function isSharedAccountRecentlyUpdated(groupId, accountId) {
+    ensureGroupState();
+    return Number(window.appState.recentlyUpdatedSharedAccounts[getSharedAccountUpdateKey(groupId, accountId)] || 0) > Date.now();
+}
+
+function markSharedAccountRecentlyUpdated(groupId, accountId) {
+    ensureGroupState();
+    const key = getSharedAccountUpdateKey(groupId, accountId);
+    window.appState.recentlyUpdatedSharedAccounts[key] = Date.now() + SHARED_ACCOUNT_UPDATE_HIGHLIGHT_MS;
+    if (sharedAccountUpdateTimers.has(key)) clearTimeout(sharedAccountUpdateTimers.get(key));
+    sharedAccountUpdateTimers.set(key, setTimeout(() => {
+        delete window.appState.recentlyUpdatedSharedAccounts[key];
+        sharedAccountUpdateTimers.delete(key);
+        notifyGroupsChanged(groupId);
+    }, SHARED_ACCOUNT_UPDATE_HIGHLIGHT_MS));
 }
 
 function getCurrentGroupUser() {
@@ -813,9 +837,25 @@ function loadSharedAccountsRealtime(groupId) {
         .orderBy('createdAt', 'desc')
         .onSnapshot({ includeMetadataChanges: true }, (snapshot) => {
             ensureGroupState();
+            const previousAccounts = window.appState.sharedAccounts[groupId] || [];
+            const previousById = new Map(previousAccounts.map(account => [account.id, account]));
             const accounts = [];
             snapshot.forEach(doc => accounts.push(mapSharedAccountDoc(doc)));
             const sortedAccounts = sortSharedAccountsForGroup(accounts);
+            const currentUid = getCurrentGroupUser().uid;
+            if (_sharedAccountsContentSig.has(groupId) && !snapshot.metadata?.fromCache) {
+                sortedAccounts.forEach(account => {
+                    const previous = previousById.get(account.id);
+                    const previousVersion = Number(previous?.sourceVersion || 0);
+                    const nextVersion = Number(account.sourceVersion || 0);
+                    if (previous && nextVersion > previousVersion && account.updatedByUid && account.updatedByUid !== currentUid) {
+                        const accountKey = getSharedAccountUpdateKey(groupId, account.id);
+                        if (window.appState.decryptedSharedAccounts) delete window.appState.decryptedSharedAccounts[accountKey];
+                        if (window.appState.decryptFailedSharedAccounts) delete window.appState.decryptFailedSharedAccounts[accountKey];
+                        markSharedAccountRecentlyUpdated(groupId, account.id);
+                    }
+                });
+            }
             window.appState.sharedAccounts[groupId] = sortedAccounts;
             window.appState.sharedAccountCounts[groupId] = sortedAccounts.length;
             const group = getGroupById(groupId);
@@ -948,6 +988,9 @@ async function shareAccountToGroup(groupId, plainAccount, sharedPassword) {
         sharedByUid: user.uid,
         sharedByEmail: user.email,
         sourceAccountId: plainAccount?.id || null,
+        sourceVersion: 1,
+        sourceUpdatedAt: window.appState.isDemo ? new Date() : firebase.firestore.FieldValue.serverTimestamp(),
+        updatedByUid: user.uid,
         updatedAt: window.appState.isDemo ? new Date() : firebase.firestore.FieldValue.serverTimestamp(),
         createdAt: window.appState.isDemo ? new Date() : firebase.firestore.FieldValue.serverTimestamp(),
     });
@@ -964,10 +1007,70 @@ async function shareAccountToGroup(groupId, plainAccount, sharedPassword) {
     }
 
     const docRef = await db.collection('groups').doc(groupId).collection('sharedAccounts').add(payload);
+    const optimisticAccount = mapSharedAccountDoc({
+        id: docRef.id,
+        data: () => ({ ...payload, createdAt: new Date(), updatedAt: new Date(), sourceUpdatedAt: new Date() }),
+        metadata: { hasPendingWrites: true },
+    });
+    window.appState.sharedAccounts[groupId] = sortSharedAccountsForGroup([
+        optimisticAccount,
+        ...(window.appState.sharedAccounts[groupId] || []).filter(account => account.id !== docRef.id),
+    ]);
+    window.appState.sharedAccountCounts[groupId] = window.appState.sharedAccounts[groupId].length;
+    notifyGroupsChanged(groupId);
     await db.collection('groups').doc(groupId).update({
         updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     }).catch(() => {});
     return docRef.id;
+}
+
+async function prepareSharedSourceAccountSync(sourceAccountId, plainAccount) {
+    ensureGroupState();
+    const user = requireGroupUser();
+    const targets = [];
+    for (const group of window.appState.groups || []) {
+        for (const account of window.appState.sharedAccounts[group.id] || []) {
+            if (account.sourceAccountId === sourceAccountId && account.sharedByUid === user.uid) targets.push({ group, account });
+        }
+    }
+    if (!targets.length) return [];
+
+    const passwords = new Map();
+    for (const { group } of targets) {
+        if (passwords.has(group.id)) continue;
+        let password = getUnlockedGroupPassword(group.id);
+        if (!password && groupHasSharedPassword(group)) {
+            password = String(window.prompt?.(`Nhập mật khẩu chung để đồng bộ tài khoản vào nhóm “${group.name || ''}”:`) || '');
+            if (!password) throw new Error(`Chưa mở khoá nhóm ${group.name || ''}`);
+            if (!(await verifyGroupPassword(group, password))) throw new Error(`Mật khẩu nhóm ${group.name || ''} không đúng`);
+            setGroupUnlocked(group.id, password);
+        }
+        if (!password) throw new Error(`Không có khoá mã hoá cho nhóm ${group.name || ''}`);
+        passwords.set(group.id, password);
+    }
+
+    return Promise.all(targets.map(async ({ group, account }) => {
+        const writeData = await buildSharedAccountWriteData({ ...account, ...plainAccount, id: sourceAccountId }, passwords.get(group.id));
+        return {
+            groupId: group.id,
+            accountId: account.id,
+            ref: db.collection('groups').doc(group.id).collection('sharedAccounts').doc(account.id),
+            groupRef: db.collection('groups').doc(group.id),
+            update: cleanGroupFirestoreData({
+                ...writeData,
+                sourceAccountId,
+                sharedByUid: account.sharedByUid,
+                sharedByEmail: account.sharedByEmail,
+                groupCategoryId: account.groupCategoryId || null,
+                groupSortOrder: account.groupSortOrder,
+                groupNote: account.groupNote || '',
+                sourceVersion: Math.max(Number(account.sourceVersion || 0) + 1, Date.now()),
+                sourceUpdatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                updatedByUid: user.uid,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            }),
+        };
+    }));
 }
 
 async function updateSharedAccountInGroup(groupId, accountId, plainAccount, sharedPassword) {
@@ -1448,6 +1551,8 @@ window.sortSharedAccountsForGroup = sortSharedAccountsForGroup;
 window.getSharedEditRequestById = getSharedEditRequestById;
 window.getSharedEditRequestsForAccount = getSharedEditRequestsForAccount;
 window.hasSharedSourceAccount = hasSharedSourceAccount;
+window.prepareSharedSourceAccountSync = prepareSharedSourceAccountSync;
+window.isSharedAccountRecentlyUpdated = isSharedAccountRecentlyUpdated;
 
 /* =============================================================================
    Lớp logic thuần (pure functions) cho re-design tab Nhóm (group-tab-redesign).

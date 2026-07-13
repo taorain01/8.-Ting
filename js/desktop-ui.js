@@ -744,7 +744,7 @@ document.addEventListener('keydown', event => {
     if (event.key === 'Escape') closeQuickPlatformFilter();
 });
 
-function renderQuickFilterResultHead(platform, accounts) {
+function renderQuickFilterResultHead(platform, accounts, { showDetails = false, showExpired = false, detailKey = '' } = {}) {
     const label = getPlatformLabel(platform, accounts);
     const logoStyle = typeof getPlatformLogoStyle === 'function' ? getPlatformLogoStyle(platform, label) : '';
     const logoMark = typeof renderPlatformLogoMark === 'function'
@@ -757,7 +757,11 @@ function renderQuickFilterResultHead(platform, accounts) {
             <span class="quick-filter-result-icon" style="${logoStyle}">${logoMark}</span>
             <span>${escapeHtml(label)}<span class="quick-filter-result-meta">${accounts.length} tài khoản${mutedText}</span></span>
         </div>
-        <button type="button" class="btn btn-sm btn-outline" onclick="setGlobalPlatformFilter('')">Xoá lọc</button>
+        <div class="quick-filter-result-actions">
+            ${renderAccountDetailToggle(detailKey, showDetails)}
+            ${renderShowExpiredToggle('dashboard', showExpired)}
+            <button type="button" class="btn btn-sm btn-outline" onclick="setGlobalPlatformFilter('')">Xoá lọc</button>
+        </div>
     </div>`;
 }
 
@@ -809,11 +813,15 @@ function renderDashboard() {
     </div>`;
 
     if (platformFilter) {
-        const matches = sortAccountsByPriority(accs.filter(acc => isDashboardSuggestionAccount(acc) && accountMatchesPlatformQuickFilter(acc, platformFilter)));
-        h += renderQuickFilterResultHead(platformFilter, matches);
+        const allMatches = sortAccountsByPriority(accs.filter(acc => isDashboardSuggestionAccount(acc) && accountMatchesPlatformQuickFilter(acc, platformFilter)));
+        const showExpired = typeof getShowExpiredState === 'function' ? getShowExpiredState('dashboard') : false;
+        const matches = showExpired ? partitionActiveThenExpired(allMatches) : filterAccountsByExpiredToggle(allMatches, false);
+        const detailKey = `dashboard:${platformFilter}`;
+        const showDetails = Boolean(window.appState.visibleGroupNotes?.[detailKey]);
+        h += renderQuickFilterResultHead(platformFilter, matches, { showDetails, showExpired, detailKey });
         h += matches.length
-            ? `<div class="d-account-stack anim-stagger">${matches.map(acc => renderDesktopCard(acc, acc.type === 'personal')).join('')}</div>`
-            : `<div class="d-empty-state anim-fade-in-up"><div class="d-empty-state-icon">🔎</div><div class="d-empty-state-title">Không có tài khoản nào</div><div class="d-empty-state-desc">Thử chọn icon dịch vụ khác</div></div>`;
+            ? `<div class="d-account-stack anim-stagger">${matches.map(acc => renderDesktopCard(acc, acc.type === 'personal', false, showExpired && isExpiredAccount(acc), { showDetails })).join('')}</div>`
+            : `<div class="d-empty-state anim-fade-in-up"><div class="d-empty-state-icon">🔎</div><div class="d-empty-state-title">Không có tài khoản nào</div><div class="d-empty-state-desc">${allMatches.length ? 'Bật "Hiện tài khoản hết hạn" để xem tài khoản đã hết hạn' : 'Thử chọn icon dịch vụ khác'}</div></div>`;
         document.getElementById('page-content').innerHTML = h;
         return;
     }
@@ -2032,17 +2040,20 @@ function renderGroupAccountCategorySelect(group, account, editMode = true) {
 
 function renderGroupBoardAccount(group, account, categoryId, index, total, editMode) {
     const meta = renderSharedAccountMeta(account);
+    const recentlyUpdated = typeof isSharedAccountRecentlyUpdated === 'function'
+        ? isSharedAccountRecentlyUpdated(group.id, account.id)
+        : false;
     const canManage = typeof canManageSharedAccountForUi === 'function' ? canManageSharedAccountForUi(group, account) : false;
     // Trạng thái nút đưa lên/xuống theo vị trí trong danh mục (Req 7.2, 7.3, 7.4):
     // ở đầu -> khoá "đưa lên"; ở cuối -> khoá "đưa xuống"; chỉ 1 tài khoản -> khoá cả hai.
     const moveButtons = typeof computeAccountMoveButtons === 'function'
         ? computeAccountMoveButtons(index, total)
         : { upDisabled: index <= 0, downDisabled: index >= total - 1 };
-    return `<div class="group-board-account">
+    return `<div class="group-board-account${recentlyUpdated ? ' shared-account-recently-updated' : ''}">
         <button type="button" class="group-board-account-hit" onclick="openGroupAccountInAccountsTab('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}')" title="Xem tài khoản">
             <div class="account-logo" style="${meta.logoStyle}">${meta.logoMark}</div>
             <div class="group-board-account-main">
-                <div class="account-name">${escapeHtml(account.name || account.serviceName || 'Tài khoản')}</div>
+                <div class="account-name">${escapeHtml(account.name || account.serviceName || 'Tài khoản')}${recentlyUpdated ? ' <span class="shared-update-badge">Vừa cập nhật</span>' : ''}</div>
                 <div class="shared-account-meta">${escapeHtml(account.displayUsername || '')}${account.groupNote ? ` · ${escapeHtml(account.groupNote)}` : ''}</div>
             </div>
             <span class="group-board-jump" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M9 18l6-6-6-6"/></svg></span>
@@ -2153,6 +2164,9 @@ function renderSharedSecretRows(group, account, decrypted) {
 
 function renderSharedAccountCard(group, account) {
     const meta = renderSharedAccountMeta(account);
+    const recentlyUpdated = typeof isSharedAccountRecentlyUpdated === 'function'
+        ? isSharedAccountRecentlyUpdated(group.id, account.id)
+        : false;
     const unlocked = Boolean(isGroupUnlocked?.(group.id));
     const key = `${group.id}:${account.id}`;
     const decrypted = window.appState.decryptedSharedAccounts?.[key];
@@ -2195,11 +2209,11 @@ function renderSharedAccountCard(group, account) {
     } else {
         secretHtml = '<div class="shared-locked-note">Đang giải mã...</div>';
     }
-    return `<div id="${escapeHtml(targetId)}" class="d-account-card group-account-card shared-account-card anim-fade-in-up" data-shared-account-id="${escapeHtml(account.id)}">
+    return `<div id="${escapeHtml(targetId)}" class="d-account-card group-account-card shared-account-card anim-fade-in-up${recentlyUpdated ? ' shared-account-recently-updated' : ''}" data-shared-account-id="${escapeHtml(account.id)}">
         <div class="d-account-card-top shared-account-top">
             <div class="account-logo" style="${meta.logoStyle}">${meta.logoMark}</div>
             <div class="shared-account-info">
-                <div class="account-name">${escapeHtml(account.name || account.serviceName || 'Tài khoản')}${editBadge.visible ? ` <span class="sync-pending-badge">${editBadge.count} chờ duyệt</span>` : ''}</div>
+                <div class="account-name">${escapeHtml(account.name || account.serviceName || 'Tài khoản')}${recentlyUpdated ? ' <span class="shared-update-badge">Vừa cập nhật</span>' : ''}${editBadge.visible ? ` <span class="sync-pending-badge">${editBadge.count} chờ duyệt</span>` : ''}</div>
                 <div class="account-user">${escapeHtml(account.displayUsername || '')}</div>
                 <div class="shared-account-meta">${escapeHtml(meta.expiryText || '')}${category ? ` · ${escapeHtml(category.name)}` : ''}${account.sharedByEmail ? ` · ${escapeHtml(account.sharedByEmail)}` : ''}</div>
             </div>
@@ -2621,10 +2635,32 @@ function renderTrashCard(acc) {
     </div>`;
 }
 
-function getAccountGroupReadableNote(acc) {
+function getAccountCachedField(acc, field) {
     const active = window.appState?.activeDecryptedAccount;
     const cached = active?.id === acc?.id ? active.data : null;
-    return String(cached?.note || acc?.note || '').trim();
+    return cached && cached[field] !== undefined ? cached[field] : acc?.[field];
+}
+
+function getAccountGroupReadableNote(acc) {
+    return String(getAccountCachedField(acc, 'note') || '').trim();
+}
+
+function accountHasCompactDetails(acc) {
+    return Boolean(
+        getAccountGroupReadableNote(acc)
+        || String(acc?.sellerName || '').trim()
+        || String(acc?.sellerLink || '').trim()
+        || acc?.purchasePrice
+        || acc?.purchaseDate
+        || acc?.expiryDate
+    );
+}
+
+function renderAccountDetailToggle(detailKey, checked) {
+    return `<label class="account-group-note-toggle account-detail-toggle" onclick="event.stopPropagation()" title="Hi?n th?ng tin chi ti?t">
+        <input type="checkbox" onchange="toggleAccountGroupNotes('${escapeJsAttr(detailKey)}')" ${checked ? 'checked' : ''}>
+        <span>Th?ng tin chi ti?t</span>
+    </label>`;
 }
 
 function getAccountGroupNoteRows(accounts = []) {
@@ -2728,7 +2764,37 @@ function renderGroupDateChips(accounts) {
 }
 
 // ===== DESKTOP CARD =====
-function renderDesktopCard(acc, isPersonal=false, isChild=false, dimmed=false) {
+function renderAccountCardDetails(acc, daysText = '') {
+    const rows = [];
+    const note = getAccountGroupReadableNote(acc);
+    const sellerName = String(acc?.sellerName || '').trim();
+    const sellerLink = String(acc?.sellerLink || '').trim();
+    const priceValue = acc?.purchasePrice;
+
+    const pushText = (icon, label, value) => {
+        const text = String(value || '').trim();
+        if (!text) return;
+        rows.push(`<div class="account-card-detail-row"><span class="account-card-detail-label"><span>${icon}</span>${escapeHtml(label)}</span><span class="account-card-detail-value">${escapeHtml(text)}</span></div>`);
+    };
+
+    if (note) {
+        rows.push(`<div class="account-card-detail-row account-card-detail-note"><span class="account-card-detail-label"><span>i</span>Ghi chú</span><div class="account-card-detail-value">${renderSmartNote(note)}</div></div>`);
+    }
+    pushText('S', 'Shop', sellerName);
+    if (sellerLink) {
+        rows.push(`<div class="account-card-detail-row"><span class="account-card-detail-label"><span>L</span>Link shop</span><span class="account-card-detail-value"><a href="#" onclick="event.preventDefault();event.stopPropagation();openExternalLink('${escapeJsAttr(sellerLink)}')" title="${escapeHtml(sellerLink)}">${escapeHtml(sellerLink)}</a></span></div>`);
+    }
+    if (priceValue && typeof formatPriceVN === 'function') pushText('₫', 'Giá', formatPriceVN(priceValue));
+    else pushText('₫', 'Giá', priceValue);
+    if (acc?.purchaseDate) pushText('M', 'Ngày mua', formatDateVN(acc.purchaseDate));
+    if (acc?.expiryDate && acc?.expiryType !== 'lifetime') pushText('H', 'Hết hạn', formatDateVN(acc.expiryDate));
+    pushText('T', 'Thời hạn', daysText);
+
+    if (!rows.length) return '';
+    return `<div class="account-card-details" onclick="event.stopPropagation()">${rows.join('')}</div>`;
+}
+
+function renderDesktopCard(acc, isPersonal=false, isChild=false, dimmed=false, options = {}) {
     const secretCard = accountNeedsMasterForDisplay(acc);
     const canCopy = canShowSecretActions(acc);
     const revealedUsername = getRevealedSecret?.(acc.id, 'username');
@@ -2737,6 +2803,7 @@ function renderDesktopCard(acc, isPersonal=false, isChild=false, dimmed=false) {
     const passwordText = revealedPassword || getAccountPasswordForDisplay(acc);
     const days = daysUntil(acc.expiryDate);
     const daysText = acc.expiryType==='lifetime' ? '♾️ Vĩnh viễn' : days<0 ? `Hết ${Math.abs(days)} ngày` : days===0 ? 'Hết hạn hôm nay' : `Còn ${days} ngày`;
+    const compactDetails = options.showDetails ? renderAccountCardDetails(acc, daysText) : '';
     const platformRef = getResolvedPlatform(acc) || acc.platform || acc;
     const emoji = getPlatformEmoji(platformRef);
     const logoStyle = typeof getPlatformLogoStyle === 'function' ? getPlatformLogoStyle(platformRef, acc.name) : `background:${stringToColor(acc.name)}15;color:${stringToColor(acc.name)}`;
@@ -2765,6 +2832,7 @@ function renderDesktopCard(acc, isPersonal=false, isChild=false, dimmed=false) {
             <span class="account-badge ${getStatusBadgeClass(acc.status)}">${getStatusText(acc.status)}</span>
         </div>
         ${renderLinkedAccountWarning(acc)}
+        ${compactDetails}
         <div class="d-account-card-bottom">
             <span class="account-days">${daysText}</span>
             <div class="account-actions" onclick="event.stopPropagation()">
@@ -3221,7 +3289,7 @@ function renderMinSupportedWarning(platform, status) {
 // hiệu hoá "Kiểm tra" theo Platform_Detector, định tuyến hành động theo nền tảng, và
 // khoá hành động khi đang tải (Requirements 1.1-1.6, 3.4/3.5/3.7, 4.4/4.6/4.8, 10.1-10.4).
 function renderUpdateSection() {
-    const version = escapeHtml(window.appState.appVersion || '1.5.0');
+    const version = escapeHtml(window.appState.appVersion || '1.5.1');
     const platform = getUpdatePlatform();
     const cap = getUpdateCapability(platform);
     const status = window.appState.updateStatus;

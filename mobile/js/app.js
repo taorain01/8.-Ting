@@ -32,7 +32,7 @@ window.appState = {
     isOnline: typeof navigator === 'undefined' ? true : navigator.onLine !== false,
     firestoreFromCache: false,
     pendingSyncCount: 0,
-    appVersion: '1.5.0',
+    appVersion: '1.5.1',
     updateStatus: null,
     updateLog: [],
     expandedGroups: {},

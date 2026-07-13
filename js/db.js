@@ -141,10 +141,36 @@ async function updateAccountInDB(accountId, updateData) {
 
     try {
         const safeData = stripSensitiveAccountFields(updateData);
-        await db.collection('users').doc(userId).collection('accounts').doc(accountId).update({
-            ...safeData,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-        });
+        const currentAccount = window.appState?.accounts?.find(account => account.id === accountId) || {};
+        let sensitiveData = {};
+        if (updateData?.encryptedData && window.appState?.masterPassword && typeof decryptAccountData === 'function') {
+            sensitiveData = await decryptAccountData(updateData, window.appState.masterPassword);
+        } else if (window.appState?.activeDecryptedAccount?.id === accountId) {
+            sensitiveData = window.appState.activeDecryptedAccount.data || {};
+        } else if (currentAccount?.encryptedData && window.appState?.masterPassword && typeof decryptAccountData === 'function') {
+            sensitiveData = await decryptAccountData(currentAccount, window.appState.masterPassword);
+        } else {
+            sensitiveData = {
+                username: updateData?.username ?? currentAccount.username ?? '',
+                password: updateData?.password ?? currentAccount.password ?? '',
+                twoFaCode: updateData?.twoFaCode ?? currentAccount.twoFaCode ?? '',
+                note: updateData?.note ?? currentAccount.note ?? '',
+            };
+        }
+        const plainAccount = { ...currentAccount, ...updateData, ...sensitiveData, id: accountId };
+        const sharedWrites = typeof prepareSharedSourceAccountSync === 'function'
+            ? await prepareSharedSourceAccountSync(accountId, plainAccount)
+            : [];
+        const timestamp = firebase.firestore.FieldValue.serverTimestamp();
+        const accountRef = db.collection('users').doc(userId).collection('accounts').doc(accountId);
+        if (sharedWrites.length) {
+            const batch = db.batch();
+            batch.update(accountRef, { ...safeData, updatedAt: timestamp });
+            sharedWrites.forEach(item => batch.update(item.ref, item.update));
+            await batch.commit();
+        } else {
+            await accountRef.update({ ...safeData, updatedAt: timestamp });
+        }
         console.log('✅ Đã cập nhật TK:', accountId);
         return true;
     } catch (error) {
