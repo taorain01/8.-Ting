@@ -32,7 +32,7 @@ window.appState = {
     isOnline: typeof navigator === 'undefined' ? true : navigator.onLine !== false,
     firestoreFromCache: false,
     pendingSyncCount: 0,
-    appVersion: '1.5.1',
+    appVersion: '1.6.0',
     updateStatus: null,
     updateLog: [],
     expandedGroups: {},
@@ -750,6 +750,12 @@ function initEditFormState(acc, decrypted = {}) {
     window.appState.addFormAuthMethod = typeof getAuthMethod === 'function' ? getAuthMethod(acc.authMethod || 'email') : (acc.authMethod || 'email');
     window.appState.addFormLinkedId = acc.linkedAccountId || null;
     window.appState.planEditMode = false;
+    // Wizard: Sửa mở ở Tab 1 nhưng đã đủ dữ liệu → cho nhảy tự do mọi tab (maxReached=3).
+    // KHÔNG auto-chuyển tab khi Sửa (R7.3/D3): bật sẵn cả 2 cờ guard.
+    window.appState.addFormTab = 1;
+    window.appState.addFormMaxTabReached = 3;
+    window.appState.addFormAutoAdvancedToStep3 = true;
+    window.appState.addFormAutoNavDisabled = true;
     return { ...acc, ...decrypted, id: acc.id };
 }
 
@@ -775,6 +781,8 @@ function finishEditFormInit(acc) {
     updateAddExpiryHint?.('edit');
     updateAddAuthMethodUI?.();
     previewParse?.();
+    // Wizard (D3): form Sửa mở tại Tab 1, sau khi panel/tag đã render xong.
+    goAddTab?.(1);
 }
 
 async function editAccount(accId) {
@@ -789,7 +797,7 @@ async function editAccount(accId) {
 
 function collectEditedAccountInput(acc) {
     const raw = document.getElementById('paste-input')?.value || '';
-    const parsed = parseAccountInput(raw) || {};
+    const parsed = (typeof parseSmartPasteBlock === 'function' ? parseSmartPasteBlock(raw).credential : parseAccountInput(raw)) || {};
     const authMethod = typeof getAuthMethod === 'function'
         ? getAuthMethod(window.appState.addFormAuthMethod || acc.authMethod || 'email')
         : (window.appState.addFormAuthMethod || acc.authMethod || 'email');
@@ -855,6 +863,7 @@ async function saveEditedAccount(accId) {
             Object.assign(acc, payload);
             window.appState.activeDecryptedAccount = { id: accId, data: { ...sensitiveData } };
             updateHeader();
+            if (typeof recordAddQuickFormHistory === 'function') recordAddQuickFormHistory();
             closeModal();
             window.appState.editingAccount = null;
             showToast(`Đã lưu "${name}"`, 'success');
@@ -862,6 +871,7 @@ async function saveEditedAccount(accId) {
             return;
         }
         if (await updateAccountInDB(accId, payload)) {
+            if (typeof recordAddQuickFormHistory === 'function') recordAddQuickFormHistory();
             closeModal();
             window.appState.editingAccount = null;
             showToast(`Đã lưu "${name}"`, 'success');
@@ -1861,11 +1871,20 @@ async function createInlineCategoryFromAddForm() {
     showToast('Đã tạo danh mục', 'success');
 }
 
-function toggleInlineCategoryCreate() {
+function closeInlineCategoryCreate() {
+    const box = document.getElementById('inline-category-create-box');
+    if (box) box.hidden = true;
+}
+
+function toggleInlineCategoryCreate(event) {
+    event?.stopPropagation?.();
     const box = document.getElementById('inline-category-create-box');
     if (!box) return;
     box.hidden = !box.hidden;
-    if (!box.hidden) document.getElementById('inline-category-name')?.focus();
+    if (!box.hidden) {
+        document.getElementById('inline-category-name')?.focus();
+        setTimeout(() => document.addEventListener('click', closeInlineCategoryCreate, { once: true }), 0);
+    }
 }
 
 function getRevealKey(id, field) {
@@ -3252,12 +3271,17 @@ function openAddModal() {
     window.appState.addFormDetectedServices = { platforms: [], tags: [] };
     window.appState.addFormAuthMethod = 'email';
     window.appState.addFormLinkedId = null;
+    // Wizard 3 tab: khởi tạo state điều hướng cho phiên thêm mới
+    window.appState.addFormTab = 1;
+    window.appState.addFormMaxTabReached = 1;
+    window.appState.addFormAutoAdvancedToStep3 = false;
+    window.appState.addFormAutoNavDisabled = false;
     resetAddFormGuideState?.();
     openModal(type === 'personal' ? 'Thêm TK cá nhân' : 'Thêm TK mua', renderAddForm(type));
     initAddTagPicker();
     updateAddExpiryHint();
     updateAddAuthMethodUI();
-    window.setTimeout(() => guideAddFormTo?.('platform-section', { focus: false, block: 'start' }), 30);
+    goAddTab?.(1);
 }
 
 const PASTE_PLATFORM_ALIASES = {
@@ -3497,10 +3521,12 @@ function syncDetectedServicesFromPaste(rawText) {
 
 function previewParse() {
     const raw = document.getElementById('paste-input')?.value || '';
-    const r = parseAccountInput(raw);
+    const smart = typeof parseSmartPasteBlock === 'function' ? parseSmartPasteBlock(raw) : null;
+    const r = smart?.credential || parseAccountInput(raw);
     const el = document.getElementById('parse-preview');
     syncDetectedServicesFromPaste(raw);
     syncSellerFromPaste(raw);
+    if (smart && typeof applySmartPasteMetadata === 'function') applySmartPasteMetadata(smart);
     if (!el) return;
     if (!r || (!r.username && !r.password)) { el.innerHTML = ''; return; }
     el.innerHTML = `<div class="parse-preview"><div class="parse-preview-item"><span class="parse-preview-label">Tài khoản</span><span class="parse-preview-value">${r.username || '—'}</span></div><div class="parse-preview-item"><span class="parse-preview-label">Mật khẩu</span><span class="parse-preview-value">${r.password || '—'}</span></div>${r.twoFaCode ? `<div class="parse-preview-item"><span class="parse-preview-label">2FA</span><span class="parse-preview-value">${r.twoFaCode}</span></div>` : ''}</div>`;
@@ -3765,6 +3791,8 @@ function toggleAddTag(tag) {
         setAddTags([...tags, tag]);
     }
     updateAddTagSuggestions();
+    // R6.1b: chọn xong gói cước → thử auto sang Tab 3 (guard tôn trọng R6.2/R6.4)
+    if (typeof maybeAutoAdvanceToStep3 === 'function') maybeAutoAdvanceToStep3();
 }
 
 function removeAddTag(tag) {
@@ -3787,6 +3815,8 @@ function addCustomTagFromInput() {
     if (!isAddTagSelected(tag)) setAddTags([...getAddTags(), tag]);
     if (input) input.value = '';
     updateAddTagSuggestions();
+    // R6.1b: thêm gói cước tùy chỉnh → thử auto sang Tab 3 (guard tôn trọng R6.2/R6.4)
+    if (typeof maybeAutoAdvanceToStep3 === 'function') maybeAutoAdvanceToStep3();
 }
 
 // === CHỈNH SỬA GÓI CƯỚC (CATALOG) ===
@@ -3852,40 +3882,12 @@ function updatePlatformPlanHeader(platform) {
     if (title) title.textContent = platform ? `Gói cước ${label}` : 'Gói cước';
 }
 
+// WIZARD: lưới nền tảng sống ở Tab 1, panel gói cước sống ở Tab 2. Việc ẩn/hiện
+// do .add-wizard-panel[hidden] lo, KHÔNG còn toggle grid.hidden/panel.hidden ở đây.
+// Chỉ cập nhật tiêu đề gói cước theo nền tảng đang chọn.
 function updatePlatformSectionState(animate = false) {
     const platform = window.appState.addFormPlatform || '';
-    const grid = document.getElementById('platform-section-grid');
-    const panel = document.getElementById('platform-plan-panel-inline');
     updatePlatformPlanHeader(platform);
-    if (!grid || !panel) return;
-
-    if (platform) {
-        panel.hidden = false;
-        if (animate) {
-            grid.classList.add('slide-out-left');
-            requestAnimationFrame(() => panel.classList.add('slide-in-right'));
-            window.setTimeout(() => {
-                if (window.appState.addFormPlatform) grid.hidden = true;
-            }, 260);
-        } else {
-            grid.hidden = true;
-            grid.classList.add('slide-out-left');
-            panel.classList.add('slide-in-right');
-        }
-        return;
-    }
-
-    grid.hidden = false;
-    grid.classList.remove('slide-out-left');
-    if (animate) {
-        panel.classList.remove('slide-in-right');
-        window.setTimeout(() => {
-            if (!window.appState.addFormPlatform) panel.hidden = true;
-        }, 260);
-    } else {
-        panel.hidden = true;
-        panel.classList.remove('slide-in-right');
-    }
 }
 
 function updatePlatformPickerState(animate = false) {
@@ -4412,7 +4414,7 @@ function inferTagsFromName(name, platform) {
 
 function buildAccountSaveInput(input = {}) {
     const raw = String(input.rawInput || input.raw || '');
-    const parsed = input.parsed || parseAccountInput(raw) || {};
+    const parsed = input.parsed || (typeof parseSmartPasteBlock === 'function' ? parseSmartPasteBlock(raw).credential : parseAccountInput(raw)) || {};
     const smartName = parseSmartName(input.name || '');
     const name = String(smartName.name || input.name || '').trim();
     const type = input.type === 'personal' ? 'personal' : 'bought';
@@ -4544,7 +4546,7 @@ async function saveNewAccount(type) {
         return;
     }
     const raw = document.getElementById('paste-input').value;
-    const parsed = parseAccountInput(raw) || {};
+    const parsed = (typeof parseSmartPasteBlock === 'function' ? parseSmartPasteBlock(raw).credential : parseAccountInput(raw)) || {};
     const authMethod = typeof getAuthMethod === 'function'
         ? getAuthMethod(window.appState.addFormAuthMethod || 'email')
         : (window.appState.addFormAuthMethod || 'email');
@@ -4560,11 +4562,21 @@ async function saveNewAccount(type) {
     const rawName = document.getElementById('add-name').value.trim();
     const smartName = parseSmartName(rawName);
     const name = smartName.name || rawName;
-    if (!name) { showToast('Nhập tên dịch vụ', 'error'); return; }
+    if (!name) {
+        goAddTab?.(2, { manual: true });
+        guideAddFormTo?.('add-name', { focus: true });
+        showToast('Nhập tên dịch vụ', 'error');
+        return;
+    }
     const isL = document.getElementById('add-lifetime').checked;
     const pDate = document.getElementById('add-purchase').value || todayStr();
     const eDate = isL ? null : document.getElementById('add-expiry').value;
-    if (!isL && !eDate) { showToast('Chọn ngày hết hạn hoặc bật Vĩnh viễn', 'error'); return; }
+    if (!isL && !eDate) {
+        goAddTab?.(2, { manual: true });
+        guideAddFormTo?.('add-smart-date', { focus: true });
+        showToast('Chọn ngày hết hạn hoặc bật Vĩnh viễn', 'error');
+        return;
+    }
     const note = autoTagNoteLinks(document.getElementById('add-note').value.trim());
     const sellerName = document.getElementById('add-seller-name')?.value.trim() || '';
     const sellerPlatform = document.getElementById('add-seller-platform')?.value || 'other';
@@ -4618,6 +4630,7 @@ async function saveNewAccount(type) {
         window.appState.accounts.unshift(data);
         if (typeof markAccountAsJustAdded === 'function') markAccountAsJustAdded(data.id);
         updateHeader();
+        if (typeof recordAddQuickFormHistory === 'function') recordAddQuickFormHistory();
         closeModal();
         showToast(`Đã thêm "${name}"`, 'success');
         navigateTo(window.appState.currentPage);
@@ -4631,7 +4644,7 @@ async function saveNewAccount(type) {
                 payload = { ...baseData, ...encryptedPayload };
             }
             const id = await addAccountToDB(payload);
-            if (id) { if (typeof markAccountAsJustAdded === 'function') markAccountAsJustAdded(id); closeModal(); showToast(`Đã thêm "${name}"`, 'success'); }
+            if (id) { if (typeof markAccountAsJustAdded === 'function') markAccountAsJustAdded(id); if (typeof recordAddQuickFormHistory === 'function') recordAddQuickFormHistory(); closeModal(); showToast(`Đã thêm "${name}"`, 'success'); }
         } catch (error) {
             console.error('❌ Lỗi mã hoá/lưu tài khoản:', error);
             showToast(error.message || 'Không thể mã hoá tài khoản', 'error');

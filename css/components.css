@@ -1606,6 +1606,96 @@
 .platform-plan-panel-inline[hidden] {
     display:none;
 }
+/* WIZARD: lưới & panel gói cước sống ở 2 tab khác nhau, luôn hiển thị trong tab
+   của mình — vô hiệu hóa animation slide (translateX/opacity) của bản một-trang. */
+.platform-section--grid-only .platform-section-grid,
+.platform-plan-panel-inline--wizard {
+    transform:none !important;
+    opacity:1 !important;
+    pointer-events:auto !important;
+    transition:none;
+}
+.platform-section--grid-only { margin:0; }
+.platform-plan-panel-inline--wizard { margin-top:4px; }
+
+/* ===== WIZARD 3 TAB (Thêm/Sửa TK) ===== */
+/* Stepper dính đỉnh modal-body để luôn thấy, không phải cuộn lên tìm. */
+.add-wizard-steps {
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:6px;
+    margin:0 -24px 16px;
+    padding:10px 24px;
+    flex-wrap:nowrap;
+    position:sticky;
+    top:0;
+    z-index:5;
+    background:var(--bg-card);
+    border-bottom:1px solid var(--border-light);
+}
+.add-wizard-step {
+    display:inline-flex;
+    align-items:center;
+    gap:7px;
+    padding:6px 14px;
+    border:1.5px solid var(--border);
+    border-radius:999px;
+    background:var(--bg-secondary);
+    color:var(--text-secondary);
+    font-size:13px;
+    font-weight:600;
+    cursor:pointer;
+    transition:all 160ms var(--ease-out);
+    white-space:nowrap;
+}
+.add-wizard-step:hover:not(.disabled) { border-color:var(--accent); color:var(--accent); }
+.add-wizard-step .add-wizard-step-num {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:20px;
+    height:20px;
+    border-radius:50%;
+    background:var(--border-light);
+    color:var(--text-secondary);
+    font-size:12px;
+    font-weight:700;
+    flex:0 0 auto;
+}
+.add-wizard-step.active {
+    border-color:var(--accent);
+    background:var(--accent);
+    color:var(--text-inverse);
+    box-shadow:0 2px 8px rgba(108,92,231,.25);
+}
+.add-wizard-step.active .add-wizard-step-num { background:rgba(255,255,255,.28); color:var(--text-inverse); }
+.add-wizard-step.done { border-color:var(--accent-light); color:var(--accent); background:var(--accent-bg); }
+.add-wizard-step.done .add-wizard-step-num { background:var(--accent); color:var(--text-inverse); }
+.add-wizard-step.disabled { opacity:.5; cursor:not-allowed; }
+.add-wizard-step-sep { color:var(--text-tertiary); font-size:14px; user-select:none; }
+
+.add-wizard-panel[hidden] { display:none; }
+.add-wizard-panel { animation:add-wizard-fade 200ms var(--ease-out); }
+@keyframes add-wizard-fade {
+    from { opacity:0; transform:translateY(4px); }
+    to { opacity:1; transform:translateY(0); }
+}
+/* Thanh điều hướng dính đáy modal để nút Tiếp/Lưu luôn thấy, khỏi cuộn. */
+.add-wizard-nav {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    margin:20px -24px 0;
+    padding:14px 24px 4px;
+    position:sticky;
+    bottom:0;
+    z-index:4;
+    background:linear-gradient(0deg, var(--bg-card) 78%, rgba(255,255,255,0));
+}
+.add-wizard-nav .btn { margin-top:0 !important; }
+.add-wizard-category { margin-top:4px; }
 .platform-picker-anchor { position:relative; width:42px; height:42px; }
 .platform-picker-toggle {
     width:42px;
@@ -2034,10 +2124,31 @@
 }
 .inline-category-create-box {
     display:grid;
-    grid-template-columns:1fr auto;
+    grid-template-columns:1fr auto auto;
     gap:8px;
     margin-top:8px;
 }
+.add-form-block { margin-top:18px; padding-top:4px; }
+.add-form-block + .add-form-block { border-top:1px solid var(--border-light); }
+.add-form-service-block { margin-top:14px; }
+.add-form-date-block, .add-form-category-block { padding-top:14px; }
+.quick-paste-wrap { position:relative; }
+.quick-paste-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
+.quick-paste-action { display:inline-flex; align-items:center; gap:5px; min-height:28px; padding:5px 9px; border:1px solid var(--border-light); border-radius:var(--radius-full); background:var(--bg-secondary); color:var(--text-secondary); font-size:11px; font-weight:800; cursor:pointer; }
+.quick-paste-action:hover, .quick-paste-action.primary { color:var(--accent); border-color:rgba(108,92,231,.3); background:var(--accent-bg); }
+.quick-form-anchor { position:relative; }
+.quick-form-popover { position:absolute; top:36px; left:0; z-index:30; width:min(360px, calc(100vw - 64px)); max-height:360px; overflow:auto; padding:10px; border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--bg-card); box-shadow:var(--shadow-lg); }
+.quick-form-popover[hidden] { display:none; }
+.quick-form-popover-section + .quick-form-popover-section { margin-top:12px; padding-top:10px; border-top:1px solid var(--border-light); }
+.quick-form-popover-title { margin:0 2px 7px; color:var(--text-tertiary); font-size:11px; font-weight:900; text-transform:uppercase; }
+.quick-form-template-card, .quick-form-history-item { width:100%; display:flex; flex-direction:column; align-items:flex-start; gap:3px; padding:9px 10px; border:1px solid var(--border-light); border-radius:var(--radius-md); background:var(--bg-secondary); color:var(--text-secondary); text-align:left; cursor:pointer; }
+.quick-form-template-card:hover, .quick-form-history-item:hover { border-color:rgba(108,92,231,.35); background:var(--accent-bg); }
+.quick-form-template-card code { color:var(--accent); font-size:11px; }
+.quick-form-template-card span, .quick-form-history-item span { color:var(--text-tertiary); font-size:11px; }
+.quick-form-history-list { display:grid; gap:6px; }
+.quick-form-history-item strong { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-primary); font-size:12px; }
+.quick-form-history-empty { padding:8px 2px; color:var(--text-tertiary); font-size:12px; }
+.quick-paste-wrap .textarea-paste { margin-top:0; }
 .add-advanced-title {
     margin-top:20px;
 }

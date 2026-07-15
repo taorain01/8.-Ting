@@ -473,7 +473,7 @@ function renderSettings() {
         </div>
     </div>
 
-    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.5.1')}</p>`;
+    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.6.0')}</p>`;
 }
 
 // ===== MOBILE DESKTOP-PARITY RENDERERS =====
@@ -2317,7 +2317,7 @@ function renderUpdateSection() {
     const version = escapeHtml(
         window.appState.appVersion
         || window.TingMobileUpdater?.INSTALLED_VERSION_NAME
-        || '1.5.1'
+        || '1.6.0'
     );
     const platform = getMobileUpdatePlatform();
     const cap = getMobileUpdateCapability(platform);
@@ -2445,7 +2445,7 @@ function renderSettings() {
             <div class="settings-item" onclick="signOut()"><div class="settings-item-icon" style="background:var(--danger-bg)">🚪</div><div class="settings-item-content"><div class="settings-item-title" style="color:var(--danger)">Đăng xuất</div></div></div>
         </div>
     </div></div>
-    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.5.1')}</p>`;
+    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.6.0')}</p>`;
     switchSettingsTab(window._settingsActiveTab || 'update');
 }
 
@@ -2590,7 +2590,7 @@ function renderPlatformPickerIcon(platform, label) {
 }
 
 function renderPlatformPickerButton(platform) {
-    return `<button type="button" class="platform-picker-item" data-platform="${escapeJsAttr(platform.id)}" onclick="selectPlatformFromPicker('${escapeJsAttr(platform.id)}','${escapeJsAttr(platform.name)}')">
+    return `<button type="button" class="platform-picker-item" data-platform="${escapeJsAttr(platform.id)}" onclick="selectPlatformThenAdvance('${escapeJsAttr(platform.id)}','${escapeJsAttr(platform.name)}')">
         ${renderPlatformPickerIcon(platform.id, platform.name)}
         <span>${escapeHtml(platform.name)}</span>
     </button>`;
@@ -2702,25 +2702,23 @@ function renderPlatformPlanHeader(platformId) {
     </div>`;
 }
 
-function renderPlatformSection(platforms) {
-    const activePlatform = window.appState?.addFormPlatform || '';
-    const gridHidden = activePlatform ? 'hidden' : '';
-    const panelHidden = activePlatform ? '' : 'hidden';
-    return `<div id="platform-section" class="platform-section">
-        <div id="platform-section-grid" class="platform-section-grid ${activePlatform ? 'slide-out-left' : ''}" ${gridHidden}>
+// Lưới nền tảng — dùng ở Tab 1 của wizard. Giữ id #platform-section-grid.
+function renderPlatformGrid(platforms) {
+    return `<div id="platform-section" class="platform-section platform-section--grid-only">
+        <div id="platform-section-grid" class="platform-section-grid">
             <div class="platform-picker-section-title">Chọn nền tảng & gói cước</div>
             <div class="platform-picker-grid">
                 ${platforms.map(renderPlatformPickerButton).join('')}
             </div>
         </div>
-        <div id="platform-plan-panel-inline" class="platform-plan-panel-inline ${activePlatform ? 'slide-in-right' : ''}" ${panelHidden}>
-            <div class="platform-plan-header">
-                <button type="button" class="platform-plan-back" onclick="backToPlatformGrid()" aria-label="Quay lại chọn nền tảng">
-                    <span aria-hidden="true">←</span>
-                    <span>Quay lại</span>
-                </button>
-                ${renderPlatformPlanHeader(activePlatform)}
-            </div>
+    </div>`;
+}
+
+// Panel gói cước — dùng ở Tab 2 của wizard. Giữ id #platform-plan-panel-inline.
+function renderPlatformPlanPanel() {
+    const activePlatform = window.appState?.addFormPlatform || '';
+    return `<div id="platform-plan-panel-inline" class="platform-plan-panel-inline platform-plan-panel-inline--wizard">
+        <div class="platform-plan-header">
             <div class="platform-plan-title-row">
                 <div class="platform-picker-section-title" id="platform-plan-title">Gói cước</div>
                 <button type="button" class="plan-edit-toggle-btn" id="plan-edit-toggle-btn" onclick="togglePlanEditMode()" aria-label="Chỉnh sửa gói cước" title="Chỉnh sửa gói cước">
@@ -2730,13 +2728,19 @@ function renderPlatformSection(platforms) {
                     </svg>
                 </button>
             </div>
-            <div id="tag-suggestions" class="platform-plan-grid"></div>
-            <div class="tag-custom-row platform-tag-custom-row">
-                <input type="text" id="add-tag-input" class="input" placeholder="Tùy chỉnh gói cước..." onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomTagFromInput()}">
-                <button type="button" class="platform-tag-add-btn" onclick="addCustomTagFromInput()" aria-label="Thêm tag">+</button>
-            </div>
+            ${renderPlatformPlanHeader(activePlatform)}
+        </div>
+        <div id="tag-suggestions" class="platform-plan-grid"></div>
+        <div class="tag-custom-row platform-tag-custom-row">
+            <input type="text" id="add-tag-input" class="input" placeholder="Tùy chỉnh gói cước..." onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomTagFromInput()}">
+            <button type="button" class="platform-tag-add-btn" onclick="addCustomTagFromInput()" aria-label="Thêm tag">+</button>
         </div>
     </div>`;
+}
+
+// Bản cũ (một trang cuộn) — giữ để tương thích. Wizard KHÔNG dùng.
+function renderPlatformSection(platforms) {
+    return `${renderPlatformGrid(platforms)}${renderPlatformPlanPanel()}`;
 }
 
 function renderCollapsibleSection(id, icon, title, contentHtml) {
@@ -2826,96 +2830,132 @@ function renderAddForm(type, editData = null) {
     const categoryContent = `
         ${renderCategoryPicker(selectedCategoryIds)}
         <div class="inline-category-create">
-            <button type="button" class="inline-create-toggle" onclick="toggleInlineCategoryCreate()">+ Tạo mới</button>
-            <div id="inline-category-create-box" class="inline-category-create-box" hidden>
+            <button type="button" class="inline-create-toggle" onclick="toggleInlineCategoryCreate(event)">+ Tạo mới</button>
+            <div id="inline-category-create-box" class="inline-category-create-box" hidden onclick="event.stopPropagation()">
                 <input type="text" id="inline-category-name" class="input" placeholder="Tên danh mục" onkeydown="if(event.key==='Enter'){event.preventDefault();createInlineCategoryFromAddForm()}">
                 <button type="button" class="quick-chip primary" onclick="createInlineCategoryFromAddForm()">Tạo</button>
+                <button type="button" class="quick-chip" onclick="closeInlineCategoryCreate()">Hủy</button>
             </div>
         </div>`;
-    const history = typeof renderAddFormHistorySuggestions === 'function'
-        ? renderAddFormHistorySuggestions(editData?.id || '')
-        : { note: '', seller: '', price: '', bundle: '' };
     return `
-    ${renderPlatformSection(platforms)}
+    <div class="add-wizard" id="add-wizard">
+    ${renderAddWizardSteps()}
 
-    <div id="add-credential-block" class="add-credential-block" ${authMethod === 'email' ? '' : 'hidden'}>
-        <div class="form-section-title">Dán thông tin tài khoản</div>
-        <textarea class="textarea-paste" id="paste-input" placeholder="user@email.com|password123|2FA_CODE" oninput="previewParse()" onpaste="handleQuickPasteGuidance()" onblur="handleQuickPasteGuidance()">${escapeHtml(rawValue)}</textarea>
-        <div id="parse-preview"></div>
-        <div id="service-detect-suggestions"></div>
-    </div>
-
-    <div class="form-section-title">Tên dịch vụ ${renderHintButton('Tên sẽ được tự điền khi ô paste nhận diện được nền tảng.')}</div>
-    <div class="service-name-picker">
-        <div class="input-group service-name-input-group">
-            <input type="text" id="add-name" class="input" placeholder=" " style="padding-left:16px" value="${escapeHtml(editData?.name || '')}" oninput="autoDetectPlatform();this.dataset.autoFilled='false'">
-            <label for="add-name" class="input-label" style="left:16px">VD: ChatGPT, Canva...</label>
+    <!-- TAB 1: Nền tảng -->
+    <div class="add-wizard-panel" data-tab="1" id="add-tab-1">
+        ${renderPlatformGrid(platforms)}
+        <div class="add-wizard-nav">
+            <span></span>
+            <button type="button" class="btn btn-outline" onclick="skipPlatformStep()">Bỏ qua ›</button>
         </div>
-        <div id="platform-detect" class="service-tag-inline"></div>
-        <div id="selected-tags" class="selected-tags service-selected-tags" hidden></div>
     </div>
 
-    ${renderAuthMethodInlineSelector(authMethod)}
-    <div id="add-auth-linked-wrap" class="add-auth-linked-wrap" ${authMethod === 'email' ? 'hidden' : ''}>
-        <div id="linked-account-picker-wrap">${renderLinkedAccountPicker(authMethod)}</div>
-        <div class="auth-method-note"><span>ⓘ</span><span>Dịch vụ SSO dùng mật khẩu từ TK gốc. Ting! sẽ lưu link tới TK gốc thay vì lưu mật khẩu riêng.</span></div>
-    </div>
-
-    <div class="form-section-title">Thời hạn ${renderHintButton('Nhập linh hoạt: 30 = +30 ngày, 28/04 30 = mua 28/04 +30 ngày, 28/04 > 28/05 = khoảng ngày.')}</div>
-    <input type="text" id="add-smart-date" class="input smart-date-input" value="${escapeHtml(smartDateValue)}" placeholder="30 ngày, 28/04 30, 28/04 > 28/05" oninput="markAddFormDateTouched();applySmartDateInput(this.value)" onblur="guideAddFormFromDate()" onkeydown="if(event.key==='Enter'){event.preventDefault();applySmartDateInput(this.value);guideAddFormFromDate()}">
-    <input type="hidden" id="add-purchase" value="${escapeHtml(purchaseValue)}">
-    <input type="hidden" id="add-expiry" value="${escapeHtml(expiryValue)}">
-    <div id="add-expiry-hint" class="quick-date-hint smart-date-preview"></div>
-    <div class="smart-date-options">
-        <label class="quick-lifetime"><input type="checkbox" id="add-date-custom" onchange="toggleSmartDateDetails(this)"> Tùy chỉnh chi tiết</label>
-        <label class="quick-lifetime"><input type="checkbox" id="add-lifetime" onchange="handleAddLifetimeToggle(this);guideAddFormFromDate()"> Vĩnh viễn</label>
-    </div>
-    <div id="smart-date-details" class="smart-date-details" ${isEdit ? '' : 'hidden'}>
-        <div class="quick-date-grid">
-            <div class="quick-date-field">
-                <label>Ngày mua</label>
-                <input type="date" id="add-purchase-detail" class="input" value="${escapeHtml(purchaseValue)}" onchange="setAddPurchaseDate(this.value);guideAddFormFromDate()">
+    <!-- TAB 2: Thông tin chính -->
+    <div class="add-wizard-panel" data-tab="2" id="add-tab-2" hidden>
+        <div id="add-credential-block" class="add-credential-block" ${authMethod === 'email' ? '' : 'hidden'}>
+            <div class="form-section-title">Dán thông tin tài khoản</div>
+            <div class="quick-paste-wrap">
+                <div class="quick-paste-toolbar">
+                    <div class="quick-form-anchor">
+                        <button type="button" class="quick-paste-action primary" onclick="toggleAddQuickFormPopover(event)">+ Điền form nhanh</button>
+                        <div id="add-quick-form-popover" class="quick-form-popover" hidden onclick="event.stopPropagation()"></div>
+                    </div>
+                    <button type="button" class="quick-paste-action" onclick="copyPasteSelectionToNote()">${renderNoteToolbarIcon('copy')} Copy vào note</button>
+                </div>
+                <textarea class="textarea-paste" id="paste-input" placeholder="user@email.com|password123|2FA_CODE" oninput="previewParse()" onpaste="handleQuickPasteGuidance()" onblur="handleQuickPasteGuidance()">${escapeHtml(rawValue)}</textarea>
             </div>
-            <div class="quick-date-field">
-                <label>Ngày hết hạn</label>
-                <input type="date" id="add-expiry-detail" class="input" value="${defaultExpiryValue}" onchange="setExpiryDate(inputValueToDate(this.value), 'tùy chỉnh');guideAddFormFromDate()">
+            <div id="parse-preview"></div>
+            <div id="service-detect-suggestions"></div>
+        </div>
+
+        <section class="add-form-block add-form-service-block">
+        <div class="form-section-title">Tên dịch vụ ${renderHintButton('Tên sẽ được tự điền khi ô paste nhận diện được nền tảng.')}</div>
+        <div class="service-name-picker">
+            <div class="input-group service-name-input-group">
+                <input type="text" id="add-name" class="input" placeholder=" " style="padding-left:16px" value="${escapeHtml(editData?.name || '')}" oninput="autoDetectPlatform();this.dataset.autoFilled='false'">
+                <label for="add-name" class="input-label" style="left:16px">VD: ChatGPT, Canva...</label>
             </div>
+            <div id="platform-detect" class="service-tag-inline"></div>
+            <div id="selected-tags" class="selected-tags service-selected-tags" hidden></div>
+        </div>
+
+        ${renderAuthMethodInlineSelector(authMethod)}
+        <div id="add-auth-linked-wrap" class="add-auth-linked-wrap" ${authMethod === 'email' ? 'hidden' : ''}>
+            <div id="linked-account-picker-wrap">${renderLinkedAccountPicker(authMethod)}</div>
+            <div class="auth-method-note"><span>ⓘ</span><span>Dịch vụ SSO dùng mật khẩu từ TK gốc. Ting! sẽ lưu link tới TK gốc thay vì lưu mật khẩu riêng.</span></div>
+        </div>
+
+        ${renderPlatformPlanPanel()}
+        </section>
+
+        <section class="add-form-block add-form-date-block">
+        <div class="form-section-title">Thời hạn ${renderHintButton('Nhập linh hoạt: 30 = +30 ngày, 28/04 30 = mua 28/04 +30 ngày, 28/04 > 28/05 = khoảng ngày.')}</div>
+        <input type="text" id="add-smart-date" class="input smart-date-input" value="${escapeHtml(smartDateValue)}" placeholder="30 ngày, 28/04 30, 28/04 > 28/05" oninput="markAddFormDateTouched();applySmartDateInput(this.value)" onblur="guideAddFormFromDate()" onkeydown="if(event.key==='Enter'){event.preventDefault();applySmartDateInput(this.value);guideAddFormFromDate()}">
+        <input type="hidden" id="add-purchase" value="${escapeHtml(purchaseValue)}">
+        <input type="hidden" id="add-expiry" value="${escapeHtml(expiryValue)}">
+        <div id="add-expiry-hint" class="quick-date-hint smart-date-preview"></div>
+        <div class="smart-date-options">
+            <label class="quick-lifetime"><input type="checkbox" id="add-date-custom" onchange="toggleSmartDateDetails(this)"> Tùy chỉnh chi tiết</label>
+            <label class="quick-lifetime"><input type="checkbox" id="add-lifetime" onchange="handleAddLifetimeToggle(this);guideAddFormFromDate()"> Vĩnh viễn</label>
+        </div>
+        <div id="smart-date-details" class="smart-date-details" ${isEdit ? '' : 'hidden'}>
+            <div class="quick-date-grid">
+                <div class="quick-date-field">
+                    <label>Ngày mua</label>
+                    <input type="date" id="add-purchase-detail" class="input" value="${escapeHtml(purchaseValue)}" onchange="setAddPurchaseDate(this.value);guideAddFormFromDate()">
+                </div>
+                <div class="quick-date-field">
+                    <label>Ngày hết hạn</label>
+                    <input type="date" id="add-expiry-detail" class="input" value="${defaultExpiryValue}" onchange="setExpiryDate(inputValueToDate(this.value), 'tùy chỉnh');guideAddFormFromDate()">
+                </div>
+            </div>
+        </div>
+        </section>
+
+        <section class="add-form-block add-form-category-block">
+        <div class="form-section-title">Danh mục <span class="optional-label">(Tùy chọn)</span></div>
+        <div class="add-wizard-category">${categoryContent}</div>
+        </section>
+
+        <div class="add-wizard-nav">
+            <button type="button" class="btn btn-outline" onclick="goAddTab(1, { manual: true })">‹ Quay lại</button>
+            <button type="button" class="btn btn-primary" onclick="goAddTab(3, { manual: true })">Tiếp ›</button>
         </div>
     </div>
 
-    <div class="form-section-title">Ghi chú ${renderHintButton('Quét text rồi bấm Copy hoặc Code để đánh dấu. Link http/https sẽ tự nhận diện khi lưu.')}</div>
-    <div class="note-input-wrap">
-        <div class="note-toolbar">
-            <button type="button" class="note-toolbar-btn" onclick="wrapNoteSelection('copy')">${renderNoteToolbarIcon('copy')} Copy</button>
-            <span class="note-toolbar-separator"></span>
-            <button type="button" class="note-toolbar-btn" onclick="wrapNoteSelection('code')">${renderNoteToolbarIcon('code')} Code</button>
-        </div>
-        <textarea class="textarea-paste" id="add-note" placeholder="Ghi chú thông minh...
+    <!-- TAB 3: Bổ sung -->
+    <div class="add-wizard-panel" data-tab="3" id="add-tab-3" hidden>
+        <div class="form-section-title">Ghi chú ${renderHintButton('Quét text rồi bấm Copy hoặc Code để đánh dấu. Link http/https sẽ tự nhận diện khi lưu.')}</div>
+        <div class="note-input-wrap">
+            <div class="note-toolbar">
+                <button type="button" class="note-toolbar-btn" onclick="wrapNoteSelection('copy')">${renderNoteToolbarIcon('copy')} Copy</button>
+                <span class="note-toolbar-separator"></span>
+                <button type="button" class="note-toolbar-btn" onclick="wrapNoteSelection('code')">${renderNoteToolbarIcon('code')} Code</button>
+            </div>
+            <textarea class="textarea-paste" id="add-note" placeholder="Ghi chú thông minh...
 [copy][/copy]
 [code][/code]
 https://example.com" style="min-height:110px" onfocus="markAddFormDateSkippedIfNeeded()" onblur="guideAddFormFromNote()">${escapeHtml(editData?.note || '')}</textarea>
+        </div>
+
+        <div class="form-section-title">Ngu&#7891;n g&#7889;c / Ng&#432;&#7901;i b&#225;n <span class="optional-label">(T&#249;y ch&#7885;n)</span></div>
+        <div class="input-group" style="margin-bottom:8px">
+            <input type="text" id="add-seller-name" class="input" placeholder=" " style="padding-left:16px" value="${escapeHtml(editData?.sellerName || '')}" oninput="this.dataset.sellerAuto='false';syncSellerLinkFromForm()" onblur="guideAddFormFromSeller()" onkeydown="if(event.key==='Enter'){event.preventDefault();guideAddFormFromSeller()}">
+            <label for="add-seller-name" class="input-label" style="left:16px">T&#234;n ng&#432;&#7901;i b&#225;n</label>
+        </div>
+        ${renderSellerPlatformPicker(editData?.sellerPlatform || 'other', editData?.sellerLink || '')}
+
+        <div class="form-section-title">Giá mua <span class="optional-label">(Tùy chọn)</span></div>
+        <div class="input-group price-input-group" style="margin-bottom:8px">
+            <input type="text" id="add-price" class="input" inputmode="numeric" autocomplete="off" placeholder=" " style="padding-left:16px" value="${editData?.purchasePrice ? formatPriceInput(editData.purchasePrice) : ''}" oninput="formatPriceField(this)">
+            <label for="add-price" class="input-label" style="left:16px">VD: 50.000 (để trống nếu không nhập)</label>
+            <span class="price-suffix" aria-hidden="true">₫</span>
+        </div>
+
+        <div class="add-wizard-nav">
+            <button type="button" class="btn btn-outline" onclick="goAddTab(2, { manual: true })">‹ Quay lại</button>
+            ${saveButton}
+        </div>
     </div>
-    ${history.note}
-
-    <div class="form-section-title">Ngu&#7891;n g&#7889;c / Ng&#432;&#7901;i b&#225;n <span class="optional-label">(T&#249;y ch&#7885;n)</span></div>
-    <div class="input-group" style="margin-bottom:8px">
-        <input type="text" id="add-seller-name" class="input" placeholder=" " style="padding-left:16px" value="${escapeHtml(editData?.sellerName || '')}" oninput="this.dataset.sellerAuto='false';syncSellerLinkFromForm()" onblur="guideAddFormFromSeller()" onkeydown="if(event.key==='Enter'){event.preventDefault();guideAddFormFromSeller()}">
-        <label for="add-seller-name" class="input-label" style="left:16px">T&#234;n ng&#432;&#7901;i b&#225;n</label>
-    </div>
-    ${renderSellerPlatformPicker(editData?.sellerPlatform || 'other', editData?.sellerLink || '')}
-    ${history.seller}
-
-    <div class="form-section-title">Giá mua <span class="optional-label">(Tùy chọn)</span></div>
-    <div class="input-group price-input-group" style="margin-bottom:8px">
-        <input type="text" id="add-price" class="input" inputmode="numeric" autocomplete="off" placeholder=" " style="padding-left:16px" value="${editData?.purchasePrice ? formatPriceInput(editData.purchasePrice) : ''}" oninput="formatPriceField(this)">
-        <label for="add-price" class="input-label" style="left:16px">VD: 50.000 (để trống nếu không nhập)</label>
-        <span class="price-suffix" aria-hidden="true">₫</span>
-    </div>
-
-    ${history.price}
-    ${history.bundle}
-
-    <div class="form-section-title add-advanced-title">Tùy chọn nâng cao</div>
-    ${renderCollapsibleSection('category', '📁', `Danh mục (${defaultCategoryIds.length})`, categoryContent)}
-    ${saveButton}`;
+    </div>`;
 }

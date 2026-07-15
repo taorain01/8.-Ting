@@ -548,3 +548,318 @@ function getPlatformEmoji(platform) {
     };
     return map[platform] || '🔑';
 }
+
+// ============================================================================
+// DÁN THÔNG MINH — parser thuần (không đụng DOM), test được độc lập.
+// Xem docs/spec-dan-thong-minh-va-wizard-2-tab.md.
+// ============================================================================
+
+/**
+ * Parse một chuỗi GIÁ thành số VND, hoặc null nếu không phải giá.
+ * Quy ước (D2/D6):
+ *   30k / 30n            -> 30000        (k, n = nghìn)
+ *   1tr / 1m             -> 1000000      (tr, m = triệu)
+ *   1.5tr / 1,5tr        -> 1500000
+ *   2m                   -> 2000000
+ *   20.000 / 20,000      -> 20000        (có dấu phân cách nghìn)
+ *   20000                -> 20000        (số trần >= 1000)
+ *   30                   -> null         (<= 999 trần, KHÔNG hậu tố = THỜI HẠN, không phải giá)
+ *   abc / "50k likes"    -> null         (có chữ thừa / cả dòng không phải giá)
+ * Chỉ nhận khi TOÀN BỘ chuỗi là một token giá (sau khi bỏ đuôi 'đ'/'vnd').
+ */
+function parseSmartPrice(value) {
+    let raw = String(value == null ? '' : value).trim().toLowerCase();
+    if (!raw) return null;
+    // Bỏ ký hiệu tiền tệ ở đuôi: đ, d, vnd, ₫ (có/không khoảng trắng).
+    raw = raw.replace(/\s*(?:đ|₫|vnd|vnđ)\s*$/i, '').trim();
+    if (!raw) return null;
+
+    // Hậu tố nghìn (k, n) hoặc triệu (tr, m). Phần số cho phép . hoặc , làm thập phân.
+    const suffixMatch = raw.match(/^(\d+(?:[.,]\d+)?)\s*(k|n|tr|m)$/i);
+    if (suffixMatch) {
+        const num = parseFloat(suffixMatch[1].replace(',', '.'));
+        if (!Number.isFinite(num) || num <= 0) return null;
+        const unit = suffixMatch[2].toLowerCase();
+        const mult = (unit === 'k' || unit === 'n') ? 1000 : 1000000;
+        const result = Math.round(num * mult);
+        return result > 0 ? result : null;
+    }
+
+    // Số có dấu phân cách nghìn: 20.000 / 20,000 / 1.000.000 -> bỏ hết . , rồi lấy số.
+    const grouped = raw.match(/^\d{1,3}(?:[.,]\d{3})+$/);
+    if (grouped) {
+        const digits = raw.replace(/[.,]/g, '');
+        const num = Number(digits);
+        return Number.isFinite(num) && num > 0 ? num : null;
+    }
+
+    // Số trần (không hậu tố, không phân cách).
+    const plain = raw.match(/^\d+$/);
+    if (plain) {
+        const num = Number(raw);
+        // <= 999 trần = THỜI HẠN (ngày), KHÔNG phải giá (D2).
+        if (num >= 1000) return num;
+        return null;
+    }
+
+    return null;
+}
+
+/**
+ * Một dòng CÓ CHẮC CHẮN là giá không (dùng cho luồng dán đa dòng, tránh nuốt
+ * nhầm 2FA code / số điện thoại toàn chữ số). CHỈ true khi:
+ *   - có hậu tố k / n / tr / m  (30k, 1tr, 2m)
+ *   - có dấu phân cách nghìn    (20.000, 1,000,000)
+ *   - có đuôi tiền tệ đ / ₫ / vnd (20000đ)
+ * Số trần thuần (20000, 123456) -> false (không chắc là giá).
+ * parseSmartPrice vẫn nhận số trần >= 1000 khi gọi trực tiếp / qua nhãn "gia:".
+ */
+function isConfidentPriceLine(value) {
+    const raw = String(value == null ? '' : value).trim().toLowerCase();
+    if (!raw) return false;
+    if (/^\d+(?:[.,]\d+)?\s*(k|n|tr|m)$/i.test(raw)) return true;         // hậu tố
+    if (/^\d{1,3}(?:[.,]\d{3})+\s*(?:đ|₫|vnd|vnđ)?$/i.test(raw)) return true; // phân cách nghìn
+    if (/^\d+\s*(?:đ|₫|vnd|vnđ)$/i.test(raw)) return true;                // đuôi tiền tệ
+    return false;
+}
+
+// Nhãn ở đầu dòng -> loại. Khớp không dấu, không phân biệt hoa thường.
+const SMART_PASTE_LABELS = [
+    { key: 'note', labels: ['note', 'ghi chu', 'ghichu', 'nb'] },
+    { key: 'seller-telegram', labels: ['tele', 'telegram', 'tel', 'tg'] },
+    { key: 'seller-zalo', labels: ['zalo', 'zl'] },
+    { key: 'seller-facebook', labels: ['fb', 'facebook', 'face'] },
+    { key: 'seller-discord', labels: ['discord', 'dc'] },
+    { key: 'seller-instagram', labels: ['ig', 'instagram', 'insta'] },
+    { key: 'seller', labels: ['shop', 'nguoi ban', 'nguoiban', 'seller', 'nguon'] },
+    { key: 'price', labels: ['gia', 'price', 'gia ban', 'giaban'] },
+    { key: 'duration', labels: ['han', 'thoi han', 'thoihan', 'duration', 'expiry', 'ngay'] },
+    { key: 'plan', labels: ['goi', 'goi cuoc', 'goicuoc', 'plan', 'package'] },
+    { key: 'key', labels: ['key', 'api', 'apikey', 'api key', 'token', 'secret key'] },
+    { key: 'name', labels: ['ten', 'service', 'dich vu', 'dichvu', 'app', 'ten dv'] },
+];
+
+function normalizeSmartLabel(value) {
+    return String(value || '')
+        .trim().toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ').trim();
+}
+
+/** Tách nhãn đầu dòng: "note: abc" -> {label:'note', rest:'abc'}; không có nhãn -> null. */
+function readSmartLineLabel(line) {
+    const m = String(line || '').match(/^\s*([A-Za-zÀ-ỹ][A-Za-zÀ-ỹ0-9 ]{0,14}?)\s*[:：]\s*(.*)$/);
+    if (!m) return null;
+    const label = normalizeSmartLabel(m[1]);
+    const found = SMART_PASTE_LABELS.find(item => item.labels.includes(label));
+    if (!found) return null;
+    return { key: found.key, rest: m[2].trim(), rawLabel: label };
+}
+
+/** Một dòng có phải "thời hạn" (3 tháng / 30 ngày / 1 năm / 6t / số <=999 trần). */
+function readSmartDuration(line) {
+    const t = normalizeSmartLabel(line);
+    if (!t) return null;
+    if (/(vinh vien|lifetime|tron doi|vĩnh viễn)/i.test(t)) return { lifetime: true, text: t };
+    // "3 tháng", "30 ngày", "1 nam", "2 tuan", "6 thang"...
+    if (/^\d+\s*(ngay|ngày|thang|tháng|tuan|tuần|nam|năm|day|days|week|weeks|month|months|year|years|d|w|y)$/i.test(t)) {
+        return { lifetime: false, text: t };
+    }
+    // Số trần <= 999 (không hậu tố) = số ngày.
+    const plain = t.match(/^(\d{1,3})$/);
+    if (plain) return { lifetime: false, text: `${plain[1]} ngay` };
+    return null;
+}
+
+/** Một dòng có chứa URL / link người bán không (dùng extractFirstUrl đã có). */
+function lineHasUrl(line) {
+    return !!(typeof extractFirstUrl === 'function' && extractFirstUrl(line));
+}
+
+/**
+ * Parser CHÍNH: nhận cả cục dán nhiều dòng, phân loại từng dòng.
+ * Trả về object mô tả (KHÔNG đụng DOM); lớp form sẽ áp vào các input tương ứng.
+ *
+ * Kết quả:
+ * {
+ *   credential: { username, password, twoFaCode, isApiKey, raw },
+ *   price: number|null,
+ *   duration: { lifetime:bool, text:string }|null,
+ *   note: string,           // nhiều dòng note nối bằng \n
+ *   seller: { platform, name, url }|null,
+ *   leftoverLines: string[] // dòng không phân loại được (đưa vào credential/tên)
+ * }
+ *
+ * Thứ tự ưu tiên mỗi dòng: nhãn rõ > link trần > giá > thời hạn > credential.
+ */
+function parseSmartPasteBlock(rawText) {
+    const result = {
+        credential: { username: '', password: '', twoFaCode: '', isApiKey: false, raw: '' },
+        price: null,
+        duration: null,
+        plan: '',
+        note: '',
+        seller: null,
+        name: '',
+        leftoverLines: [],
+    };
+    const raw = String(rawText || '');
+    if (!raw.trim()) return result;
+
+    const lines = raw.split(/\r?\n/).map(l => l.trim());
+    const noteParts = [];
+    const credentialLines = [];
+    let keyLabeled = false;
+
+    const sellerLabelMap = {
+        'seller-telegram': 'telegram',
+        'seller-zalo': 'zalo',
+        'seller-facebook': 'facebook',
+        'seller-discord': 'discord',
+        'seller-instagram': 'other',
+        'seller': 'other',
+    };
+
+    function assignSeller(platform, text) {
+        const value = String(text || '').trim();
+        if (!value && !result.seller) return;
+        // Nếu có URL trong text -> để detectSellerFromText suy ra chuẩn.
+        let url = '';
+        let name = value.replace(/^@+/, '');
+        if (typeof normalizeSellerLink === 'function') {
+            url = normalizeSellerLink(value, platform) || '';
+        }
+        if (typeof detectSellerFromText === 'function' && lineHasUrl(value)) {
+            const det = detectSellerFromText(value);
+            if (det) { platform = det.platform; name = det.name; url = det.url; }
+        }
+        // handle telegram: thêm @ cho đẹp
+        if (platform === 'telegram' && name && !name.startsWith('@')) name = `@${name}`;
+        result.seller = { platform: platform || 'other', name: name || value, url };
+    }
+
+    for (const line of lines) {
+        if (!line) continue;
+
+        // 1. Nhãn rõ.
+        const labeled = readSmartLineLabel(line);
+        if (labeled) {
+            if (labeled.key === 'note') {
+                if (labeled.rest) noteParts.push(labeled.rest);
+                continue;
+            }
+            if (labeled.key === 'price') {
+                const p = parseSmartPrice(labeled.rest);
+                if (p != null) result.price = p;
+                continue;
+            }
+            if (labeled.key === 'duration') {
+                const d = readSmartDuration(labeled.rest);
+                if (d) result.duration = d;
+                else if (labeled.rest) result.duration = { lifetime: false, text: labeled.rest };
+                continue;
+            }
+            if (labeled.key === 'plan') {
+                if (labeled.rest) result.plan = labeled.rest;
+                continue;
+            }
+            if (labeled.key === 'name') {
+                if (labeled.rest) result.name = labeled.rest;
+                continue;
+            }
+            if (labeled.key === 'key') {
+                result.credential.isApiKey = true;
+                result.credential.username = labeled.rest || result.credential.username;
+                keyLabeled = true;
+                continue;
+            }
+            if (labeled.key in sellerLabelMap) {
+                assignSeller(sellerLabelMap[labeled.key], labeled.rest);
+                continue;
+            }
+        }
+
+        // 2. Link trần (không nhãn) -> người bán.
+        if (lineHasUrl(line) && !labeled) {
+            assignSeller('other', line);
+            continue;
+        }
+
+        // 3. Giá — CHỈ auto-nhận khi CHẮC CHẮN là giá (có hậu tố k/n/tr/m, dấu phân
+        //    cách nghìn, hoặc đuôi đ/vnd). Số trần thuần (vd 123456, 20000) KHÔNG tự
+        //    nhận là giá trong luồng dán, vì dễ nuốt nhầm 2FA code / số điện thoại.
+        //    Muốn nhập giá trần thì gõ "gia: 20000" hoặc "20.000" hoặc "20000đ".
+        if (isConfidentPriceLine(line)) {
+            const price = parseSmartPrice(line);
+            if (price != null) { result.price = price; continue; }
+        }
+
+        // 4. Thời hạn.
+        const dur = readSmartDuration(line);
+        if (dur) { result.duration = dur; continue; }
+
+        // 5. Còn lại: credential. Nhưng nếu dòng chứa "số điện thoại + tên nền tảng seller"
+        //    kiểu "zalo 9448298185" thì tách seller.
+        const sellerInline = line.match(/^(zalo|telegram|tele|facebook|fb|discord|ig|instagram)\s+(.+)$/i);
+        if (sellerInline) {
+            const platform = sellerLabelMap['seller-' + normalizeSmartLabel(sellerInline[1])]
+                || (normalizeSmartLabel(sellerInline[1]) === 'tele' ? 'telegram' : 'other');
+            assignSeller(platform, sellerInline[2]);
+            continue;
+        }
+
+        if (/^tai[_\s-]?khoan\|mat[_\s-]?khau(?:\|2fa)?$/i.test(normalizeSmartLabel(line).replace(/đ/g, 'd'))) continue;
+        credentialLines.push(line);
+    }
+
+    result.note = noteParts.join('\n');
+
+    // Xử lý credential: nếu đã có nhãn key -> giữ isApiKey, username là key.
+    if (keyLabeled) {
+        result.credential.raw = credentialLines.join('\n');
+        // Nếu key chưa có value nhưng có 1 dòng credential đứng một mình -> lấy làm key.
+        if (!result.credential.username && credentialLines.length === 1) {
+            result.credential.username = credentialLines[0];
+        }
+        return result;
+    }
+
+    // Không nhãn key: gom credentialLines rồi tách.
+    if (credentialLines.length === 0) {
+        return result;
+    }
+
+    const credRaw = credentialLines.join('\n');
+    result.credential.raw = credRaw;
+    const parsed = typeof parseAccountInput === 'function' ? parseAccountInput(credRaw) : null;
+
+    if (parsed && (parsed.username || parsed.password)) {
+        result.credential.username = parsed.username || '';
+        result.credential.password = parsed.password || '';
+        result.credential.twoFaCode = parsed.twoFaCode || '';
+        if (!result.name && parsed.serviceName) result.name = parsed.serviceName;
+        // Chỉ 1 dòng, tách ra không có password -> coi là KEY API (1 field), không ép u/p.
+        if (credentialLines.length === 1 && !result.credential.password && !result.credential.twoFaCode) {
+            result.credential.isApiKey = true;
+        }
+    } else if (credentialLines.length === 1) {
+        // 1 dòng lạ, không tách được -> Key API.
+        result.credential.isApiKey = true;
+        result.credential.username = credentialLines[0];
+    } else {
+        result.credential.username = credentialLines[0] || '';
+        result.credential.password = credentialLines[1] || '';
+        result.credential.twoFaCode = credentialLines[2] || '';
+    }
+
+    return result;
+}
+
+// Export cho test (Node) — guard để không vỡ khi nạp bằng <script> trong browser.
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        parseAccountInput, detectPlatform, extractFirstUrl, normalizeSellerLink,
+        detectSellerFromText, inferSellerPlatformFromUrl,
+        parseSmartPrice, parseSmartPasteBlock, readSmartLineLabel, readSmartDuration,
+    };
+}

@@ -56,10 +56,10 @@
 
   /**
    * Phiên bản đang cài trên Android (khớp `versionName`/`versionCode` trong
-   * cấu hình Capacitor: versionName "1.5.1", versionCode 10501).
+   * cấu hình Capacitor: versionName "1.6.0", versionCode 10600).
    */
-  const INSTALLED_VERSION_NAME = '1.5.1';
-  const INSTALLED_VERSION_CODE = 10501;
+  const INSTALLED_VERSION_NAME = '1.6.0';
+  const INSTALLED_VERSION_CODE = 10600;
 
   /** Khóa localStorage cho nhật ký cập nhật và mốc Background_Check. */
   const STORAGE_KEY_UPDATE_LOG = 'ting.update.log';

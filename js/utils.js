@@ -934,11 +934,10 @@ function handleQuickPasteGuidance() {
 }
 
 function guideAddFormFromDate() {
-    const guide = getAddFormGuideState();
     markAddFormDateTouched();
-    if (guide.noteGuided) return;
-    guide.noteGuided = true;
-    guideAddFormTo('add-note');
+    // Wizard: rời ô Thời hạn → thử auto-chuyển sang Tab 3 (R6.1).
+    // Không còn cuộn tới Ghi chú vì Ghi chú nằm ở Tab 3 (khác tab).
+    if (typeof maybeAutoAdvanceToStep3 === 'function') maybeAutoAdvanceToStep3();
 }
 
 function guideAddFormFromNote() {
@@ -953,6 +952,267 @@ function guideAddFormFromSeller() {
     const seller = document.getElementById('add-seller-name');
     if (!seller?.value.trim()) return;
     guideAddFormTo('add-price');
+}
+
+// ===== WIZARD 3 TAB (Thêm/Sửa TK) =====
+const ADD_WIZARD_TOTAL_TABS = 3;
+const ADD_WIZARD_STEP_LABELS = ['Nền tảng', 'Thông tin', 'Bổ sung'];
+
+function renderAddWizardSteps() {
+    const steps = ADD_WIZARD_STEP_LABELS.map((label, index) => {
+        const tab = index + 1;
+        return `<button type="button" class="add-wizard-step" data-step="${tab}" onclick="goAddTab(${tab}, { manual: true, fromStepper: true })">
+            <span class="add-wizard-step-num">${tab}</span>
+            <span class="add-wizard-step-label">${label}</span>
+        </button>`;
+    }).join('<span class="add-wizard-step-sep" aria-hidden="true">›</span>');
+    return `<div class="add-wizard-steps" id="add-wizard-steps">${steps}</div>`;
+}
+
+function updateAddWizardSteps() {
+    const current = window.appState?.addFormTab || 1;
+    document.querySelectorAll('#add-wizard-steps .add-wizard-step').forEach(btn => {
+        const tab = Number(btn.dataset.step);
+        btn.classList.toggle('active', tab === current);
+        btn.classList.toggle('done', tab < current);
+        btn.classList.remove('disabled');
+        btn.disabled = false;
+    });
+}
+
+function goAddTab(tab, opts = {}) {
+    const g = window.appState;
+    if (!g) return;
+    tab = Math.min(Math.max(1, tab | 0), ADD_WIZARD_TOTAL_TABS);
+    const prev = g.addFormTab || 1;
+    // R6.4 LUẬT HỦY: user chủ động quay lại tab NHỎ HƠN → tắt mọi auto-chuyển phần còn lại của phiên
+    if (opts.manual && tab < prev) {
+        g.addFormAutoNavDisabled = true;
+    }
+    g.addFormTab = tab;
+    g.addFormMaxTabReached = Math.max(g.addFormMaxTabReached || 1, tab);
+    document.querySelectorAll('.add-wizard-panel').forEach(panel => {
+        panel.hidden = Number(panel.dataset.tab) !== tab;
+    });
+    updateAddWizardSteps();
+    // Vùng cuộn thật của modal (index.html: #modal-body). KHÔNG có #modal-content.
+    const modalBody = document.getElementById('modal-body');
+    if (modalBody) modalBody.scrollTop = 0;
+    // Focus/căn mục đầu hợp lý của tab (không auto-focus để tránh bàn phím bật trên mobile)
+    if (tab === 2) guideAddFormTo('paste-input', { focus: false, block: 'start' });
+    if (tab === 3) guideAddFormTo('add-note', { focus: false, block: 'start' });
+}
+
+function skipPlatformStep() {
+    goAddTab(2, { manual: true });
+}
+
+// Nút nền tảng cũ gọi selectPlatformFromPicker(platform, NAME) — 2 tham số (id + name),
+// KHÔNG phải selectAddPlatform(id). Hàm này bọc lại, giữ đúng chữ ký + name.
+function selectPlatformThenAdvance(platform, name) {
+    if (typeof selectPlatformFromPicker === 'function') selectPlatformFromPicker(platform, name);
+    if (platform === 'other') return;                       // 'other' = bỏ chọn, không auto sang tab 2
+    if (window.appState?.addFormAutoNavDisabled) return;    // R6.4
+    goAddTab(2);                                            // R2.2 — auto (KHÔNG manual)
+}
+
+function maybeAutoAdvanceToStep3() {
+    const g = window.appState;
+    if (!g) return;
+    if (g.addFormAutoNavDisabled) return;      // R6.4: user đã hủy auto-nav
+    if (g.addFormAutoAdvancedToStep3) return;  // R6.2: chỉ 1 lần/phiên
+    const name = document.getElementById('add-name')?.value.trim();
+    const hasName = !!name || !!g.addFormPlatform;
+    const lifetime = document.getElementById('add-lifetime')?.checked;
+    const expiry = document.getElementById('add-expiry')?.value;
+    const hasExpiry = !!lifetime || !!expiry;
+    if (hasName && hasExpiry) {
+        g.addFormAutoAdvancedToStep3 = true;
+        goAddTab(3);                            // auto — KHÔNG manual
+    }
+}
+
+const ADD_QUICK_FORM_TEMPLATE = 'note:\ngia:\nshop:\nngay:\ngoi:\n\ntai_khoan|mat_khau|2fa';
+const ADD_QUICK_FORM_HISTORY_KEY = 'ting.addQuickFormHistory.v1';
+const ADD_QUICK_FORM_HISTORY_MAX_AGE = 90 * 24 * 60 * 60 * 1000;
+const ADD_QUICK_FORM_HISTORY_LIMIT = 20;
+
+function getAddQuickFormPlatform() {
+    const selected = window.appState?.addFormPlatform;
+    const name = document.getElementById('add-name')?.value || '';
+    return selected || (typeof detectPlatform === 'function' ? detectPlatform(name) : '') || 'other';
+}
+
+function loadAddQuickFormHistory(now = Date.now()) {
+    let items = [];
+    try {
+        const parsed = JSON.parse(localStorage.getItem(ADD_QUICK_FORM_HISTORY_KEY) || '[]');
+        if (Array.isArray(parsed)) items = parsed;
+    } catch {}
+    const fresh = items
+        .filter(item => item && now - Number(item.lastUsedAt || item.createdAt || 0) <= ADD_QUICK_FORM_HISTORY_MAX_AGE)
+        .sort((a, b) => Number(b.lastUsedAt || 0) - Number(a.lastUsedAt || 0))
+        .slice(0, ADD_QUICK_FORM_HISTORY_LIMIT);
+    if (fresh.length !== items.length) {
+        try { localStorage.setItem(ADD_QUICK_FORM_HISTORY_KEY, JSON.stringify(fresh)); } catch {}
+    }
+    return fresh;
+}
+
+function getAddQuickFormSnapshot() {
+    const tags = typeof getAddTags === 'function' ? getAddTags() : [];
+    return {
+        platform: getAddQuickFormPlatform(),
+        note: document.getElementById('add-note')?.value.trim() || '',
+        price: document.getElementById('add-price')?.value.trim() || '',
+        shop: document.getElementById('add-seller-name')?.value.trim() || '',
+        sellerPlatform: document.getElementById('add-seller-platform')?.value || 'other',
+        sellerLink: document.getElementById('add-seller-link')?.value.trim() || '',
+        date: document.getElementById('add-smart-date')?.value.trim() || '',
+        plan: tags[0] || '',
+    };
+}
+
+function getAddQuickFormHistoryKey(item) {
+    return JSON.stringify([
+        item.platform || 'other', item.note || '', item.price || '', item.shop || '',
+        item.sellerPlatform || 'other', item.sellerLink || '', item.date || '', item.plan || '',
+    ]).toLowerCase();
+}
+
+function recordAddQuickFormHistory() {
+    const item = getAddQuickFormSnapshot();
+    if (![item.note, item.price, item.shop, item.date, item.plan].some(Boolean)) return;
+    const now = Date.now();
+    const key = getAddQuickFormHistoryKey(item);
+    const history = loadAddQuickFormHistory(now);
+    const previous = history.find(entry => getAddQuickFormHistoryKey(entry) === key);
+    const next = {
+        ...item,
+        createdAt: Number(previous?.createdAt || now),
+        lastUsedAt: now,
+    };
+    const saved = [next, ...history.filter(entry => getAddQuickFormHistoryKey(entry) !== key)]
+        .slice(0, ADD_QUICK_FORM_HISTORY_LIMIT);
+    try { localStorage.setItem(ADD_QUICK_FORM_HISTORY_KEY, JSON.stringify(saved)); } catch {}
+}
+
+function getFilteredAddQuickFormHistory() {
+    const platform = getAddQuickFormPlatform();
+    const history = loadAddQuickFormHistory();
+    if (!platform || platform === 'other') return history.slice(0, 8);
+    return history.filter(item => item.platform === platform).slice(0, 8);
+}
+
+function getAddQuickFormHistoryLabel(item) {
+    return item.plan || item.shop || item.note || item.date || 'Form gần đây';
+}
+
+function renderAddQuickFormPopover() {
+    const items = getFilteredAddQuickFormHistory();
+    const history = items.length
+        ? items.map((item, index) => `<button type="button" class="quick-form-history-item" onclick="applyAddQuickFormHistory(${index})"><strong>${escapeHtml(getAddQuickFormHistoryLabel(item))}</strong><span>${escapeHtml([item.shop, item.price, item.date].filter(Boolean).join(' · ') || 'Thông tin đã dùng')}</span></button>`).join('')
+        : '<div class="quick-form-history-empty">Chưa có lịch sử cho nền tảng này</div>';
+    return `<div class="quick-form-popover-section"><div class="quick-form-popover-title">Form mẫu</div><button type="button" class="quick-form-template-card" onclick="insertAddQuickFormTemplate()"><code>note · gia · shop · ngay · goi</code><span>Chèn form trống để điền nhanh</span></button></div><div class="quick-form-popover-section"><div class="quick-form-popover-title">Lịch sử gần đây</div><div class="quick-form-history-list">${history}</div></div>`;
+}
+
+function closeAddQuickFormPopover() {
+    const popover = document.getElementById('add-quick-form-popover');
+    if (popover) popover.hidden = true;
+    document.removeEventListener('keydown', handleAddQuickFormEscape);
+}
+
+function handleAddQuickFormEscape(event) {
+    if (event.key === 'Escape') closeAddQuickFormPopover();
+}
+
+function toggleAddQuickFormPopover(event) {
+    event?.stopPropagation?.();
+    const popover = document.getElementById('add-quick-form-popover');
+    if (!popover) return;
+    const opening = popover.hidden;
+    popover.hidden = !opening;
+    if (!opening) return;
+    popover.innerHTML = renderAddQuickFormPopover();
+    document.addEventListener('keydown', handleAddQuickFormEscape);
+    setTimeout(() => document.addEventListener('click', closeAddQuickFormPopover, { once: true }), 0);
+}
+
+function insertAddQuickFormTemplate() {
+    const input = document.getElementById('paste-input');
+    if (!input) return;
+    const current = input.value.trim();
+    input.value = current && !/^(note|gia|shop|ngay|goi)\s*:/im.test(current)
+        ? `${ADD_QUICK_FORM_TEMPLATE.replace('tai_khoan|mat_khau|2fa', current)}`
+        : ADD_QUICK_FORM_TEMPLATE;
+    closeAddQuickFormPopover();
+    input.focus();
+    previewParse?.();
+}
+
+function applyAddQuickFormData(item = {}) {
+    const note = document.getElementById('add-note');
+    const price = document.getElementById('add-price');
+    const seller = document.getElementById('add-seller-name');
+    if (note && item.note !== undefined) note.value = item.note || '';
+    if (price && item.price !== undefined) {
+        price.value = item.price || '';
+        if (typeof formatPriceField === 'function') formatPriceField(price);
+    }
+    if (seller && item.shop !== undefined) seller.value = item.shop || '';
+    if (typeof selectSellerPlatform === 'function' && item.sellerPlatform) selectSellerPlatform(item.sellerPlatform, { syncLink: false });
+    const sellerLink = document.getElementById('add-seller-link');
+    if (sellerLink && item.sellerLink !== undefined) sellerLink.value = item.sellerLink || '';
+    if (item.date && typeof applySmartDateInput === 'function') {
+        const smartDate = document.getElementById('add-smart-date');
+        if (smartDate) smartDate.value = item.date;
+        applySmartDateInput(item.date);
+    }
+    if (item.plan && typeof setAddTags === 'function') setAddTags([item.plan]);
+    if (typeof renderSelectedAddTags === 'function') renderSelectedAddTags();
+    if (typeof updateAddTagSuggestions === 'function') updateAddTagSuggestions();
+}
+
+function applyAddQuickFormHistory(index) {
+    const item = getFilteredAddQuickFormHistory()[Number(index)];
+    if (!item) return;
+    applyAddQuickFormData(item);
+    item.lastUsedAt = Date.now();
+    const history = loadAddQuickFormHistory();
+    const key = getAddQuickFormHistoryKey(item);
+    const saved = [item, ...history.filter(entry => getAddQuickFormHistoryKey(entry) !== key)];
+    try { localStorage.setItem(ADD_QUICK_FORM_HISTORY_KEY, JSON.stringify(saved)); } catch {}
+    closeAddQuickFormPopover();
+}
+
+function copyPasteSelectionToNote() {
+    const input = document.getElementById('paste-input');
+    const note = document.getElementById('add-note');
+    if (!input || !note) return;
+    const selected = input.value.slice(input.selectionStart || 0, input.selectionEnd || 0).trim();
+    const content = selected || input.value.trim();
+    if (!content) return;
+    const tagged = `[copy]${content}[/copy]`;
+    note.value = note.value.trim() ? `${note.value.trim()}\n${tagged}` : tagged;
+    if (typeof showToast === 'function') showToast('Đã đưa nội dung vào ghi chú', 'success');
+}
+
+function applySmartPasteMetadata(parsed) {
+    if (!parsed) return;
+    applyAddQuickFormData({
+        note: parsed.note || undefined,
+        price: parsed.price != null ? String(parsed.price) : undefined,
+        shop: parsed.seller?.name || undefined,
+        sellerPlatform: parsed.seller?.platform,
+        sellerLink: parsed.seller?.url,
+        date: parsed.duration?.text,
+        plan: parsed.plan || undefined,
+    });
+    const nameInput = document.getElementById('add-name');
+    if (nameInput && parsed.name && (!nameInput.value.trim() || nameInput.dataset.autoFilled === 'true')) {
+        nameInput.value = parsed.name;
+        nameInput.dataset.autoFilled = 'true';
+    }
 }
 
 function buildAddFormHistorySuggestions(editingId = '') {
@@ -1253,6 +1513,22 @@ if (typeof window !== 'undefined') {
     window.guideAddFormFromDate = guideAddFormFromDate;
     window.guideAddFormFromNote = guideAddFormFromNote;
     window.guideAddFormFromSeller = guideAddFormFromSeller;
+    window.renderAddWizardSteps = renderAddWizardSteps;
+    window.updateAddWizardSteps = updateAddWizardSteps;
+    window.goAddTab = goAddTab;
+    window.skipPlatformStep = skipPlatformStep;
+    window.selectPlatformThenAdvance = selectPlatformThenAdvance;
+    window.maybeAutoAdvanceToStep3 = maybeAutoAdvanceToStep3;
+    window.ADD_QUICK_FORM_TEMPLATE = ADD_QUICK_FORM_TEMPLATE;
+    window.loadAddQuickFormHistory = loadAddQuickFormHistory;
+    window.recordAddQuickFormHistory = recordAddQuickFormHistory;
+    window.renderAddQuickFormPopover = renderAddQuickFormPopover;
+    window.toggleAddQuickFormPopover = toggleAddQuickFormPopover;
+    window.closeAddQuickFormPopover = closeAddQuickFormPopover;
+    window.insertAddQuickFormTemplate = insertAddQuickFormTemplate;
+    window.applyAddQuickFormHistory = applyAddQuickFormHistory;
+    window.copyPasteSelectionToNote = copyPasteSelectionToNote;
+    window.applySmartPasteMetadata = applySmartPasteMetadata;
     window.buildAddFormHistorySuggestions = buildAddFormHistorySuggestions;
     window.renderAddFormHistorySuggestions = renderAddFormHistorySuggestions;
     window.applyAddHistoryNote = applyAddHistoryNote;

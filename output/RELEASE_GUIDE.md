@@ -480,6 +480,28 @@ npx.cmd electron-builder --win --x64 --publish never
 
 Publish that su van lam thu cong qua REST API o muc 9, khong dua vao auto-publish cua electron-builder.
 
+### `releaseNotes` trong `version.json` bi loi font / mojibake tren Windows
+
+Trieu chung: chay `node scripts/write-release-manifest.cjs --notes "...tieng Viet co dau..."` tu PowerShell tao `version.json` co chu kieu `Tá»‘i giáº£n...` thay vi UTF-8 dung. Nguyen nhan la chuoi Unicode bi sai encoding khi truyen qua command-line Windows vao Node.
+
+Cach xu ly an toan:
+
+- Dung release notes ASCII/khong dau khi truyen truc tiep qua `--notes`, hoac sua script de doc notes tu file UTF-8 thay vi command-line.
+- Sau khi tao manifest, luon mo `output/version.json` va kiem tra `releaseNotes` truoc khi publish.
+- Neu da bi loi, chay lai lenh tao manifest voi notes ASCII; khong sua `apkSize`/`apkSha256` bang tay.
+
+Vi du:
+
+```powershell
+node scripts/write-release-manifest.cjs `
+  --apk "output/Ting-$VERSION.apk" `
+  --version $VERSION `
+  --version-code $CODE `
+  --asset-name "Ting-$VERSION.apk" `
+  --apk-url "https://raw.githubusercontent.com/taorain01/ting-releases/main/Ting-$VERSION.apk" `
+  --notes "Toi gian form them tai khoan va bo sung dan nhanh."
+```
+
 ## 13. Checklist ngan truoc khi bao xong
 
 - `npm.cmd test` passed.
