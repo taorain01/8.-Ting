@@ -264,6 +264,17 @@ Neu khong co `gh`, dung REST API voi token trong git credential store. Khong in 
 
 Neu PowerShell bao `gh.exe is not recognized`, day la may chua cai GitHub CLI, khong phai loi artifact. Khong can cai `gh` giua release; chuyen ngay sang REST API ben duoi. Khi kiem tra `$LASTEXITCODE`, luu y loi `CommandNotFoundException` cua PowerShell co the khong dat exit code nhu chuong trinh native, vi vay nen kiem tra truoc bang `Get-Command gh -ErrorAction SilentlyContinue` thay vi chi dua vao `$LASTEXITCODE`.
 
+Neu REST API tao release bao `400 Problems parsing JSON`, thuong la body JSON Unicode tu PowerShell bi gui sai encoding. Tao JSON dang compact, encode thanh UTF-8 bytes va gui bytes thay vi gui truc tiep chuoi PowerShell:
+
+```powershell
+$json = $Body | ConvertTo-Json -Depth 20 -Compress
+$bytes = [Text.Encoding]::UTF8.GetBytes($json)
+Invoke-RestMethod -Method Post -Uri $Uri -Headers $headers `
+  -ContentType "application/json; charset=utf-8" -Body $bytes
+```
+
+Neu release notes khong can dau, co the dung notes ASCII de giam them rui ro encoding; van nen gui JSON bang UTF-8 bytes.
+
 Script mau rut gon:
 
 ```powershell
