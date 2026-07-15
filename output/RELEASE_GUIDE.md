@@ -262,6 +262,8 @@ gh release create $TAG "output/Ting-$VERSION.apk" "output/version.json" `
 
 Neu khong co `gh`, dung REST API voi token trong git credential store. Khong in token ra log.
 
+Neu PowerShell bao `gh.exe is not recognized`, day la may chua cai GitHub CLI, khong phai loi artifact. Khong can cai `gh` giua release; chuyen ngay sang REST API ben duoi. Khi kiem tra `$LASTEXITCODE`, luu y loi `CommandNotFoundException` cua PowerShell co the khong dat exit code nhu chuong trinh native, vi vay nen kiem tra truoc bang `Get-Command gh -ErrorAction SilentlyContinue` thay vi chi dua vao `$LASTEXITCODE`.
+
 Script mau rut gon:
 
 ```powershell
