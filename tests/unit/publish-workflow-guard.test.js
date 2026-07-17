@@ -160,3 +160,10 @@ describe('writeReleaseManifest: ghi version.json đủ 7 trường khi có APK +
     expect(manifest).toMatchObject(written);
   });
 });
+
+describe('Android build runner portability', () => {
+  it('invokes gradlew through bash on non-Windows runners', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', '..', 'scripts', 'build-android-debug.cjs'), 'utf8');
+    expect(source).toContain("run('bash', ['./gradlew', 'assembleDebug']");
+  });
+});

@@ -13,7 +13,7 @@ bộ quá nhỏ.
 
 ## Chưa phát hành
 
-- Chưa có thay đổi mới.
+- Sửa Android CI không chạy được `gradlew` trên runner Linux sau khi checkout.
 
 ## 1.7.0 - 2026-07-17
 

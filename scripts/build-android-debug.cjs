@@ -164,5 +164,7 @@ patchAndroidVersion(packageVersion, versionToAndroidCode(packageVersion));
 if (process.platform === 'win32') {
   run('cmd.exe', ['/d', '/c', '.\\gradlew.bat assembleDebug'], { cwd: androidDir, env });
 } else {
-  run('./gradlew', ['assembleDebug'], { cwd: androidDir, env });
+  // GitHub checkout can lose the executable bit on gradlew. Invoking it through
+  // bash keeps the build portable without depending on repository file mode.
+  run('bash', ['./gradlew', 'assembleDebug'], { cwd: androidDir, env });
 }
