@@ -29,6 +29,13 @@ const EXPORT_SNIPPET = `
   notifyGroupsChanged,
   runGroupsChangedRender,
   shouldRenderGroupDetail,
+  isGroupRealtimeReady,
+  markGroupRealtimeSourcePending,
+  markGroupRealtimeSourceReady,
+  notifyGroupRealtimeSnapshot,
+  isGroupListRealtimeReady,
+  markGroupListRealtimeSourcePending,
+  notifyGroupListRealtimeSnapshot,
   GROUP_RENDER_DEBOUNCE_MS,
 };
 `;
@@ -124,6 +131,71 @@ function createHarness({ currentPage = 'group-detail', currentGroupId = 'g1' } =
         pendingTimers: () => timers.size,
     };
 }
+
+describe('initial group realtime readiness', () => {
+    it('coalesces the member and invite snapshots before the first list render', () => {
+        const h = createHarness({ currentPage: 'groups', currentGroupId: null });
+
+        expect(h.api.isGroupListRealtimeReady()).toBe(true);
+        h.api.markGroupListRealtimeSourcePending('groups');
+        h.api.markGroupListRealtimeSourcePending('invites');
+        expect(h.api.isGroupListRealtimeReady()).toBe(false);
+
+        h.api.notifyGroupListRealtimeSnapshot('groups', true);
+        expect(h.pendingTimers()).toBe(0);
+        h.api.notifyGroupListRealtimeSnapshot('invites', true);
+        expect(h.pendingTimers()).toBe(1);
+
+        h.advance(50);
+        expect(h.counts.renderGroupList).toBe(1);
+        expect(h.api.isGroupListRealtimeReady()).toBe(true);
+    });
+
+    it('does not repaint Group Detail while a user tab transition is settling', () => {
+        const h = createHarness({ currentPage: 'group-detail', currentGroupId: 'g1' });
+        h.appState.groupTabTransitionPending = true;
+
+        h.api.notifyGroupsChanged('g1', { contentChanged: true });
+        h.advance(50);
+
+        expect(h.counts.renderGroupDetail).toBe(0);
+        expect(h.counts.updateHeader).toBe(1);
+    });
+
+    it('waits for both initial snapshots before reporting ready', () => {
+        const h = createHarness({ currentPage: 'group-detail', currentGroupId: 'g1' });
+        const {
+            isGroupRealtimeReady,
+            markGroupRealtimeSourcePending,
+            markGroupRealtimeSourceReady,
+        } = h.api;
+
+        expect(isGroupRealtimeReady('g1')).toBe(true);
+        expect(markGroupRealtimeSourceReady('g1', 'accounts')).toBe(false);
+        expect(isGroupRealtimeReady('g1')).toBe(false);
+        expect(markGroupRealtimeSourceReady('g1', 'requests')).toBe(true);
+        expect(isGroupRealtimeReady('g1')).toBe(true);
+
+        markGroupRealtimeSourcePending('g1', 'accounts');
+        expect(isGroupRealtimeReady('g1')).toBe(false);
+    });
+
+    it('coalesces the two initial snapshots into one render request', () => {
+        const h = createHarness({ currentPage: 'group-detail', currentGroupId: 'g1' });
+
+        h.api.notifyGroupRealtimeSnapshot('g1', 'accounts', true);
+        expect(h.pendingTimers()).toBe(0);
+        expect(h.counts.renderGroupDetail).toBe(0);
+
+        h.api.notifyGroupRealtimeSnapshot('g1', 'requests', true);
+        expect(h.pendingTimers()).toBe(1);
+        h.advance(50);
+
+        expect(h.counts.renderGroupDetail).toBe(1);
+        expect(h.lastArgs.renderGroupDetail).toEqual({ gid: 'g1', opts: { quiet: true } });
+        expect(h.pendingTimers()).toBe(0);
+    });
+});
 
 describe('Group_Sync_Coordinator — debounce và cổng render (Requirements 1.1, 1.3, 1.4, 1.5, 1.6)', () => {
     it('Req 1.1/1.3: nhiều Snapshot_Event trong cùng cửa sổ 50ms gộp thành đúng 1 render và mỗi lần gọi reset timer', () => {

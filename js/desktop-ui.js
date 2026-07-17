@@ -2376,7 +2376,7 @@ let _lastGroupDetailSignature = null;
 // Hiện tại #page-content (.d-content) là vùng cuộn thực tế; sau khi cố định header + tab-bar
 // (phần CSS), vùng cuộn có thể là một phần tử con chuyên biệt. Ưu tiên phần tử con nếu có,
 // nếu không thì fallback về chính container để luôn bảo toàn được scrollTop.
-const GROUP_DETAIL_SCROLL_SELECTORS = ['.group-tab-body', '.group-detail-scroll', '.group-detail-body'];
+const GROUP_DETAIL_SCROLL_SELECTORS = ['.group-tab-surface', '.group-tab-body', '.group-detail-scroll', '.group-detail-body'];
 
 // Lấy phần tử cuộn dọc thực sự bên trong container chi tiết nhóm.
 function getGroupDetailScrollEl(container) {
@@ -2463,6 +2463,59 @@ function restoreDetailUiState(container, snapshot) {
     }
 }
 
+function syncGroupDetailTabs(root, activeTab) {
+    if (!root) return;
+    const tabs = root.querySelectorAll?.('.group-tab[data-tab]') || [];
+    tabs.forEach(tab => {
+        const isActive = tab.dataset?.tab === activeTab;
+        tab.classList?.toggle?.('active', isActive);
+        tab.setAttribute?.('aria-selected', String(isActive));
+        tab.tabIndex = isActive ? 0 : -1;
+    });
+    const settingsButton = root.querySelector?.('.group-detail-settings-btn');
+    if (settingsButton) {
+        const isSettings = activeTab === 'settings';
+        settingsButton.classList?.toggle?.('is-active', isSettings);
+        settingsButton.setAttribute?.('aria-pressed', String(isSettings));
+    }
+}
+
+// Keep the group shell mounted after the first paint. Replacing only the panel
+// prevents the header and centered tab control from blinking on tab/data changes.
+function patchGroupDetailShell(root, view, options = {}) {
+    if (!root || !view) return false;
+    const panel = root.querySelector?.('#group-tab-panel');
+    if (!panel) return false;
+
+    const previousTab = panel.dataset?.activeTab || '';
+    const panelNeedsPaint = panel.__tingGroupPanelSignature !== view.panelSignature;
+    const uiSnapshot = options.quiet && panelNeedsPaint
+        ? captureDetailUiState(root.parentElement || root)
+        : null;
+
+    root.classList?.toggle?.('group-detail-quiet', Boolean(options.quiet));
+    if (root.dataset) root.dataset.activeTab = view.activeTab;
+
+    const title = root.querySelector?.('[data-group-detail-title]');
+    if (title && title.textContent !== view.title) title.textContent = view.title;
+    const meta = root.querySelector?.('[data-group-detail-meta]');
+    if (meta && meta.textContent !== view.meta) meta.textContent = view.meta;
+    syncGroupDetailTabs(root, view.activeTab);
+
+    panel.dataset.activeTab = view.activeTab;
+    panel.setAttribute?.('aria-labelledby', view.activeTab === 'settings'
+        ? 'group-settings-trigger'
+        : `group-tab-${view.activeTab}`);
+
+    if (panelNeedsPaint) {
+        panel.innerHTML = view.tabContent;
+        panel.__tingGroupPanelSignature = view.panelSignature;
+        if (!options.quiet && previousTab && previousTab !== view.activeTab) panel.scrollTop = 0;
+    }
+    if (options.quiet && panelNeedsPaint) restoreDetailUiState(root.parentElement || root, uiSnapshot);
+    return true;
+}
+
 function renderGroupDetail(groupId, options = {}) {
     const group = getGroupById?.(groupId);
     if (!group) {
@@ -2499,6 +2552,10 @@ function renderGroupDetail(groupId, options = {}) {
     // and as a change signature. `@@HEAD@@` is a placeholder swapped for the head
     // animation class only when we actually paint, so the signature stays stable
     // whether the render is animated (user navigation) or quiet (data refresh).
+    const titleText = group.name || 'Nhóm';
+    const metaText = `${roleLabel} · ${headerCounts.memberCount} thành viên · ${headerCounts.sharedAccountCount} tài khoản`;
+    const settingsActive = activeTab === 'settings';
+    const panelLabelledBy = settingsActive ? 'group-settings-trigger' : `group-tab-${activeTab}`;
     const bodyHtml = `
         <button class="back-btn" onclick="goBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polyline points="15,18 9,12 15,6"/></svg> Nhóm</button>
         <div class="group-detail-head@@HEAD@@">
@@ -2506,15 +2563,15 @@ function renderGroupDetail(groupId, options = {}) {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
             </div>
             <div class="group-detail-main">
-                <div class="group-detail-title">${escapeHtml(group.name || 'Nhóm')}</div>
-                <div class="group-card-meta">${escapeHtml(roleLabel)} · ${headerCounts.memberCount} thành viên · ${headerCounts.sharedAccountCount} tài khoản</div>
+                <div class="group-detail-title" data-group-detail-title>${escapeHtml(titleText)}</div>
+                <div class="group-card-meta" data-group-detail-meta>${escapeHtml(metaText)}</div>
             </div>
             <div class="group-detail-actions">
-                <button class="icon-btn group-detail-settings-btn" title="Cài đặt nhóm" onclick="openGroupSettings('${escapeJsAttr(groupId)}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" width="18" height="18"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
+                <button id="group-settings-trigger" class="icon-btn group-detail-settings-btn${settingsActive ? ' is-active' : ''}" type="button" aria-pressed="${settingsActive}" title="Cài đặt nhóm" onclick="openGroupSettings('${escapeJsAttr(groupId)}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" width="18" height="18"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
             </div>
         </div>
         ${renderGroupTabs(group)}
-        <div id="group-tab-panel" class="group-tab-surface" role="tabpanel" aria-labelledby="group-tab-${escapeHtml(activeTab)}">
+        <div id="group-tab-panel" class="group-tab-surface" data-active-tab="${escapeHtml(activeTab)}" role="tabpanel" aria-labelledby="${escapeHtml(panelLabelledBy)}">
             ${tabContent}
         </div>
     `;
@@ -2522,21 +2579,39 @@ function renderGroupDetail(groupId, options = {}) {
     // each landing as a separate quiet refresh. If the resulting DOM is identical
     // we skip the innerHTML swap entirely so the tab doesn't blink/jitter 2-3 times.
     const signature = `${groupId}|${activeTab}|${bodyHtml}`;
-    if (options.quiet && signature === _lastGroupDetailSignature) return;
+    const panelSignature = `${groupId}|${activeTab}|${tabContent}`;
+    const existingRoot = pageContent.querySelector?.('.group-detail-root') || null;
+    const canPatchExisting = existingRoot?.dataset?.groupId === String(groupId)
+        && Boolean(existingRoot.querySelector?.('#group-tab-panel'));
+    if (options.quiet && signature === _lastGroupDetailSignature && canPatchExisting) return;
     _lastGroupDetailSignature = signature;
+
+    const view = {
+        activeTab,
+        title: titleText,
+        meta: metaText,
+        tabContent,
+        panelSignature,
+    };
+    if (canPatchExisting && patchGroupDetailShell(existingRoot, view, options)) return;
 
     // On data-driven refresh (Firestore snapshot) don't replay entrance animations,
     // otherwise every update makes the whole board fade in again and looks like a jitter.
     // The quiet marker lives on a wrapper inside the rendered HTML so it never leaks to other pages.
     const quietClass = options.quiet ? ' group-detail-quiet' : '';
-    const headAnim = options.quiet ? '' : ' anim-fade-in-up';
+    // Group Detail deliberately paints without entrance motion. The shell and
+    // panel can update close together as realtime data arrives, so replaying a
+    // fade here looks like one or two visible flashes.
+    const headAnim = '';
     // Chế độ quiet (refresh do dữ liệu): chụp scroll + focus + vị trí con trỏ TRƯỚC khi swap,
     // gán trực tiếp innerHTML (không xoá trắng vùng nội dung), rồi khôi phục lại NGAY sau khi vẽ
     // để giữ nguyên scroll offset (0px) và phần tử đang focus (Req 1.2, 2.1, 2.4, 2.5).
     const uiSnapshot = options.quiet ? captureDetailUiState(pageContent) : null;
     pageContent.innerHTML = `
-        <div class="group-detail-root${quietClass}">${bodyHtml.replace('@@HEAD@@', headAnim)}</div>
+        <div class="group-detail-root${quietClass}" data-group-id="${escapeHtml(groupId)}" data-active-tab="${escapeHtml(activeTab)}">${bodyHtml.replace('@@HEAD@@', headAnim)}</div>
     `;
+    const paintedPanel = pageContent.querySelector?.('#group-tab-panel');
+    if (paintedPanel) paintedPanel.__tingGroupPanelSignature = panelSignature;
     if (options.quiet) restoreDetailUiState(pageContent, uiSnapshot);
 }
 
@@ -3314,7 +3389,7 @@ function renderMinSupportedWarning(platform, status) {
 // hiệu hoá "Kiểm tra" theo Platform_Detector, định tuyến hành động theo nền tảng, và
 // khoá hành động khi đang tải (Requirements 1.1-1.6, 3.4/3.5/3.7, 4.4/4.6/4.8, 10.1-10.4).
 function renderUpdateSection() {
-    const version = escapeHtml(window.appState.appVersion || '1.7.1');
+    const version = escapeHtml(window.appState.appVersion || '1.7.3');
     const platform = getUpdatePlatform();
     const cap = getUpdateCapability(platform);
     const status = window.appState.updateStatus;
@@ -3951,6 +4026,9 @@ function renderAddForm(type, editData = null) {
                 <button type="button" class="quick-chip" onclick="closeInlineCategoryCreate()">Hủy</button>
             </div>
         </div>`;
+    const renderHistoryField = kind => typeof renderAddHistoryFieldButton === 'function'
+        ? renderAddHistoryFieldButton(kind, editData?.id || '')
+        : '';
     const historyButton = typeof renderAddHistoryOpenButton === 'function'
         ? renderAddHistoryOpenButton(editData?.id || '')
         : '';
@@ -4048,7 +4126,7 @@ function renderAddForm(type, editData = null) {
     <!-- TAB 3: Bổ sung -->
     <div class="add-wizard-panel" data-tab="3" id="add-tab-3" hidden>
         ${historyButton}
-        <div class="form-section-title">Ghi chú ${renderHintButton('Quét text rồi bấm Copy hoặc Code để đánh dấu. Link http/https sẽ tự nhận diện khi lưu.')}</div>
+        <div class="form-section-title add-field-title"><span>Ghi chú ${renderHintButton('Quét text rồi bấm Copy hoặc Code để đánh dấu. Link http/https sẽ tự nhận diện khi lưu.')}</span>${renderHistoryField('note')}</div>
         <div class="note-input-wrap">
             <div class="note-toolbar">
                 <button type="button" class="note-toolbar-btn" onclick="wrapNoteSelection('copy')">${renderNoteToolbarIcon('copy')} Copy</button>
@@ -4061,14 +4139,14 @@ function renderAddForm(type, editData = null) {
 https://example.com" style="min-height:110px" onfocus="markAddFormDateSkippedIfNeeded()" onblur="guideAddFormFromNote()">${escapeHtml(editData?.note || '')}</textarea>
         </div>
 
-        <div class="form-section-title">Ngu&#7891;n g&#7889;c / Ng&#432;&#7901;i b&#225;n <span class="optional-label">(T&#249;y ch&#7885;n)</span></div>
+        <div class="form-section-title add-field-title"><span>Ngu&#7891;n g&#7889;c / Ng&#432;&#7901;i b&#225;n <span class="optional-label">(T&#249;y ch&#7885;n)</span></span>${renderHistoryField('seller')}</div>
         <div class="input-group" style="margin-bottom:8px">
             <input type="text" id="add-seller-name" class="input" placeholder=" " style="padding-left:16px" value="${escapeHtml(editData?.sellerName || '')}" oninput="this.dataset.sellerAuto='false';syncSellerLinkFromForm()" onblur="guideAddFormFromSeller()" onkeydown="if(event.key==='Enter'){event.preventDefault();guideAddFormFromSeller()}">
             <label for="add-seller-name" class="input-label" style="left:16px">T&#234;n ng&#432;&#7901;i b&#225;n</label>
         </div>
         ${renderSellerPlatformPicker(editData?.sellerPlatform || 'other', editData?.sellerLink || '')}
 
-        <div class="form-section-title">Giá mua <span class="optional-label">(Tùy chọn)</span></div>
+        <div class="form-section-title add-field-title"><span>Giá mua <span class="optional-label">(Tùy chọn)</span></span>${renderHistoryField('price')}</div>
         <div class="input-group price-input-group" style="margin-bottom:8px">
             <input type="text" id="add-price" class="input" inputmode="decimal" autocomplete="off" placeholder=" " style="padding-left:16px" value="${editData?.purchaseAmount ?? editData?.purchasePrice ?? ''}" oninput="formatAccountPurchaseAmountField(this);updateAccountPurchaseConversionPreview()">
             <label for="add-price" class="input-label" style="left:16px">Số tiền gốc (để trống nếu không nhập)</label>

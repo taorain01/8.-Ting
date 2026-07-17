@@ -171,6 +171,78 @@ let _pendingContentChanged = false;
 // So sánh nội dung đã map (bỏ qua pendingSync/metadata) giữa các Snapshot_Event.
 const _sharedAccountsContentSig = new Map();
 const _sharedEditRequestsContentSig = new Map();
+const _groupRealtimeReadiness = new Map();
+const _groupRealtimeTrackingStarted = new Set();
+const _groupListRealtimeReadiness = { groups: false, invites: false };
+let _groupListRealtimeTrackingStarted = false;
+
+function isGroupListRealtimeReady() {
+    return !_groupListRealtimeTrackingStarted
+        || Boolean(_groupListRealtimeReadiness.groups && _groupListRealtimeReadiness.invites);
+}
+
+function markGroupListRealtimeSourcePending(source) {
+    if (!Object.prototype.hasOwnProperty.call(_groupListRealtimeReadiness, source)) return false;
+    _groupListRealtimeTrackingStarted = true;
+    _groupListRealtimeReadiness[source] = false;
+    return isGroupListRealtimeReady();
+}
+
+function markGroupListRealtimeSourceReady(source) {
+    if (!Object.prototype.hasOwnProperty.call(_groupListRealtimeReadiness, source)) return false;
+    const wasReady = isGroupListRealtimeReady();
+    _groupListRealtimeTrackingStarted = true;
+    _groupListRealtimeReadiness[source] = true;
+    return !wasReady && isGroupListRealtimeReady();
+}
+
+function notifyGroupListRealtimeSnapshot(source, contentChanged = true) {
+    const wasReady = isGroupListRealtimeReady();
+    const becameReady = markGroupListRealtimeSourceReady(source);
+    if (wasReady) notifyGroupsChanged(null, { contentChanged });
+    else if (becameReady) notifyGroupsChanged(null, { contentChanged: true });
+}
+
+function getGroupRealtimeReadiness(groupId) {
+    if (!_groupRealtimeReadiness.has(groupId)) {
+        _groupRealtimeReadiness.set(groupId, { accounts: false, requests: false });
+    }
+    return _groupRealtimeReadiness.get(groupId);
+}
+
+function isGroupRealtimeReady(groupId) {
+    if (!groupId || !_groupRealtimeTrackingStarted.has(groupId)) return true;
+    const status = _groupRealtimeReadiness.get(groupId);
+    return Boolean(status?.accounts && status?.requests);
+}
+
+function areKnownGroupRealtimeSourcesReady() {
+    return (window.appState?.groups || []).every(group => !group?.id || isGroupRealtimeReady(group.id));
+}
+
+function markGroupRealtimeSourcePending(groupId, source) {
+    if (!groupId || !['accounts', 'requests'].includes(source)) return false;
+    _groupRealtimeTrackingStarted.add(groupId);
+    const status = getGroupRealtimeReadiness(groupId);
+    status[source] = false;
+    return isGroupRealtimeReady(groupId);
+}
+
+function markGroupRealtimeSourceReady(groupId, source) {
+    if (!groupId || !['accounts', 'requests'].includes(source)) return false;
+    const wasReady = _groupRealtimeTrackingStarted.has(groupId) && isGroupRealtimeReady(groupId);
+    _groupRealtimeTrackingStarted.add(groupId);
+    const status = getGroupRealtimeReadiness(groupId);
+    status[source] = true;
+    return !wasReady && isGroupRealtimeReady(groupId);
+}
+
+function notifyGroupRealtimeSnapshot(groupId, source, contentChanged) {
+    const wasReady = _groupRealtimeTrackingStarted.has(groupId) && isGroupRealtimeReady(groupId);
+    const becameReady = markGroupRealtimeSourceReady(groupId, source);
+    if (wasReady) notifyGroupsChanged(groupId, { contentChanged });
+    else if (becameReady) notifyGroupsChanged(groupId, { contentChanged: true });
+}
 
 // Chuỗi hoá nội dung danh sách để so sánh, loại bỏ trường metadata (pendingSync)
 // nhằm chỉ phát hiện thay đổi nội dung hiển thị chứ không phải thay đổi fromCache/hasPendingWrites.
@@ -195,7 +267,10 @@ function runGroupsChangedRender() {
     _pendingContentChanged = false;
     if (typeof updateHeader === 'function') updateHeader();
     const page = window.appState?.currentPage || '';
-    if (page === 'groups' && typeof renderGroupList === 'function') renderGroupList();
+    const listReady = typeof isGroupListRealtimeReady !== 'function' || isGroupListRealtimeReady();
+    const knownGroupsReady = typeof areKnownGroupRealtimeSourcesReady !== 'function'
+        || areKnownGroupRealtimeSourcesReady();
+    if (page === 'groups' && listReady && knownGroupsReady && typeof renderGroupList === 'function') renderGroupList();
 
     // Cổng render Group_Detail_View: dùng hàm thuần shouldRenderGroupDetail để quyết định.
     // Khi groupId là null (cập nhật chung, ví dụ danh sách nhóm) coi như nhắm đúng nhóm đang mở.
@@ -205,7 +280,11 @@ function runGroupsChangedRender() {
     };
     const eventGroupId = (groupId === null) ? state.currentGroupId : groupId;
     const event = { groupId: eventGroupId, contentChanged };
-    if (shouldRenderGroupDetail(state, event) && typeof renderGroupDetail === 'function') {
+    const firstPaintPending = Boolean(window.appState?.groupDetailFirstPaintPending);
+    const tabTransitionPending = Boolean(window.appState?.groupTabTransitionPending);
+    const currentGroupReady = !state.currentGroupId || isGroupRealtimeReady(state.currentGroupId);
+    if (listReady && currentGroupReady && !firstPaintPending && !tabTransitionPending
+        && shouldRenderGroupDetail(state, event) && typeof renderGroupDetail === 'function') {
         // Data-driven refresh: render ở chế độ quiet để không phát lại entrance animation (tránh nháy).
         renderGroupDetail(state.currentGroupId, { quiet: true });
     }
@@ -368,13 +447,16 @@ function loadGroupsRealtime() {
     ensureGroupState();
     if (typeof groupsUnsubscribe === 'function') groupsUnsubscribe();
     groupsUnsubscribe = null;
+    markGroupListRealtimeSourcePending('groups');
+    markGroupListRealtimeSourcePending('invites');
 
     const user = getCurrentGroupUser();
     if (!user.email || !user.verified) {
         window.appState.groups = [];
         window.appState.groupInvites = [];
         syncSharedAccountListeners([]);
-        notifyGroupsChanged();
+        notifyGroupListRealtimeSnapshot('groups');
+        notifyGroupListRealtimeSnapshot('invites');
         return null;
     }
 
@@ -385,7 +467,8 @@ function loadGroupsRealtime() {
         }, user.email));
         window.appState.groups = sortGroupsByTime(all.filter(group => group.memberEmails.includes(user.email)));
         window.appState.groupInvites = sortGroupsByTime(all.filter(group => group.pendingMemberEmails.includes(user.email) && !group.memberEmails.includes(user.email)));
-        notifyGroupsChanged();
+        notifyGroupListRealtimeSnapshot('groups');
+        notifyGroupListRealtimeSnapshot('invites');
         return null;
     }
 
@@ -400,7 +483,7 @@ function loadGroupsRealtime() {
             snapshot.forEach(doc => groups.push(mapGroupDoc(doc, user.email, user.uid)));
             window.appState.groups = sortGroupsByTime(groups);
             syncSharedAccountListeners(groups.map(group => group.id));
-            notifyGroupsChanged();
+            notifyGroupListRealtimeSnapshot('groups');
         }, (error) => {
             console.error('Load groups error:', error);
             window.appState.groups = [];
@@ -410,7 +493,7 @@ function loadGroupsRealtime() {
             } else if (typeof showToast === 'function') {
                 showToast(error.message || 'Không tải được danh sách nhóm', 'error');
             }
-            notifyGroupsChanged();
+            notifyGroupListRealtimeSnapshot('groups');
         });
 
     inviteUnsubscribe = db.collection('groups')
@@ -423,7 +506,7 @@ function loadGroupsRealtime() {
                 if (!memberIds.has(doc.id)) invites.push(mapGroupDoc(doc, user.email, user.uid, { invite: true }));
             });
             window.appState.groupInvites = sortGroupsByTime(invites);
-            notifyGroupsChanged();
+            notifyGroupListRealtimeSnapshot('invites');
         }, (error) => {
             console.error('Load group invites error:', error);
             window.appState.groupInvites = [];
@@ -432,7 +515,7 @@ function loadGroupsRealtime() {
             } else if (typeof showToast === 'function') {
                 showToast(error.message || 'Không tải được lời mời nhóm', 'error');
             }
-            notifyGroupsChanged();
+            notifyGroupListRealtimeSnapshot('invites');
         });
 
     groupsUnsubscribe = () => {
@@ -446,6 +529,8 @@ function stopGroupsRealtime() {
     if (typeof groupsUnsubscribe === 'function') groupsUnsubscribe();
     groupsUnsubscribe = null;
     syncSharedAccountListeners([]);
+    markGroupListRealtimeSourcePending('groups');
+    markGroupListRealtimeSourcePending('invites');
 }
 
 async function addGroupMember(groupId, email) {
@@ -647,11 +732,11 @@ function getGroupDerivedKey(groupId) {
     return `ting-open-group::${String(groupId || '')}`;
 }
 
-function setGroupUnlocked(groupId, sharedPassword) {
+function setGroupUnlocked(groupId, sharedPassword, options = {}) {
     ensureGroupState();
     if (!groupId || !sharedPassword) return false;
     window.appState.groupUnlocked[groupId] = String(sharedPassword);
-    notifyGroupsChanged(groupId);
+    if (options.notify !== false) notifyGroupsChanged(groupId);
     return true;
 }
 
@@ -875,11 +960,12 @@ function loadSharedAccountsRealtime(groupId) {
     ensureGroupState();
     if (!groupId) return null;
     if (typeof sharedAccountsUnsubscribes.get(groupId) === 'function') return sharedAccountsUnsubscribes.get(groupId);
+    markGroupRealtimeSourcePending(groupId, 'accounts');
 
     if (window.appState.isDemo) {
         window.appState.sharedAccounts[groupId] = sortSharedAccountsForGroup(window.appState.sharedAccounts[groupId] || []);
         window.appState.sharedAccountCounts[groupId] = window.appState.sharedAccounts[groupId].length;
-        notifyGroupsChanged(groupId);
+        notifyGroupRealtimeSnapshot(groupId, 'accounts', true);
         return null;
     }
 
@@ -914,14 +1000,14 @@ function loadSharedAccountsRealtime(groupId) {
             const sig = computeGroupContentSignature(sortedAccounts);
             const contentChanged = sig !== _sharedAccountsContentSig.get(groupId);
             _sharedAccountsContentSig.set(groupId, sig);
-            notifyGroupsChanged(groupId, { contentChanged });
+            notifyGroupRealtimeSnapshot(groupId, 'accounts', contentChanged);
         }, (error) => {
             console.error('Load shared accounts error:', error);
             window.appState.sharedAccounts[groupId] = [];
             window.appState.sharedAccountCounts[groupId] = 0;
             _sharedAccountsContentSig.set(groupId, computeGroupContentSignature([]));
             if (typeof showToast === 'function') showToast(error.message || 'Không tải được tài khoản chia sẻ', 'error');
-            notifyGroupsChanged(groupId);
+            notifyGroupRealtimeSnapshot(groupId, 'accounts', true);
         });
     sharedAccountsUnsubscribes.set(groupId, unsubscribe);
     return unsubscribe;
@@ -932,17 +1018,19 @@ function stopSharedAccountsRealtime(groupId) {
     if (typeof unsubscribe === 'function') unsubscribe();
     sharedAccountsUnsubscribes.delete(groupId);
     _sharedAccountsContentSig.delete(groupId); // xoá chữ ký để lần listen sau coi là mới
+    markGroupRealtimeSourcePending(groupId, 'accounts');
 }
 
 function loadSharedEditRequestsRealtime(groupId) {
     ensureGroupState();
     if (!groupId) return null;
     if (typeof sharedEditRequestsUnsubscribes.get(groupId) === 'function') return sharedEditRequestsUnsubscribes.get(groupId);
+    markGroupRealtimeSourcePending(groupId, 'requests');
 
     if (window.appState.isDemo) {
         window.appState.sharedEditRequests[groupId] = window.appState.sharedEditRequests[groupId] || [];
         window.appState.sharedEditRequestCounts[groupId] = window.appState.sharedEditRequests[groupId].filter(item => item.status === 'pending').length;
-        notifyGroupsChanged(groupId);
+        notifyGroupRealtimeSnapshot(groupId, 'requests', true);
         return null;
     }
 
@@ -961,14 +1049,14 @@ function loadSharedEditRequestsRealtime(groupId) {
             const sig = computeGroupContentSignature(requests);
             const contentChanged = sig !== _sharedEditRequestsContentSig.get(groupId);
             _sharedEditRequestsContentSig.set(groupId, sig);
-            notifyGroupsChanged(groupId, { contentChanged });
+            notifyGroupRealtimeSnapshot(groupId, 'requests', contentChanged);
         }, (error) => {
             console.error('Load shared edit requests error:', error);
             window.appState.sharedEditRequests[groupId] = [];
             window.appState.sharedEditRequestCounts[groupId] = 0;
             _sharedEditRequestsContentSig.set(groupId, computeGroupContentSignature([]));
             if (typeof showToast === 'function') showToast(error.message || 'Không tải được yêu cầu sửa', 'error');
-            notifyGroupsChanged(groupId);
+            notifyGroupRealtimeSnapshot(groupId, 'requests', true);
         });
     sharedEditRequestsUnsubscribes.set(groupId, unsubscribe);
     return unsubscribe;
@@ -979,6 +1067,7 @@ function stopSharedEditRequestsRealtime(groupId) {
     if (typeof unsubscribe === 'function') unsubscribe();
     sharedEditRequestsUnsubscribes.delete(groupId);
     _sharedEditRequestsContentSig.delete(groupId); // xoá chữ ký để lần listen sau coi là mới
+    markGroupRealtimeSourcePending(groupId, 'requests');
 }
 
 function hasSharedSourceAccount(groupId, sourceAccountId) {
@@ -1581,6 +1670,8 @@ window.loadSharedAccountsRealtime = loadSharedAccountsRealtime;
 window.stopSharedAccountsRealtime = stopSharedAccountsRealtime;
 window.loadSharedEditRequestsRealtime = loadSharedEditRequestsRealtime;
 window.stopSharedEditRequestsRealtime = stopSharedEditRequestsRealtime;
+window.isGroupRealtimeReady = isGroupRealtimeReady;
+window.isGroupListRealtimeReady = isGroupListRealtimeReady;
 window.shareAccountToGroup = shareAccountToGroup;
 window.updateSharedAccountInGroup = updateSharedAccountInGroup;
 window.createSharedEditRequest = createSharedEditRequest;

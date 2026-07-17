@@ -13,6 +13,20 @@ bộ quá nhỏ.
 
 ## Chưa phát hành
 
+## 1.7.3 - 2026-07-18
+
+- Thiết kế lại tab Nhóm và điều phối dữ liệu realtime để chuyển tab chỉ vẽ một lần, không còn nháy hoặc tải lặp.
+- Thêm biểu đồ dòng Chi tiêu chính với khung 10 ngày, kéo ngang bằng chuột hoặc cảm ứng và mặc định đặt ngày hôm nay ở giữa.
+- Loại bỏ đợt animation thứ hai khi chuyển trang từ sidebar trên PC và mobile.
+- Cải thiện lịch sử nhập riêng cho Ghi chú, Người bán và Giá; bao gồm các sửa lỗi đồng bộ Chi tiêu với Firestore của bản phát triển 1.7.2.
+
+## 1.7.2 - 2026-07-17
+
+- Sửa đồng bộ Chi tiêu với Firestore bằng cách khởi tạo client `auth/db` dùng chung cho PC và mobile.
+- Tự backfill các khoản mua cũ có giá vào sổ giao dịch sau khi đăng nhập lại.
+- Thu gọn giao diện Chi tiêu với bộ lọc dạng nút và nút thêm khoản chi nhỏ hơn.
+- Giữ lịch sử gộp ở đầu form và thêm ba nút riêng cho Ghi chú, Người bán, Giá; ghi chú chỉ hiện bản xem trước một dòng.
+
 ## 1.7.1 - 2026-07-17
 
 - Thêm khu Chi tiêu trên dashboard, tự ghi nhận tiền mua tài khoản và cho phép nhập khoản chi thủ công.

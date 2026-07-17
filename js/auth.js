@@ -817,6 +817,9 @@ async function signOut() {
             window.appState.expenses = [];
             window.appState.expensesLoaded = false;
             window.appState.accountsLoaded = false;
+            window.appState.expenseBackfillComplete = false;
+            window.appState.expenseBackfillStats = null;
+            window.appState.expenseBackfillWarningShown = false;
             window.appState.customCategories = [];
             window.appState.groups = [];
             window.appState.groupInvites = [];
@@ -855,6 +858,9 @@ async function signOut() {
         window.appState.expenses = [];
         window.appState.expensesLoaded = false;
         window.appState.accountsLoaded = false;
+        window.appState.expenseBackfillComplete = false;
+        window.appState.expenseBackfillStats = null;
+        window.appState.expenseBackfillWarningShown = false;
         window.appState.customCategories = [];
         window.appState.groups = [];
         window.appState.groupInvites = [];
@@ -962,6 +968,9 @@ function resetAppSessionState() {
     window.appState.expenses = [];
     window.appState.expensesLoaded = false;
     window.appState.accountsLoaded = false;
+    window.appState.expenseBackfillComplete = false;
+    window.appState.expenseBackfillStats = null;
+    window.appState.expenseBackfillWarningShown = false;
     window.appState.customCategories = [];
     window.appState.groups = [];
     window.appState.groupInvites = [];

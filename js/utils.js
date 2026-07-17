@@ -424,6 +424,24 @@ function escapeJsAttr(value) {
 
 const TING_RELEASE_HISTORY = Object.freeze([
     {
+        version: '1.7.3', date: '18/07/2026', title: 'Ổn định giao diện Nhóm và biểu đồ Chi tiêu',
+        changes: [
+            'Thiết kế lại tab Nhóm và điều phối dữ liệu realtime để chuyển tab chỉ vẽ một lần, không còn nháy hoặc tải lặp.',
+            'Thêm biểu đồ dòng Chi tiêu chính với khung 10 ngày, kéo ngang bằng chuột hoặc cảm ứng và mặc định đặt ngày hôm nay ở giữa.',
+            'Loại bỏ đợt animation thứ hai khi chuyển trang từ sidebar trên PC và mobile.',
+            'Cải thiện lịch sử nhập riêng và bao gồm các sửa lỗi đồng bộ Chi tiêu với Firestore của bản phát triển 1.7.2.',
+        ],
+    },
+    {
+        version: '1.7.2', date: '17/07/2026', title: 'Đồng bộ Chi tiêu với Firestore',
+        changes: [
+            'Sửa kết nối auth/db dùng chung để ghi và đọc sổ giao dịch trên PC và mobile.',
+            'Tự backfill các khoản mua cũ có giá vào dữ liệu Chi tiêu mà không tạo bản ghi trùng.',
+            'Thu gọn bộ lọc và phần đầu trang Chi tiêu.',
+            'Giữ lịch sử gộp ở đầu form và thêm ba nút riêng cho Ghi chú, Người bán, Giá với bản xem trước ghi chú một dòng.',
+        ],
+    },
+    {
         version: '1.7.1', date: '17/07/2026', title: 'Chi tiêu và quy đổi theo giao dịch',
         changes: [
             'Thêm khu Chi tiêu trên dashboard, tự ghi nhận tiền mua tài khoản và hỗ trợ khoản chi thủ công.',
@@ -1699,9 +1717,7 @@ function applyAddHistoryBundle(encodedBundle) {
     if (bundle.purchasePrice) applyAddHistoryPrice(encodeAddHistoryPayload(String(bundle.purchasePrice)));
 }
 
-// ===== POPUP LỊCH SỬ ĐÃ NHẬP (gộp Ghi chú + Người bán + Giá) =====
-// Gộp toàn bộ gợi ý lịch sử vào MỘT popup gọn để dễ chọn và nhìn đầy đủ,
-// thay cho các hàng chip rải rác bị cắt cụt (...) dưới từng ô nhập.
+// ===== LỊCH SỬ RIÊNG CHO GHI CHÚ / NGƯỜI BÁN / GIÁ =====
 
 function formatAddHistoryPriceLabel(value) {
     const formatted = typeof formatPriceInput === 'function'
@@ -1710,58 +1726,119 @@ function formatAddHistoryPriceLabel(value) {
     return formatted ? `${formatted} ₫` : '';
 }
 
-// Nút mở popup — chỉ hiện khi thực sự có lịch sử để chọn.
+const ADD_HISTORY_FIELD_CONFIG = Object.freeze({
+    note: { key: 'notes', title: 'Lịch sử ghi chú' },
+    seller: { key: 'sellers', title: 'Lịch sử người bán' },
+    price: { key: 'prices', title: 'Lịch sử giá mua' },
+});
+
+function getAddHistoryFieldItems(kind, editingId = '') {
+    const config = ADD_HISTORY_FIELD_CONFIG[kind];
+    if (!config) return [];
+    const history = buildAddFormHistorySuggestions(editingId);
+    return history[config.key] || [];
+}
+
+function renderAddHistoryFieldButton(kind, editingId = '') {
+    const config = ADD_HISTORY_FIELD_CONFIG[kind];
+    const items = getAddHistoryFieldItems(kind, editingId);
+    if (!config) return '';
+    const disabled = items.length ? '' : ' disabled aria-disabled="true" title="Chưa có lịch sử"';
+    const action = items.length ? `onclick="toggleAddHistoryPopover(event,'${escapeJsAttr(kind)}')"` : '';
+    return `<div class="add-history-anchor add-history-anchor-${escapeHtml(kind)}">
+        <button type="button" class="add-history-open-btn" ${action}${disabled} aria-label="${escapeHtml(config.title)}">
+            <span class="add-history-open-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg></span>
+            <span class="add-history-open-tx">Lịch sử</span>
+            <span class="add-history-open-count">${items.length}</span>
+        </button>
+        <div id="add-history-popover-${escapeHtml(kind)}" class="add-history-popover" data-kind="${escapeHtml(kind)}" data-editing-id="${escapeHtml(editingId || '')}" hidden onclick="event.stopPropagation()"></div>
+    </div>`;
+}
+
 function renderAddHistoryOpenButton(editingId = '') {
     const history = buildAddFormHistorySuggestions(editingId);
     const total = history.notes.length + history.sellers.length
         + history.prices.length + history.bundles.length;
-    if (!total) return '';
-    return `<div class="add-history-anchor">
-        <button type="button" class="add-history-open-btn" onclick="toggleAddHistoryPopover(event)">
-            <span class="add-history-open-ic" aria-hidden="true">🕘</span>
-            <span class="add-history-open-tx">Lịch sử đã nhập</span>
-            <span class="add-history-open-count">${total}</span>
-            <span class="add-history-open-caret" aria-hidden="true">▾</span>
-        </button>
-        <div id="add-history-popover" class="add-history-popover" data-editing-id="${escapeHtml(editingId || '')}" hidden onclick="event.stopPropagation()"></div>
+    const disabled = total ? '' : ' disabled aria-disabled="true" title="Chưa có lịch sử"';
+    const action = total ? 'onclick="toggleAddHistoryPopover(event,\'combined\')"' : '';
+    return `<div class="add-history-combined-row">
+        <div class="add-history-anchor add-history-anchor-combined">
+            <button type="button" class="add-history-open-btn add-history-open-btn-combined" ${action}${disabled} aria-label="Lịch sử đã nhập">
+                <span class="add-history-open-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg></span>
+                <span class="add-history-open-tx">Lịch sử đã nhập</span>
+                <span class="add-history-open-count">${total}</span>
+                <span class="add-history-open-caret" aria-hidden="true">▾</span>
+            </button>
+            <div id="add-history-popover-combined" class="add-history-popover add-history-popover-combined" data-kind="combined" data-editing-id="${escapeHtml(editingId || '')}" hidden onclick="event.stopPropagation()"></div>
+        </div>
     </div>`;
 }
 
 function renderAddHistorySectionWrap(kind, title, itemsHtml) {
     if (!itemsHtml) return '';
-    return `<div class="add-history-section add-history-section-${kind}">
+    return `<div class="add-history-section add-history-section-${escapeHtml(kind)}">
         <div class="add-history-section-title">${escapeHtml(title)}</div>
         <div class="add-history-section-items">${itemsHtml}</div>
     </div>`;
 }
 
-function renderAddHistoryPopoverContent(editingId = '') {
+function renderAddHistoryPopoverContent(kind, editingId = '') {
     const history = buildAddFormHistorySuggestions(editingId);
-    const sections = [];
-
-    if (history.bundles.length) {
-        const items = history.bundles.map(item => {
-            const payload = escapeJsAttr(encodeAddHistoryPayload(item));
-            const priceLabel = formatAddHistoryPriceLabel(item.purchasePrice);
-            const meta = [item.sellerName, priceLabel].filter(Boolean).join('  ·  ');
-            return `<button type="button" class="add-history-item add-history-item-bundle" onclick="applyAddHistoryBundle('${payload}');closeAddHistoryPopover()">
-                <span class="add-history-item-note">${escapeHtml(item.note)}</span>
-                ${meta ? `<span class="add-history-item-meta">${escapeHtml(meta)}</span>` : ''}
-            </button>`;
-        }).join('');
-        sections.push(renderAddHistorySectionWrap('bundle', 'Bộ đầy đủ · ghi chú + người bán + giá', items));
+    if (kind === 'combined') {
+        const sections = [];
+        if (history.bundles.length) {
+            const items = history.bundles.map(item => {
+                const payload = escapeJsAttr(encodeAddHistoryPayload(item));
+                const priceLabel = formatAddHistoryPriceLabel(item.purchasePrice);
+                const meta = [item.sellerName, priceLabel].filter(Boolean).join(' · ');
+                return `<button type="button" class="add-history-item add-history-item-bundle" onclick="applyAddHistoryBundle('${payload}');closeAddHistoryPopover()">
+                    <span class="add-history-item-note">${escapeHtml(getAddHistoryPreview(item.note))}</span>
+                    ${meta ? `<span class="add-history-item-meta">${escapeHtml(meta)}</span>` : ''}
+                </button>`;
+            }).join('');
+            sections.push(renderAddHistorySectionWrap('bundle', 'Bộ đầy đủ · ghi chú + người bán + giá', items));
+        }
+        if (history.notes.length) {
+            const items = history.notes.map(item => {
+                const payload = escapeJsAttr(encodeAddHistoryPayload(item.value));
+                return `<button type="button" class="add-history-item add-history-item-note-row" onclick="applyAddHistoryNote('${payload}');closeAddHistoryPopover()"><span class="add-history-item-note">${escapeHtml(item.label)}</span></button>`;
+            }).join('');
+            sections.push(renderAddHistorySectionWrap('note', 'Ghi chú', items));
+        }
+        if (history.sellers.length) {
+            const items = history.sellers.map(item => {
+                const name = escapeJsAttr(encodeAddHistoryPayload(item.name));
+                const platform = escapeJsAttr(item.platform || 'other');
+                const link = escapeJsAttr(encodeAddHistoryPayload(item.link || ''));
+                return `<button type="button" class="add-history-item add-history-item-seller" onclick="applyAddHistorySeller('${name}','${platform}','${link}');closeAddHistoryPopover()"><span class="add-history-item-main">${escapeHtml(item.name)}</span></button>`;
+            }).join('');
+            sections.push(renderAddHistorySectionWrap('seller', 'Người bán', items));
+        }
+        if (history.prices.length) {
+            const items = history.prices.map(item => {
+                const payload = escapeJsAttr(encodeAddHistoryPayload(String(item.value)));
+                return `<button type="button" class="add-history-item add-history-item-price" onclick="applyAddHistoryPrice('${payload}');closeAddHistoryPopover()">${escapeHtml(formatAddHistoryPriceLabel(item.value) || item.label)}</button>`;
+            }).join('');
+            sections.push(renderAddHistorySectionWrap('price', 'Giá mua', items));
+        }
+        const body = sections.join('') || '<div class="add-history-empty">Chưa có lịch sử nào để chọn</div>';
+        return `<div class="add-history-popover-head">
+            <span class="add-history-popover-title">Lịch sử đã nhập</span>
+            <button type="button" class="add-history-popover-close" onclick="closeAddHistoryPopover()" aria-label="Đóng">✕</button>
+        </div><div class="add-history-popover-body">${body}</div>`;
     }
 
-    if (history.notes.length) {
-        const items = history.notes.map(item => {
+    const config = ADD_HISTORY_FIELD_CONFIG[kind];
+    if (!config) return '';
+    let items = '';
+
+    if (kind === 'note') {
+        items = history.notes.map(item => {
             const payload = escapeJsAttr(encodeAddHistoryPayload(item.value));
-            return `<button type="button" class="add-history-item" onclick="applyAddHistoryNote('${payload}');closeAddHistoryPopover()">${escapeHtml(item.value)}</button>`;
+            return `<button type="button" class="add-history-item add-history-item-note-row" onclick="applyAddHistoryNote('${payload}');closeAddHistoryPopover()" title="${escapeHtml(item.label)}"><span class="add-history-item-note">${escapeHtml(item.label)}</span></button>`;
         }).join('');
-        sections.push(renderAddHistorySectionWrap('note', 'Ghi chú', items));
-    }
-
-    if (history.sellers.length) {
-        const items = history.sellers.map(item => {
+    } else if (kind === 'seller') {
+        items = history.sellers.map(item => {
             const name = escapeJsAttr(encodeAddHistoryPayload(item.name));
             const platform = escapeJsAttr(item.platform || 'other');
             const link = escapeJsAttr(encodeAddHistoryPayload(item.link || ''));
@@ -1770,28 +1847,25 @@ function renderAddHistoryPopoverContent(editingId = '') {
                 <span class="add-history-item-main">${escapeHtml(item.name)}</span>${sub}
             </button>`;
         }).join('');
-        sections.push(renderAddHistorySectionWrap('seller', 'Người bán', items));
-    }
-
-    if (history.prices.length) {
-        const items = history.prices.map(item => {
+    } else if (kind === 'price') {
+        items = history.prices.map(item => {
             const payload = escapeJsAttr(encodeAddHistoryPayload(String(item.value)));
             return `<button type="button" class="add-history-item add-history-item-price" onclick="applyAddHistoryPrice('${payload}');closeAddHistoryPopover()">${escapeHtml(formatAddHistoryPriceLabel(item.value) || item.label)}</button>`;
         }).join('');
-        sections.push(renderAddHistorySectionWrap('price', 'Giá mua', items));
     }
 
-    const body = sections.join('') || '<div class="add-history-empty">Chưa có lịch sử nào để chọn</div>';
+    const body = items
+        ? `<div class="add-history-section add-history-section-${escapeHtml(kind)}"><div class="add-history-section-items">${items}</div></div>`
+        : '<div class="add-history-empty">Chưa có lịch sử nào để chọn</div>';
     return `<div class="add-history-popover-head">
-        <span class="add-history-popover-title">Lịch sử đã nhập</span>
+        <span class="add-history-popover-title">${escapeHtml(config.title)}</span>
         <button type="button" class="add-history-popover-close" onclick="closeAddHistoryPopover()" aria-label="Đóng">✕</button>
     </div>
     <div class="add-history-popover-body">${body}</div>`;
 }
 
 function closeAddHistoryPopover() {
-    const popover = document.getElementById('add-history-popover');
-    if (popover) popover.hidden = true;
+    document.querySelectorAll?.('.add-history-popover').forEach(popover => { popover.hidden = true; });
     if (typeof document !== 'undefined') document.removeEventListener('keydown', handleAddHistoryEscape);
 }
 
@@ -1799,17 +1873,18 @@ function handleAddHistoryEscape(event) {
     if (event.key === 'Escape') closeAddHistoryPopover();
 }
 
-function toggleAddHistoryPopover(event) {
+function toggleAddHistoryPopover(event, kind = '') {
     event?.stopPropagation?.();
-    const popover = document.getElementById('add-history-popover');
+    const anchor = event?.currentTarget?.closest?.('.add-history-anchor');
+    const popover = anchor?.querySelector?.('.add-history-popover');
     if (!popover) return;
     const opening = popover.hidden;
-    popover.hidden = !opening;
+    closeAddHistoryPopover();
     if (!opening) {
-        document.removeEventListener('keydown', handleAddHistoryEscape);
         return;
     }
-    popover.innerHTML = renderAddHistoryPopoverContent(popover.dataset.editingId || '');
+    popover.hidden = false;
+    popover.innerHTML = renderAddHistoryPopoverContent(kind || popover.dataset.kind, popover.dataset.editingId || '');
     positionAddHistoryPopover(popover);
     document.addEventListener('keydown', handleAddHistoryEscape);
     setTimeout(() => document.addEventListener('click', closeAddHistoryPopover, { once: true }), 0);
@@ -1955,11 +2030,13 @@ if (typeof window !== 'undefined') {
     window.copyPasteSelectionToNote = copyPasteSelectionToNote;
     window.applySmartPasteMetadata = applySmartPasteMetadata;
     window.buildAddFormHistorySuggestions = buildAddFormHistorySuggestions;
+    window.getAddHistoryFieldItems = getAddHistoryFieldItems;
     window.applyAddHistoryNote = applyAddHistoryNote;
     window.applyAddHistorySeller = applyAddHistorySeller;
     window.applyAddHistoryPrice = applyAddHistoryPrice;
     window.applyAddHistoryBundle = applyAddHistoryBundle;
     window.renderAddHistoryOpenButton = renderAddHistoryOpenButton;
+    window.renderAddHistoryFieldButton = renderAddHistoryFieldButton;
     window.renderAddHistoryPopoverContent = renderAddHistoryPopoverContent;
     window.toggleAddHistoryPopover = toggleAddHistoryPopover;
     window.closeAddHistoryPopover = closeAddHistoryPopover;

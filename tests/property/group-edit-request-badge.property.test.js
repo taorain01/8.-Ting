@@ -97,7 +97,7 @@ const invalidArb = fc.oneof(
   fc.constant('12abc'),
   fc.constant({}),
   fc.constant([1, 2]),
-  fc.string(),
+  fc.string().filter((value) => !Number.isFinite(Number(value))),
 );
 
 // Chuỗi số hợp lệ (Number() chuyển được), gồm cả số thực dạng chuỗi.

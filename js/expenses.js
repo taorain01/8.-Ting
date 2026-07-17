@@ -27,6 +27,7 @@
         currency: 'all',
         status: 'active',
         selectedBucket: '',
+        filtersOpen: false,
     };
 
     let expensesUnsubscribe = null;
@@ -189,9 +190,11 @@
     }
 
     function expenseCollection() {
-        const userId = root.auth?.currentUser?.uid;
-        if (!userId || !root.db) return null;
-        return root.db.collection('users').doc(userId).collection('expenses');
+        const authClient = root.auth || (typeof auth !== 'undefined' ? auth : null);
+        const firestore = root.db || (typeof db !== 'undefined' ? db : null);
+        const userId = authClient?.currentUser?.uid;
+        if (!userId || !firestore) return null;
+        return firestore.collection('users').doc(userId).collection('expenses');
     }
 
     async function saveExpense(input, options = {}) {
@@ -235,21 +238,47 @@
 
     async function backfillAccountExpenses() {
         const app = state();
-        if (!app || backfillRunning || app.expensesLoaded !== true || app.accountsLoaded !== true) return;
+        if (!app || app.expensesLoaded !== true || app.accountsLoaded !== true) {
+            return { created: 0, skipped: 0, failed: 0, ready: false };
+        }
+        if (backfillRunning) return { created: 0, skipped: 0, failed: 0, running: true };
         backfillRunning = true;
+        const stats = { created: 0, skipped: 0, failed: 0, ready: true };
         try {
             const known = new Set(app.expenses.map(item => item.id));
-            for (const account of app.accounts || []) {
+            const accountsById = new Map();
+            [...(app.accounts || []), ...(app.trashAccounts || [])].forEach(account => {
+                if (account?.id) accountsById.set(account.id, account);
+            });
+            for (const account of accountsById.values()) {
                 const id = initialPurchaseExpenseId(account.id);
                 const money = accountPurchaseMoney(account);
-                if (!known.has(id) && money.amount && money.amountVnd) {
+                if (known.has(id) || !money.amount || !money.amountVnd) {
+                    stats.skipped += 1;
+                    continue;
+                }
+                try {
                     await syncInitialPurchaseExpenseFromAccount(account);
                     known.add(id);
+                    stats.created += 1;
+                } catch (error) {
+                    stats.failed += 1;
+                    console.warn(`Expense backfill failed for account ${account.id}:`, error);
                 }
             }
-            app.expenseBackfillComplete = true;
+            app.expenseBackfillComplete = stats.failed === 0;
+            app.expenseBackfillStats = { ...stats };
+            if (stats.failed && !app.expenseBackfillWarningShown) {
+                app.expenseBackfillWarningShown = true;
+                root.showToast?.(`Chưa đồng bộ được ${stats.failed} khoản chi cũ`, 'warning');
+            }
+            return stats;
         } catch (error) {
+            stats.failed += 1;
+            app.expenseBackfillComplete = false;
+            app.expenseBackfillStats = { ...stats };
             console.warn('Expense backfill failed:', error);
+            return stats;
         } finally {
             backfillRunning = false;
         }
@@ -522,9 +551,9 @@
         return money;
     }
 
-    function accountOptions(selectedId = '') {
+    function accountOptions(selectedId = '', emptyLabel = 'Không gắn tài khoản') {
         const accounts = state()?.accounts || [];
-        return `<option value="">Không gắn tài khoản</option>` + accounts.map(account => (
+        return `<option value="">${safe(emptyLabel)}</option>` + accounts.map(account => (
             `<option value="${safe(account.id)}" ${account.id === selectedId ? 'selected' : ''}>${safe(account.name || account.id)}</option>`
         )).join('');
     }
@@ -704,6 +733,32 @@
         renderExpensesPage();
     }
 
+    function toggleExpenseFilters() {
+        const app = state();
+        if (!app) return;
+        app.expenseViewState.filtersOpen = !app.expenseViewState.filtersOpen;
+        renderExpensesPage();
+    }
+
+    function expenseFilterSummary(view = DEFAULT_VIEW) {
+        const presetLabels = {
+            week: 'Tuần này', '7d': '7 ngày', month: 'Tháng này', '30d': '30 ngày',
+            '3m': '3 tháng', '6m': '6 tháng', year: 'Năm nay', all: 'Tất cả', custom: 'Tùy chọn',
+        };
+        const groupLabels = { day: 'Theo ngày', week: 'Theo tuần', month: 'Theo tháng' };
+        const metricLabels = { amount: 'Tổng tiền', count: 'Số lần mua' };
+        return [
+            presetLabels[view.preset] || presetLabels.month,
+            groupLabels[view.groupBy] || groupLabels.day,
+            metricLabels[view.metric] || metricLabels.amount,
+        ].join(' · ');
+    }
+
+    function activeExpenseFilterCount(view = DEFAULT_VIEW) {
+        return ['preset', 'groupBy', 'metric', 'kind', 'accountId', 'currency', 'status']
+            .reduce((count, key) => count + (view[key] !== DEFAULT_VIEW[key] ? 1 : 0), 0);
+    }
+
     function selectExpenseBucket(key) {
         const app = state();
         if (!app) return;
@@ -711,29 +766,234 @@
         renderExpensesPage();
     }
 
-    function renderTrendChart(buckets, metric, selectedBucket) {
+    function parseExpenseBucketDate(key, groupBy = 'day') {
+        const value = groupBy === 'month' && /^\d{4}-\d{2}$/.test(String(key || ''))
+            ? `${key}-01`
+            : String(key || '');
+        const date = new Date(`${value}T00:00:00`);
+        return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    function buildExpenseTimeline(buckets, groupBy = 'day', range = {}) {
+        const source = [...(buckets || [])].sort((a, b) => a.key.localeCompare(b.key));
+        if (!source.length) return [];
+        const firstKey = bucketKey(range.from || source[0].key, groupBy);
+        const lastKey = bucketKey(range.to || source[source.length - 1].key, groupBy);
+        const firstDate = parseExpenseBucketDate(firstKey, groupBy);
+        const lastDate = parseExpenseBucketDate(lastKey, groupBy);
+        if (!firstDate || !lastDate || firstDate > lastDate) return source;
+
+        const byKey = new Map(source.map(item => [item.key, item]));
+        const timeline = [];
+        const cursor = new Date(firstDate);
+        for (let index = 0; cursor <= lastDate && index <= 240; index += 1) {
+            const key = bucketKey(localDate(cursor), groupBy);
+            const item = byKey.get(key);
+            timeline.push(item ? { ...item } : { key, amountVnd: 0, count: 0 });
+            if (groupBy === 'month') cursor.setMonth(cursor.getMonth() + 1, 1);
+            else cursor.setDate(cursor.getDate() + (groupBy === 'week' ? 7 : 1));
+        }
+        return cursor <= lastDate ? source : timeline;
+    }
+
+    function niceExpenseChartScale(maxValue, metric = 'amount') {
+        const value = Math.max(0, Number(maxValue || 0));
+        if (metric === 'count') {
+            const step = Math.max(1, Math.ceil(value / 3));
+            const max = Math.max(step, Math.ceil(value / step) * step);
+            return { max, step, ticks: Array.from({ length: Math.round(max / step) + 1 }, (_, index) => index * step) };
+        }
+        if (!value) return { max: 1, step: 1, ticks: [0, 1] };
+        const roughStep = value / 3;
+        const magnitude = 10 ** Math.floor(Math.log10(roughStep));
+        const fraction = roughStep / magnitude;
+        const factor = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 4 ? 4 : fraction <= 5 ? 5 : 10;
+        const step = factor * magnitude;
+        const max = Math.ceil(value / step) * step;
+        return { max, step, ticks: Array.from({ length: Math.round(max / step) + 1 }, (_, index) => index * step) };
+    }
+
+    function getExpenseChartViewportWidth() {
+        const contentWidth = typeof document !== 'undefined'
+            ? Number(document.getElementById('page-content')?.clientWidth || 0)
+            : 0;
+        const windowWidth = Number(root.innerWidth || 0);
+        const compact = windowWidth > 0 && windowWidth <= 600;
+        return Math.max(220, (contentWidth || windowWidth || 1040) - (compact ? 60 : 100));
+    }
+
+    function buildExpenseAreaChartModel(buckets, metric = 'amount', viewportWidth = 940, visiblePoints = 10) {
+        const values = (buckets || []).map(item => metric === 'count' ? item.count : item.amountVnd);
+        const scale = niceExpenseChartScale(Math.max(...values, 0), metric);
+        const safeVisiblePoints = Math.max(2, Number(visiblePoints || 10));
+        const left = 22;
+        const right = 22;
+        const safeViewportWidth = Math.max(220, Number(viewportWidth || 940));
+        const pointSpacing = Math.max(18, (safeViewportWidth - left - right) / (safeVisiblePoints - 1));
+        const width = Math.max(safeViewportWidth, left + right + Math.max(1, values.length - 1) * pointSpacing);
+        const height = 300;
+        const top = 20;
+        const baseline = 236;
+        const plotWidth = width - left - right;
+        const plotHeight = baseline - top;
+        const points = values.map((value, index) => ({
+            bucket: buckets[index],
+            value,
+            x: values.length === 1 ? left + plotWidth / 2 : left + index * plotWidth / (values.length - 1),
+            y: top + (1 - value / scale.max) * plotHeight,
+        }));
+        const pointPath = points.map(point => `${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' L ');
+        return {
+            width, height, left, right, top, baseline, plotWidth, plotHeight, points, scale,
+            linePath: pointPath ? `M ${pointPath}` : '',
+            areaPath: pointPath ? `M ${points[0].x.toFixed(1)} ${baseline} L ${pointPath} L ${points[points.length - 1].x.toFixed(1)} ${baseline} Z` : '',
+            labelEvery: 2,
+        };
+    }
+
+    function formatExpenseBucketLabel(key, groupBy = 'day') {
+        if (groupBy === 'month' && /^\d{4}-\d{2}$/.test(String(key || ''))) {
+            const [year, month] = String(key).split('-');
+            return `Thg ${Number(month)}/${year}`;
+        }
+        const date = parseExpenseBucketDate(key, groupBy);
+        if (!date) return String(key || '');
+        const label = `${date.getDate()} thg ${date.getMonth() + 1}`;
+        return groupBy === 'week' ? `Từ ${label}` : label;
+    }
+
+    function renderExpenseAreaChart(buckets, metric, selectedBucket, groupBy = 'day', today = new Date()) {
+        if (!buckets.length) return '<div class="expense-empty-chart">Chưa có dữ liệu trong khoảng đã chọn.</div>';
+        const model = buildExpenseAreaChartModel(buckets, metric, getExpenseChartViewportWidth(), 10);
+        const todayKey = bucketKey(localDate(today), groupBy);
+        const todayIndex = model.points.findIndex(point => point.bucket.key === todayKey);
+        const todayPoint = todayIndex >= 0 ? model.points[todayIndex] : null;
+        const tickLines = model.scale.ticks.map(value => {
+            const y = model.top + (1 - value / model.scale.max) * model.plotHeight;
+            return `<g class="expense-area-grid"><line x1="${model.left}" y1="${y}" x2="${model.width - model.right}" y2="${y}"></line></g>`;
+        }).join('');
+        const yAxisLabels = model.scale.ticks.map(value => {
+            const y = model.top + (1 - value / model.scale.max) * model.plotHeight;
+            const label = metric === 'count' ? String(value) : compactVnd(value);
+            return `<span style="top:${(y / model.height * 100).toFixed(2)}%">${safe(label)}</span>`;
+        }).join('');
+        const labelIndexes = new Set([0, model.points.length - 1]);
+        const labelEvery = groupBy === 'day' ? 2 : 1;
+        model.points.forEach((_, index) => { if (index % labelEvery === 0) labelIndexes.add(index); });
+        if (todayIndex >= 0) labelIndexes.add(todayIndex);
+        const xLabels = [...labelIndexes].sort((a, b) => a - b).map(index => {
+            const point = model.points[index];
+            const todayClass = point.bucket.key === todayKey ? ' is-today' : '';
+            return `<text class="expense-area-x-label${todayClass}" x="${point.x}" y="286" text-anchor="middle">${safe(formatExpenseBucketLabel(point.bucket.key, groupBy))}</text>`;
+        }).join('');
+        const events = model.points.filter(point => point.bucket.count > 0).map(point => {
+            const active = selectedBucket === point.bucket.key;
+            const valueLabel = metric === 'count' ? `${point.value} giao dịch` : formatVnd(point.value);
+            const key = js(point.bucket.key);
+            return `<g class="expense-area-point${active ? ' active' : ''}" data-chart-x="${point.x}" role="button" tabindex="0" onclick="selectExpenseBucket('${key}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectExpenseBucket('${key}')}" aria-label="${safe(`${point.bucket.key}: ${valueLabel}`)}">
+                <title>${safe(`${point.bucket.key} · ${valueLabel}`)}</title>
+                ${active ? `<line class="expense-area-guide" x1="${point.x}" y1="${model.top}" x2="${point.x}" y2="${model.baseline}"></line>` : ''}
+                <rect class="expense-area-hit" x="${point.x - 22}" y="${model.top}" width="44" height="${model.baseline - model.top + 28}"></rect>
+                <circle cx="${point.x}" cy="${point.y}" r="${active ? 5.5 : 3.5}"></circle>
+                <rect class="expense-area-event-box" x="${point.x - 10}" y="${model.baseline + 10}" width="20" height="17" rx="4"></rect>
+                <text class="expense-area-event-count" x="${point.x}" y="${model.baseline + 22}" text-anchor="middle">${point.bucket.count > 9 ? '9+' : point.bucket.count}</text>
+            </g>`;
+        }).join('');
+        const activeDays = buckets.filter(item => item.count > 0).length;
+        const peak = Math.max(...buckets.map(item => metric === 'count' ? item.count : item.amountVnd), 0);
+        return `<div class="expense-area-chart-shell"><div class="expense-area-chart-scroll" data-expense-chart-scroll data-expense-chart-today-x="${todayPoint ? todayPoint.x : ''}" tabindex="0" aria-label="Giữ và kéo ngang để xem các ngày khác"><svg class="expense-area-chart" style="width:${model.width}px" viewBox="0 0 ${model.width} ${model.height}" role="img" aria-label="Biểu đồ đường chi tiêu theo thời gian">
+            <defs><linearGradient id="expense-area-fill" x1="0" y1="0" x2="0" y2="1"><stop class="expense-area-stop-start" offset="0%"></stop><stop class="expense-area-stop-end" offset="100%"></stop></linearGradient></defs>
+            ${tickLines}
+            <path class="expense-area-fill" d="${model.areaPath}"></path>
+            <path class="expense-area-line" d="${model.linePath}"></path>
+            <line class="expense-area-axis" x1="${model.left}" y1="${model.baseline}" x2="${model.width - model.right}" y2="${model.baseline}"></line>
+            ${events}${xLabels}
+        </svg></div><div class="expense-area-y-axis" aria-hidden="true">${yAxisLabels}</div></div><div class="expense-area-summary"><span><i></i>Xu hướng theo thời gian</span><span>${activeDays} mốc có giao dịch</span><span>Đỉnh: <strong>${metric === 'count' ? peak : compactVnd(peak)}</strong></span><span class="expense-area-drag-hint">Giữ và kéo để xem ngày khác</span></div>`;
+    }
+
+    function initExpenseAreaChartInteractions(container) {
+        const scroll = container?.querySelector?.('[data-expense-chart-scroll]');
+        if (!scroll || scroll.dataset.dragReady === 'true') return;
+        scroll.dataset.dragReady = 'true';
+        const activePoint = scroll.querySelector('.expense-area-point.active');
+        if (activePoint) {
+            const x = Number(activePoint.dataset.chartX || 0);
+            scroll.scrollLeft = Math.max(0, x - scroll.clientWidth / 2);
+        } else if (String(scroll.dataset.expenseChartTodayX || '') !== '') {
+            const todayX = Number(scroll.dataset.expenseChartTodayX);
+            const maxScroll = Math.max(0, scroll.scrollWidth - scroll.clientWidth);
+            scroll.scrollLeft = Math.max(0, Math.min(maxScroll, todayX - scroll.clientWidth / 2));
+        } else {
+            scroll.scrollLeft = Math.max(0, scroll.scrollWidth - scroll.clientWidth);
+        }
+
+        let pointerId = null;
+        let startX = 0;
+        let startScrollLeft = 0;
+        let moved = false;
+        let suppressClickUntil = 0;
+        scroll.addEventListener('pointerdown', event => {
+            if (event.pointerType === 'mouse' && event.button !== 0) return;
+            pointerId = event.pointerId;
+            startX = event.clientX;
+            startScrollLeft = scroll.scrollLeft;
+            moved = false;
+            scroll.classList.add('is-dragging');
+            try { scroll.setPointerCapture(pointerId); } catch (_) { /* noop */ }
+        });
+        scroll.addEventListener('pointermove', event => {
+            if (pointerId !== event.pointerId) return;
+            const delta = event.clientX - startX;
+            if (Math.abs(delta) > 4) moved = true;
+            if (!moved) return;
+            scroll.scrollLeft = startScrollLeft - delta;
+            event.preventDefault();
+        });
+        const finishDrag = event => {
+            if (pointerId !== event.pointerId) return;
+            if (moved) suppressClickUntil = Date.now() + 160;
+            try { scroll.releasePointerCapture(pointerId); } catch (_) { /* noop */ }
+            pointerId = null;
+            scroll.classList.remove('is-dragging');
+        };
+        scroll.addEventListener('pointerup', finishDrag);
+        scroll.addEventListener('pointercancel', finishDrag);
+        scroll.addEventListener('click', event => {
+            if (Date.now() <= suppressClickUntil) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+        }, true);
+        scroll.addEventListener('keydown', event => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+            event.preventDefault();
+            scroll.scrollBy({ left: event.key === 'ArrowLeft' ? -scroll.clientWidth * .7 : scroll.clientWidth * .7, behavior: 'smooth' });
+        });
+    }
+
+    function renderTrendChart(buckets, metric, selectedBucket, groupBy = 'day') {
         if (!buckets.length) return '<div class="expense-empty-chart">Chưa có dữ liệu trong khoảng đã chọn.</div>';
         const values = buckets.map(item => metric === 'count' ? item.count : item.amountVnd);
         const max = Math.max(...values, 1);
-        const width = Math.max(520, buckets.length * 58);
-        const height = 230;
-        const chartHeight = 160;
+        const width = Math.max(420, buckets.length * 48);
+        const height = 190;
+        const chartHeight = 112;
         const barWidth = Math.max(16, Math.min(38, width / buckets.length - 14));
         const bars = buckets.map((bucket, index) => {
             const value = metric === 'count' ? bucket.count : bucket.amountVnd;
             const barHeight = Math.max(value ? 4 : 0, Math.round(value / max * chartHeight));
             const x = 28 + index * ((width - 56) / buckets.length) + (((width - 56) / buckets.length) - barWidth) / 2;
-            const y = 178 - barHeight;
-            const label = bucket.key.length === 10 ? bucket.key.slice(5) : bucket.key;
+            const y = 132 - barHeight;
+            const label = formatExpenseBucketLabel(bucket.key, groupBy);
             const valueLabel = metric === 'count' ? String(value) : compactVnd(value);
-            return `<g class="expense-chart-bar ${selectedBucket === bucket.key ? 'active' : ''}" onclick="selectExpenseBucket('${js(bucket.key)}')" role="button" tabindex="0">
+            return `<g class="expense-chart-bar ${selectedBucket === bucket.key ? 'active' : ''}" onclick="selectExpenseBucket('${js(bucket.key)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectExpenseBucket('${js(bucket.key)}')}" role="button" tabindex="0">
                 <title>${safe(bucket.key)} · ${metric === 'count' ? `${value} giao dịch` : formatVnd(value)}</title>
                 <rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="7"></rect>
                 <text x="${x + barWidth / 2}" y="${Math.max(14, y - 7)}" text-anchor="middle" class="expense-chart-value">${safe(valueLabel)}</text>
-                <text x="${x + barWidth / 2}" y="205" text-anchor="middle" class="expense-chart-label">${safe(label)}</text>
+                <text x="${x + barWidth / 2}" y="166" text-anchor="middle" class="expense-chart-label">${safe(label)}</text>
             </g>`;
         }).join('');
-        return `<div class="expense-chart-scroll"><svg class="expense-trend-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Biểu đồ chi tiêu">${bars}</svg></div>`;
+        return `<div class="expense-chart-scroll"><svg class="expense-trend-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Biểu đồ cột chi tiêu phụ">${bars}</svg></div>`;
     }
 
     function compactVnd(value) {
@@ -796,29 +1056,52 @@
         const buckets = aggregateExpenses(allFiltered, view.groupBy);
         const accountCount = new Set(filtered.map(item => item.accountId).filter(Boolean)).size;
         const range = presetRange(view.preset, new Date(), view.customFrom, view.customTo);
+        const timelineBuckets = buildExpenseTimeline(buckets, view.groupBy, range);
+        const chartRangeLabel = range.from && range.to ? `${range.from} → ${range.to}` : `${buckets.length} kỳ dữ liệu`;
+        const filterCount = activeExpenseFilterCount(view);
+        const filterSummary = expenseFilterSummary(view);
         const custom = view.preset === 'custom'
             ? `<input type="date" class="input" value="${safe(view.customFrom)}" onchange="setExpenseView('customFrom',this.value)"><span>đến</span><input type="date" class="input" value="${safe(view.customTo)}" onchange="setExpenseView('customTo',this.value)">`
             : `<span class="expense-range-caption">${range.from || 'Từ đầu'} → ${range.to || 'Hiện tại'}</span>`;
         content.innerHTML = `<section class="expense-page anim-fade-in-up">
-            <header class="expense-page-head"><div><button class="expense-back" onclick="goBack()">← Tổng quan</button><p class="expense-eyebrow">Sổ giao dịch</p><h2>Chi tiêu tài khoản</h2><p>Lưu số tiền gốc và tỷ giá tại đúng thời điểm chi.</p></div><button class="btn btn-primary" onclick="openExpenseForm()">+ Thêm khoản chi</button></header>
-            <div class="expense-filter-panel">
+            <header class="expense-page-head">
+                <div class="expense-page-heading">
+                    <div class="expense-page-title-row">
+                        <button type="button" class="expense-back" onclick="goBack()" aria-label="Về Tổng quan" title="Về Tổng quan">←</button>
+                        <div><p class="expense-eyebrow">Sổ giao dịch</p><h2>Chi tiêu</h2></div>
+                    </div>
+                    <p class="expense-page-subtitle">Theo dõi khoản mua và tỷ giá quy đổi.</p>
+                </div>
+                <button type="button" class="expense-add-btn" onclick="openExpenseForm()"><span aria-hidden="true">+</span> Thêm</button>
+            </header>
+            <div class="expense-filter-shell">
+                <button type="button" class="expense-filter-toggle ${view.filtersOpen ? 'is-open' : ''}" onclick="toggleExpenseFilters()" aria-expanded="${view.filtersOpen ? 'true' : 'false'}" aria-controls="expense-filter-panel">
+                    <span class="expense-filter-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M7 12h10M10 18h4"/></svg></span>
+                    <span class="expense-filter-copy"><strong>Bộ lọc</strong><small>${safe(filterSummary)}</small></span>
+                    ${filterCount ? `<span class="expense-filter-count">${filterCount}</span>` : ''}
+                    <span class="expense-filter-chevron" aria-hidden="true">⌄</span>
+                </button>
+                <div id="expense-filter-panel" class="expense-filter-panel ${view.filtersOpen ? 'is-open' : ''}" ${view.filtersOpen ? '' : 'hidden'}>
                 <select class="input" onchange="setExpenseView('preset',this.value)">
                     ${[['week','Tuần này'],['7d','7 ngày'],['month','Tháng này'],['30d','30 ngày'],['3m','3 tháng'],['6m','6 tháng'],['year','Năm nay'],['all','Tất cả'],['custom','Tùy chọn']].map(([value,label]) => `<option value="${value}" ${view.preset === value ? 'selected' : ''}>${label}</option>`).join('')}
                 </select>
                 <select class="input" onchange="setExpenseView('groupBy',this.value)"><option value="day" ${view.groupBy === 'day' ? 'selected' : ''}>Theo ngày</option><option value="week" ${view.groupBy === 'week' ? 'selected' : ''}>Theo tuần</option><option value="month" ${view.groupBy === 'month' ? 'selected' : ''}>Theo tháng</option></select>
                 <select class="input" onchange="setExpenseView('metric',this.value)"><option value="amount" ${view.metric === 'amount' ? 'selected' : ''}>Tổng tiền</option><option value="count" ${view.metric === 'count' ? 'selected' : ''}>Số lần mua</option></select>
                 <select class="input" onchange="setExpenseView('kind',this.value)"><option value="all">Mọi loại</option><option value="purchase" ${view.kind === 'purchase' ? 'selected' : ''}>Mua tài khoản</option><option value="renewal" ${view.kind === 'renewal' ? 'selected' : ''}>Gia hạn</option><option value="manual" ${view.kind === 'manual' ? 'selected' : ''}>Chi phí khác</option></select>
-                <select class="input" onchange="setExpenseView('accountId',this.value)">${accountOptions(view.accountId)}</select>
+                <select class="input" onchange="setExpenseView('accountId',this.value)">${accountOptions(view.accountId, 'Mọi tài khoản')}</select>
                 <select class="input" onchange="setExpenseView('currency',this.value)">${renderCurrencyOptions(view.currency, true)}</select>
                 <select class="input" onchange="setExpenseView('status',this.value)"><option value="active" ${view.status === 'active' ? 'selected' : ''}>Đang dùng</option><option value="deleted" ${view.status === 'deleted' ? 'selected' : ''}>Đã xóa</option></select>
                 <div class="expense-custom-range">${custom}</div>
             </div>
+            </div>
             ${view.selectedBucket ? `<button class="expense-bucket-chip" onclick="selectExpenseBucket('${js(view.selectedBucket)}')">Đang xem ${safe(view.selectedBucket)} ×</button>` : ''}
             <div class="expense-kpi-grid"><div><span>Tổng chi</span><strong>${formatVnd(total)}</strong></div><div><span>Giao dịch</span><strong>${filtered.length}</strong></div><div><span>Trung bình</span><strong>${formatVnd(average)}</strong></div><div><span>Tài khoản</span><strong>${accountCount}</strong></div></div>
-            <div class="expense-analytics-grid"><section class="expense-panel expense-panel-wide"><header><div><p>Xu hướng</p><h3>${view.metric === 'count' ? 'Số lần mua' : 'Chi tiêu quy đổi VND'}</h3></div></header>${renderTrendChart(buckets, view.metric, view.selectedBucket)}</section>
+            <section class="expense-panel expense-primary-chart"><header><div><p>Biểu đồ chính</p><h3>${view.metric === 'count' ? 'Nhịp giao dịch theo thời gian' : 'Dòng chi tiêu theo thời gian'}</h3></div><span class="expense-chart-range">${safe(chartRangeLabel)}</span></header>${renderExpenseAreaChart(timelineBuckets, view.metric, view.selectedBucket, view.groupBy)}</section>
+            <div class="expense-analytics-grid"><section class="expense-panel expense-secondary-chart"><header><div><p>Biểu đồ phụ</p><h3>${view.metric === 'count' ? 'So sánh số lần mua' : 'So sánh chi tiêu từng kỳ'}</h3></div></header>${renderTrendChart(buckets, view.metric, view.selectedBucket, view.groupBy)}</section>
                 <section class="expense-panel"><header><div><p>Phân bổ</p><h3>Theo ${view.breakdown === 'platform' ? 'nền tảng' : 'tài khoản'}</h3></div><select class="input" onchange="setExpenseView('breakdown',this.value)"><option value="account" ${view.breakdown === 'account' ? 'selected' : ''}>Tài khoản</option><option value="platform" ${view.breakdown === 'platform' ? 'selected' : ''}>Nền tảng</option></select></header>${renderBreakdown(filtered, view.breakdown)}</section></div>
             <section class="expense-panel expense-ledger"><header><div><p>Chi tiết</p><h3>${filtered.length} giao dịch</h3></div></header>${renderExpenseRows(filtered, view.status)}</section>
         </section>`;
+        initExpenseAreaChartInteractions(content);
         return content.innerHTML;
     }
 
@@ -864,6 +1147,12 @@
         bucketKey,
         filterExpenses,
         aggregateExpenses,
+        buildExpenseTimeline,
+        niceExpenseChartScale,
+        buildExpenseAreaChartModel,
+        renderExpenseAreaChart,
+        renderTrendChart,
+        initExpenseAreaChartInteractions,
         breakdownExpenses,
         formatCurrencyAmount,
         formatVnd,
@@ -893,6 +1182,9 @@
         requestDeleteExpense,
         requestRestoreExpense,
         setExpenseView,
+        toggleExpenseFilters,
+        expenseFilterSummary,
+        activeExpenseFilterCount,
         selectExpenseBucket,
         openExpenseAccount,
     };

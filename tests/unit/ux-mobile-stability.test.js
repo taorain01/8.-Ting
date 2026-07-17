@@ -65,6 +65,17 @@ describe('PC/mobile UX stability contracts', () => {
     expect(read('mobile/js/ui.js')).toContain('scrollIntoView');
   });
 
+  it('suppresses nested card animations when a page transition starts', () => {
+    for (const file of ['js/smooth-ux.js', 'mobile/js/smooth-ux.js']) {
+      const source = read(file);
+      const suppressAt = source.indexOf('suppressNestedPageAnimations(pc)');
+      const frameAt = source.indexOf('requestAnimationFrame(function () {', suppressAt);
+      expect(suppressAt).toBeGreaterThan(-1);
+      expect(source).toContain("querySelectorAll('.anim-fade-in-up, .anim-stagger')");
+      expect(frameAt).toBeGreaterThan(suppressAt);
+    }
+  });
+
   it('guards mobile drag with threshold, pointer capture, rAF, placeholder and save lock', () => {
     const source = read('mobile/js/app.js');
     expect(source).toContain('Math.hypot(event.clientX - state.startX, event.clientY - state.startY) < 8');

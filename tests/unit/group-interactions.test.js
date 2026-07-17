@@ -175,6 +175,9 @@ function loadInteractions(overrides = {}) {
       closeCategoryDropdown: typeof closeCategoryDropdown === 'function' ? closeCategoryDropdown : undefined,
       handleSetSharedAccountCategory: typeof handleSetSharedAccountCategory === 'function' ? handleSetSharedAccountCategory : undefined,
       validateInviteEmail: typeof validateInviteEmail === 'function' ? validateInviteEmail : undefined,
+      openGroupDetail: typeof openGroupDetail === 'function' ? openGroupDetail : undefined,
+      setGroupDetailTab: typeof setGroupDetailTab === 'function' ? setGroupDetailTab : undefined,
+      decryptSharedAccountForDisplay: typeof decryptSharedAccountForDisplay === 'function' ? decryptSharedAccountForDisplay : undefined,
     };
   `;
   // Thứ tự: groups.js TRƯỚC (định nghĩa hàm thuần), desktop-app.js SAU (handler).
@@ -204,11 +207,24 @@ function loadInteractions(overrides = {}) {
   sandbox.updateSharedAccountGroupMeta = mk('updateSharedAccountGroupMeta');
   sandbox.showToast = (message, type) => { calls.toasts.push({ message, type }); };
   sandbox.renderGroupDetail = (...args) => { calls.renderGroupDetail.push(args); };
+  sandbox.updateHeader = () => {};
+  sandbox.resetGroupEditState = () => ({ groupId: null, enabled: false });
+  sandbox.loadSharedAccountsRealtime = () => null;
+  sandbox.loadSharedEditRequestsRealtime = () => null;
+  let realtimeReady = overrides.realtimeReady !== false;
+  sandbox.isGroupRealtimeReady = () => realtimeReady;
   // confirmAction mặc định true (người dùng xác nhận); có thể ép false qua override.
   sandbox.confirmAction = async () => (overrides.confirm === undefined ? true : overrides.confirm);
   win.confirmAction = sandbox.confirmAction;
 
-  return { sandbox, dom, win, calls, exports: sandbox.__appExports };
+  return {
+    sandbox,
+    dom,
+    win,
+    calls,
+    exports: sandbox.__appExports,
+    setRealtimeReady: value => { realtimeReady = Boolean(value); },
+  };
 }
 
 // Nhóm mẫu dùng chung.
@@ -250,8 +266,75 @@ describe('handler tương tác tab Nhóm (task 8.6)', () => {
     expect(typeof exports.openCategoryDropdown).toBe('function');
     expect(typeof exports.closeCategoryDropdown).toBe('function');
     expect(typeof exports.handleSetSharedAccountCategory).toBe('function');
+    expect(typeof exports.openGroupDetail).toBe('function');
+    expect(typeof exports.setGroupDetailTab).toBe('function');
     // Lớp logic thuần thật đã sẵn sàng (không phải fallback).
     expect(typeof exports.validateInviteEmail).toBe('function');
+  });
+
+  it('openGroupDetail xoá page-enter còn sót trước khi render để không nháy lần hai', () => {
+    const ctx = loadInteractions({ appState: makeAppState(makeGroup(), { currentPage: 'groups' }) });
+    const pageContent = ctx.dom.doc.getElementById('page-content');
+    pageContent.classList.add('page-enter');
+
+    const opened = ctx.exports.openGroupDetail('g1', true);
+
+    expect(opened).toBe(true);
+    expect(pageContent.classList.contains('page-enter')).toBe(false);
+    expect(ctx.calls.renderGroupDetail).toEqual([['g1']]);
+  });
+
+  it('waits for initial snapshots and paints Group Detail only once', async () => {
+    const ctx = loadInteractions({
+      appState: makeAppState(makeGroup(), { currentPage: 'groups' }),
+      realtimeReady: false,
+    });
+
+    const opened = ctx.exports.openGroupDetail('g1', true);
+    expect(opened).toBe(true);
+    expect(ctx.calls.renderGroupDetail).toHaveLength(0);
+
+    ctx.setRealtimeReady(true);
+    await new Promise(resolve => setTimeout(resolve, 60));
+    expect(ctx.calls.renderGroupDetail).toEqual([['g1']]);
+
+    await new Promise(resolve => setTimeout(resolve, 80));
+    expect(ctx.calls.renderGroupDetail).toHaveLength(1);
+  });
+
+  it('coalesces a tab click and an in-flight realtime refresh into one panel render', async () => {
+    const ctx = loadInteractions({
+      appState: makeAppState(makeGroup(), { currentGroupTab: 'board' }),
+    });
+
+    ctx.exports.setGroupDetailTab('members');
+    expect(ctx.calls.renderGroupDetail).toHaveLength(0);
+    expect(ctx.win.appState.groupTabTransitionPending).toBe(true);
+
+    ctx.sandbox.notifyGroupsChanged('g1', { contentChanged: true });
+    await new Promise(resolve => setTimeout(resolve, 140));
+
+    expect(ctx.calls.renderGroupDetail).toEqual([['g1', {}]]);
+    expect(ctx.win.appState.groupTabTransitionPending).toBe(false);
+  });
+
+  it('updates only the decrypted account card instead of rerendering Group Detail', async () => {
+    const ctx = loadInteractions({
+      appState: makeAppState(makeGroup(), {
+        currentGroupTab: 'accounts',
+        decryptFailedSharedAccounts: {},
+      }),
+    });
+    ctx.sandbox.decryptSharedAccount = async account => ({ ...account, username: 'user@test.local', password: 'secret' });
+    ctx.sandbox.renderSharedAccountCard = () => '<div class="shared-account-card">ready</div>';
+    const targetId = ctx.sandbox.getGroupAccountTargetId('g1', 'acc1');
+    const target = ctx.dom.doc.getElementById(targetId);
+
+    const decrypted = await ctx.exports.decryptSharedAccountForDisplay('g1', 'acc1');
+
+    expect(decrypted.username).toBe('user@test.local');
+    expect(target.outerHTML).toContain('ready');
+    expect(ctx.calls.renderGroupDetail).toHaveLength(0);
   });
 
   // ==========================================================================

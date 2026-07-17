@@ -9,8 +9,8 @@
 //     focus lại đúng phần tử và setSelectionRange.
 //   - getGroupDetailScrollEl / buildStableFocusSelector: chọn vùng cuộn và dựng
 //     selector ổn định.
-//   - renderGroupDetail(groupId, { quiet }): quiet gắn wrapper .group-detail-quiet
-//     và KHÔNG gắn marker anim-fade-in-up ở head; animated thì CÓ.
+//   - renderGroupDetail(groupId, { quiet }): Group Detail không gắn entrance
+//     animation ở head; quiet vẫn gắn wrapper .group-detail-quiet.
 //
 // _Validates: Requirements 1.2, 2.1, 2.4, 2.5_
 //
@@ -30,6 +30,7 @@ const vm = require('vm');
 
 const ROOT = path.join(__dirname, '..', '..');
 const UI_SRC = fs.readFileSync(path.join(ROOT, 'js', 'desktop-ui.js'), 'utf8');
+const COMPONENTS_CSS = fs.readFileSync(path.join(ROOT, 'css', 'components.css'), 'utf8');
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, ch => ({
@@ -147,6 +148,7 @@ function loadQuietUi(overrides = {}) {
       restoreDetailUiState: typeof restoreDetailUiState === 'function' ? restoreDetailUiState : undefined,
       getGroupDetailScrollEl: typeof getGroupDetailScrollEl === 'function' ? getGroupDetailScrollEl : undefined,
       buildStableFocusSelector: typeof buildStableFocusSelector === 'function' ? buildStableFocusSelector : undefined,
+      patchGroupDetailShell: typeof patchGroupDetailShell === 'function' ? patchGroupDetailShell : undefined,
       renderGroupDetail: typeof renderGroupDetail === 'function' ? renderGroupDetail : undefined,
     };
   `;
@@ -161,7 +163,71 @@ describe('quiet render bảo toàn trạng thái Group_Detail_View (task 4.2)', 
     expect(typeof exports.restoreDetailUiState).toBe('function');
     expect(typeof exports.getGroupDetailScrollEl).toBe('function');
     expect(typeof exports.buildStableFocusSelector).toBe('function');
+    expect(typeof exports.patchGroupDetailShell).toBe('function');
     expect(typeof exports.renderGroupDetail).toBe('function');
+  });
+
+  it('chuyển tab chỉ thay panel, giữ nguyên shell và cập nhật trạng thái tab tại chỗ', () => {
+    const { exports } = loadQuietUi();
+    const tokens = initial => ({
+      values: new Set(initial),
+      toggle(name, force) { force ? this.values.add(name) : this.values.delete(name); },
+      has(name) { return this.values.has(name); },
+    });
+    const makeTab = id => ({
+      dataset: { tab: id },
+      classList: tokens(id === 'board' ? ['active'] : []),
+      attrs: {},
+      tabIndex: id === 'board' ? 0 : -1,
+      setAttribute(name, value) { this.attrs[name] = value; },
+    });
+    const tabs = ['board', 'accounts', 'members'].map(makeTab);
+    const title = { textContent: 'Nhóm A' };
+    const meta = { textContent: 'Chủ nhóm · 1 thành viên · 0 tài khoản' };
+    const settings = {
+      classList: tokens([]), attrs: {},
+      setAttribute(name, value) { this.attrs[name] = value; },
+    };
+    const panel = {
+      dataset: { activeTab: 'board' },
+      innerHTML: '<div>Bảng cũ</div>',
+      scrollTop: 240,
+      __tingGroupPanelSignature: 'old',
+      attrs: {},
+      setAttribute(name, value) { this.attrs[name] = value; },
+    };
+    const root = {
+      dataset: { groupId: 'g1', activeTab: 'board' },
+      classList: tokens([]),
+      parentElement: null,
+      querySelector(selector) {
+        if (selector === '#group-tab-panel' || selector === '.group-tab-surface') return panel;
+        if (selector === '[data-group-detail-title]') return title;
+        if (selector === '[data-group-detail-meta]') return meta;
+        if (selector === '.group-detail-settings-btn') return settings;
+        return null;
+      },
+      querySelectorAll(selector) { return selector === '.group-tab[data-tab]' ? tabs : []; },
+    };
+
+    const didPatch = exports.patchGroupDetailShell(root, {
+      activeTab: 'accounts',
+      title: 'Nhóm A',
+      meta: 'Chủ nhóm · 1 thành viên · 3 tài khoản',
+      tabContent: '<div>Tài khoản mới</div>',
+      panelSignature: 'new',
+    });
+
+    expect(didPatch).toBe(true);
+    expect(root.dataset.activeTab).toBe('accounts');
+    expect(panel.dataset.activeTab).toBe('accounts');
+    expect(panel.innerHTML).toContain('Tài khoản mới');
+    expect(panel.scrollTop).toBe(0);
+    expect(meta.textContent).toContain('3 tài khoản');
+    expect(tabs[0].classList.has('active')).toBe(false);
+    expect(tabs[1].classList.has('active')).toBe(true);
+    expect(tabs[1].attrs['aria-selected']).toBe('true');
+    expect(panel.attrs['aria-labelledby']).toBe('group-tab-accounts');
   });
 
   // --- Case 1: giữ nguyên scroll offset (sai số 0px) — Req 1.2, 2.1 ---------
@@ -248,7 +314,7 @@ describe('quiet render bảo toàn trạng thái Group_Detail_View (task 4.2)', 
     expect(exports.buildStableFocusSelector(withData)).toBe('button[data-account-id="acc-9"]');
   });
 
-  // --- Case 3 + 4: quiet không xoá trắng & marker animation — Req 2.1, 2.4, 2.5
+  // --- Case 3 + 4: Group Detail không nháy và quiet không xoá trắng ---------
   function setupRenderStubs(sandbox, tab = 'board') {
     sandbox.window.appState.currentGroupTab = tab;
     sandbox.window.appState.user = { email: 'me@example.com' };
@@ -267,16 +333,27 @@ describe('quiet render bảo toàn trạng thái Group_Detail_View (task 4.2)', 
     sandbox.renderGroupList = () => {};
   }
 
-  it('animated (điều hướng): head gắn anim-fade-in-up, wrapper KHÔNG có group-detail-quiet', () => {
+  it('điều hướng vào Group Detail: head hiện ngay, không gắn anim-fade-in-up', () => {
     const { sandbox, dom, exports } = loadQuietUi();
     setupRenderStubs(sandbox);
 
-    exports.renderGroupDetail('g1'); // không quiet => animated
+    exports.renderGroupDetail('g1');
     const html = dom.doc.getElementById('page-content').innerHTML;
 
-    expect(html).toContain('group-detail-head anim-fade-in-up');
+    expect(html).toContain('class="group-detail-head"');
+    expect(html).not.toContain('group-detail-head anim-fade-in-up');
     expect(html).toContain('class="group-detail-root"'); // không kèm group-detail-quiet
     expect(html).not.toContain('group-detail-quiet');
+  });
+
+  it('CSS của tab nhóm tắt cả entrance animation và transition active', () => {
+    const tabRule = COMPONENTS_CSS.match(/\.group-tab\s*\{[\s\S]*?\}/)?.[0] || '';
+    const panelRule = COMPONENTS_CSS.match(/\.group-tab-surface \.anim-fade-in-up\s*\{[\s\S]*?\}/)?.[0] || '';
+
+    expect(tabRule).toContain('transition:none');
+    expect(panelRule).toContain('animation:none !important');
+    expect(panelRule).toContain('opacity:1 !important');
+    expect(panelRule).toContain('transform:none !important');
   });
 
   it('quiet (refresh dữ liệu): wrapper có group-detail-quiet và head KHÔNG gắn anim-fade-in-up', () => {

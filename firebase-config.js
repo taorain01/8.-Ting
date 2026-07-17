@@ -73,6 +73,9 @@ async function initFirebase() {
 
     auth = firebase.auth();
     db = firebase.firestore();
+    // Shared feature modules use window-scoped clients after firebaseReady resolves.
+    window.auth = auth;
+    window.db = db;
 
     // Bật offline persistence cho Firestore
     db.enablePersistence({ synchronizeTabs: true }).catch(err => {

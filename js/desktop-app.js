@@ -11,6 +11,9 @@ window.appState = {
     expenses: [],
     expensesLoaded: false,
     accountsLoaded: false,
+    expenseBackfillComplete: false,
+    expenseBackfillStats: null,
+    expenseBackfillWarningShown: false,
     customCategories: [],
     groups: [],
     groupInvites: [],
@@ -71,7 +74,7 @@ window.appState = {
         notifyOverdueDays: 3,
         shortcuts: { openApp: 'Control+Shift+T', quickAdd: 'Control+Shift+S' },
     },
-    appVersion: '1.7.1',
+    appVersion: '1.7.3',
     updateStatus: null,
     updateLog: [],
     visibleGroupNotes: {},
@@ -302,6 +305,10 @@ function navigateTo(page, isBack = false) {
     if (!isRestoring && page !== window.appState.currentPage) recordNavHistory();
     window.appState.previousPage = window.appState.currentPage;
     window.appState.currentPage = page;
+    if (page !== 'group-detail') {
+        window.appState.groupDetailFirstPaintPending = false;
+        window.appState.groupTabTransitionPending = false;
+    }
     if (page !== 'detail') window.appState.activeDecryptedAccount = null;
     if (page !== 'detail') window.appState.currentDetailId = null;
     if (!isRestoring) {
@@ -442,8 +449,8 @@ function initSmartNavigationInputs() {
 
 // ===== HEADER / SIDEBAR =====
 function formatSidebarVersion(version) {
-    const raw = String(version || '1.7.1').trim().replace(/^v/i, '');
-    return raw ? `v${raw}` : 'v1.7.1';
+    const raw = String(version || '1.7.3').trim().replace(/^v/i, '');
+    return raw ? `v${raw}` : 'v1.7.3';
 }
 
 function updateSidebarVersion() {
@@ -2111,6 +2118,58 @@ async function submitCreateGroup() {
     }
 }
 
+const GROUP_DETAIL_FIRST_PAINT_TIMEOUT_MS = 350;
+let _groupDetailFirstPaintTimer = null;
+let _groupDetailFirstPaintToken = 0;
+
+function scheduleGroupDetailFirstPaint(groupId, group) {
+    const token = ++_groupDetailFirstPaintToken;
+    const startedAt = Date.now();
+    if (_groupDetailFirstPaintTimer) clearTimeout(_groupDetailFirstPaintTimer);
+
+    const paintWhenReady = async () => {
+        _groupDetailFirstPaintTimer = null;
+        if (token !== _groupDetailFirstPaintToken) return;
+        if (window.appState.currentPage !== 'group-detail' || window.appState.currentGroupId !== groupId) return;
+
+        const detailRealtimeReady = typeof isGroupRealtimeReady !== 'function' || isGroupRealtimeReady(groupId);
+        const listRealtimeReady = typeof isGroupListRealtimeReady !== 'function' || isGroupListRealtimeReady();
+        const realtimeReady = detailRealtimeReady && listRealtimeReady;
+        const timedOut = Date.now() - startedAt >= GROUP_DETAIL_FIRST_PAINT_TIMEOUT_MS;
+        if (!realtimeReady && !timedOut) {
+            _groupDetailFirstPaintTimer = setTimeout(paintWhenReady, 16);
+            return;
+        }
+
+        if (window.appState.currentGroupTab === 'accounts' && !timedOut) {
+            const remaining = Math.max(0, GROUP_DETAIL_FIRST_PAINT_TIMEOUT_MS - (Date.now() - startedAt));
+            await Promise.race([
+                preloadGroupSharedAccounts(groupId),
+                new Promise(resolve => setTimeout(resolve, remaining)),
+            ]);
+            if (token !== _groupDetailFirstPaintToken
+                || window.appState.currentPage !== 'group-detail'
+                || window.appState.currentGroupId !== groupId) return;
+        }
+
+        const paintedGroupId = document.getElementById('page-content')
+            ?.querySelector?.('.group-detail-root')?.dataset?.groupId;
+        window.appState.groupDetailFirstPaintPending = false;
+        // A realtime refresh may have painted during this polling cycle.
+        if (paintedGroupId !== String(groupId)) renderGroupDetail(groupId);
+
+        if (groupHasSharedPassword?.(group) && !isGroupUnlocked?.(groupId)) {
+            setTimeout(() => {
+                if (window.appState.currentPage === 'group-detail' && window.appState.currentGroupId === groupId) {
+                    openUnlockGroupModal(groupId);
+                }
+            }, 120);
+        }
+    };
+
+    paintWhenReady();
+}
+
 function openGroupDetail(groupId, isBack = false) {
     const group = getGroupById?.(groupId);
     if (!group) {
@@ -2126,16 +2185,22 @@ function openGroupDetail(groupId, isBack = false) {
     window.appState.currentPage = 'group-detail';
     window.appState.currentGroupId = groupId;
     window.appState.currentGroupTab = window.appState.currentGroupTab || 'board';
+    _groupTabSwitchToken += 1;
+    if (_groupTabSwitchTimer) clearTimeout(_groupTabSwitchTimer);
+    _groupTabSwitchTimer = null;
+    window.appState.groupDetailFirstPaintPending = true;
+    window.appState.groupTabTransitionPending = false;
     document.querySelectorAll('.d-nav-item[data-page]').forEach(item => {
         item.classList.toggle('active', item.dataset.page === 'groups');
     });
+    // Do not inherit a still-running page transition from the Groups list.
+    // Keeping Group Detail motionless prevents a second flash when realtime
+    // account/request snapshots land immediately after the first paint.
+    document.getElementById('page-content')?.classList.remove('page-enter');
     document.getElementById('page-title').textContent = group.name || 'Chi tiết nhóm';
     loadSharedAccountsRealtime?.(groupId);
     loadSharedEditRequestsRealtime?.(groupId);
-    renderGroupDetail(groupId);
-    if (groupHasSharedPassword?.(group) && !isGroupUnlocked?.(groupId)) {
-        setTimeout(() => openUnlockGroupModal(groupId), 120);
-    }
+    scheduleGroupDetailFirstPaint(groupId, group);
     if (!isBack) resetNavScroll();
     return true;
 }
@@ -2171,14 +2236,30 @@ async function unlockGroupWithPassword(groupId, password) {
             showToast('Mật khẩu chung không đúng', 'error');
             return false;
         }
-        setGroupUnlocked(groupId, password);
+        setGroupUnlocked(groupId, password, { notify: false });
         window.appState.decryptedSharedAccounts = Object.fromEntries(
             Object.entries(window.appState.decryptedSharedAccounts || {}).filter(([key]) => !key.startsWith(`${groupId}:`))
         );
+        window.appState.decryptFailedSharedAccounts = Object.fromEntries(
+            Object.entries(window.appState.decryptFailedSharedAccounts || {}).filter(([key]) => !key.startsWith(`${groupId}:`))
+        );
+        const preloadAccounts = window.appState.currentPage === 'group-detail'
+            && window.appState.currentGroupId === groupId
+            && window.appState.currentGroupTab === 'accounts';
+        if (preloadAccounts) {
+            window.appState.groupTabTransitionPending = true;
+            await Promise.race([
+                preloadGroupSharedAccounts(groupId),
+                new Promise(resolve => setTimeout(resolve, GROUP_TAB_SWITCH_SETTLE_MS)),
+            ]);
+        }
         showToast('Đã mở khoá nhóm', 'success');
         // Mở khoá xong: render lại ở chế độ quiet để hiển thị dữ liệu đã giải mã mà KHÔNG phát lại
         // Entrance_Animation cho toàn bộ danh sách (Req 4.2). Sai mật khẩu đã return sớm ở trên (giữ locked, Req 4.5).
-        if (window.appState.currentPage === 'group-detail') renderGroupDetail(groupId, { quiet: true });
+        if (window.appState.currentPage === 'group-detail' && window.appState.currentGroupId === groupId) {
+            window.appState.groupTabTransitionPending = false;
+            renderGroupDetail(groupId, { quiet: true });
+        }
         return true;
     } catch (error) {
         console.error('Unlock group error:', error);
@@ -2311,6 +2392,10 @@ async function handleDeleteGroup(groupId) {
     }
 }
 
+const GROUP_TAB_SWITCH_SETTLE_MS = 90;
+let _groupTabSwitchTimer = null;
+let _groupTabSwitchToken = 0;
+
 function setGroupDetailTab(tab = 'board', options = {}) {
     // Chuẩn hoá về đúng 3 tab con hợp lệ (board/accounts/members) qua hàm thuần normalizeGroupTab.
     // 'settings' KHÔNG phải tab con ⇒ sẽ bị đưa về 'board'; muốn mở cài đặt hãy dùng openGroupSettings (Req 3.4, 3.6).
@@ -2319,12 +2404,24 @@ function setGroupDetailTab(tab = 'board', options = {}) {
         : (['board', 'accounts', 'members'].includes(tab) ? tab : 'board');
     // Chọn lại đúng tab đang active ⇒ giữ nguyên, KHÔNG render lại, không phát lại hiệu ứng (Req 3.5).
     if (normalized === window.appState.currentGroupTab) return;
-    // Chuyển sang tab con khác ⇒ cập nhật Active_Subtab và render animated để phát Entrance_Animation đúng một lần (Req 2.3, 3.2).
+    const groupId = window.appState.currentGroupId;
+    const token = ++_groupTabSwitchToken;
+    if (_groupTabSwitchTimer) clearTimeout(_groupTabSwitchTimer);
+    // Chuyển tab sau cửa sổ gom ngắn để callback realtime nhập vào cùng một lượt vẽ.
     window.appState.currentGroupTab = normalized;
+    window.appState.groupTabTransitionPending = true;
     // Chuyển tab con ⇒ đặt lại Group_Tab về View_Mode TRƯỚC khi render lại (Req 5.1, 2.3),
     // tránh vô tình để lộ cụm Edit_Control khi quay lại tab "Bảng".
     window.appState.groupEditMode = resetGroupEditState();
-    renderGroupDetail(window.appState.currentGroupId, options);
+    if (normalized === 'accounts') preloadGroupSharedAccounts(groupId);
+
+    _groupTabSwitchTimer = setTimeout(() => {
+        _groupTabSwitchTimer = null;
+        if (token !== _groupTabSwitchToken) return;
+        if (window.appState.currentPage !== 'group-detail' || window.appState.currentGroupId !== groupId) return;
+        window.appState.groupTabTransitionPending = false;
+        renderGroupDetail(groupId, options);
+    }, GROUP_TAB_SWITCH_SETTLE_MS);
 }
 
 // Bật/tắt Edit_Mode của Group_Tab qua nút bút chì (Edit_Toggle_Button) — Req 2.4, 2.5, 4.7.
@@ -2347,6 +2444,10 @@ function openGroupSettings(groupId) {
     const id = groupId || window.appState.currentGroupId;
     // Đang ở view cài đặt rồi ⇒ giữ nguyên, không render lại.
     if (window.appState.currentGroupTab === 'settings') return;
+    _groupTabSwitchToken += 1;
+    if (_groupTabSwitchTimer) clearTimeout(_groupTabSwitchTimer);
+    _groupTabSwitchTimer = null;
+    window.appState.groupTabTransitionPending = false;
     window.appState.currentGroupTab = 'settings';
     renderGroupDetail(id);
 }
@@ -2369,10 +2470,20 @@ function scrollToGroupAccountTarget(groupId, accountId) {
 }
 
 // Click vào tài khoản ở tab Bảng ⇒ chuyển sang tab Tài khoản và cuộn tới đúng card.
-function openGroupAccountInAccountsTab(groupId, accountId) {
+async function openGroupAccountInAccountsTab(groupId, accountId) {
     const group = getGroupById?.(groupId);
     if (!group) return false;
+    _groupTabSwitchToken += 1;
+    if (_groupTabSwitchTimer) clearTimeout(_groupTabSwitchTimer);
+    _groupTabSwitchTimer = null;
     window.appState.currentGroupTab = 'accounts';
+    window.appState.groupTabTransitionPending = true;
+    await Promise.race([
+        preloadGroupSharedAccounts(groupId),
+        new Promise(resolve => setTimeout(resolve, GROUP_TAB_SWITCH_SETTLE_MS)),
+    ]);
+    if (window.appState.currentPage !== 'group-detail' || window.appState.currentGroupId !== groupId) return false;
+    window.appState.groupTabTransitionPending = false;
     renderGroupDetail(groupId);
     requestAnimationFrame(() => {
         if (!scrollToGroupAccountTarget(groupId, accountId)) {
@@ -2833,7 +2944,38 @@ function getSharedAccountCacheKey(groupId, accountId) {
     return `${groupId}:${accountId}`;
 }
 
-async function decryptSharedAccountForDisplay(groupId, accountId) {
+function refreshSharedAccountCard(groupId, accountId) {
+    if (window.appState.currentPage !== 'group-detail'
+        || window.appState.currentGroupId !== groupId
+        || window.appState.currentGroupTab !== 'accounts') return false;
+    const group = getGroupById?.(groupId);
+    const account = getSharedAccountById(groupId, accountId);
+    const target = document.getElementById(getGroupAccountTargetId(groupId, accountId));
+    if (!group || !account || !target || typeof renderSharedAccountCard !== 'function') return false;
+    target.outerHTML = renderSharedAccountCard(group, account);
+    return true;
+}
+
+function preloadGroupSharedAccounts(groupId) {
+    if (!isGroupUnlocked?.(groupId)) return Promise.resolve([]);
+    window.appState.decryptingSharedAccounts = window.appState.decryptingSharedAccounts || {};
+    const group = getGroupById?.(groupId);
+    const accounts = group && typeof getGroupSharedAccounts === 'function'
+        ? getGroupSharedAccounts(group)
+        : (window.appState.sharedAccounts?.[groupId] || []);
+    const tasks = accounts.map(account => {
+        const key = getSharedAccountCacheKey(groupId, account.id);
+        if (window.appState.decryptedSharedAccounts?.[key]
+            || window.appState.decryptFailedSharedAccounts?.[key]
+            || window.appState.decryptingSharedAccounts[key]) return Promise.resolve(null);
+        window.appState.decryptingSharedAccounts[key] = true;
+        return decryptSharedAccountForDisplay(groupId, account.id, { refresh: true, silent: true })
+            .finally(() => { delete window.appState.decryptingSharedAccounts[key]; });
+    });
+    return Promise.allSettled(tasks);
+}
+
+async function decryptSharedAccountForDisplay(groupId, accountId, options = {}) {
     const key = getSharedAccountCacheKey(groupId, accountId);
     if (window.appState.decryptedSharedAccounts?.[key]) return window.appState.decryptedSharedAccounts[key];
     const password = getUnlockedGroupPassword?.(groupId);
@@ -2842,14 +2984,16 @@ async function decryptSharedAccountForDisplay(groupId, accountId) {
     try {
         const decrypted = await decryptSharedAccount(account, password);
         window.appState.decryptedSharedAccounts[key] = decrypted;
-        // Giải mã xong 1 tài khoản: render lại ở chế độ quiet để không nháy/không phát lại hiệu ứng (Req 4.2).
-        if (window.appState.currentPage === 'group-detail' && window.appState.currentGroupId === groupId) {
-            renderGroupDetail(groupId, { quiet: true });
-        }
+        if (window.appState.decryptFailedSharedAccounts) delete window.appState.decryptFailedSharedAccounts[key];
+        // Chỉ thay đúng card vừa giải mã; không dựng lại toàn bộ panel Nhóm.
+        if (options.refresh !== false) refreshSharedAccountCard(groupId, accountId);
         return decrypted;
     } catch (error) {
         console.error('Decrypt shared account error:', error);
-        showToast('Không giải mã được tài khoản chia sẻ', 'error');
+        window.appState.decryptFailedSharedAccounts = window.appState.decryptFailedSharedAccounts || {};
+        window.appState.decryptFailedSharedAccounts[key] = true;
+        if (options.refresh !== false) refreshSharedAccountCard(groupId, accountId);
+        if (!options.silent) showToast('Không giải mã được tài khoản chia sẻ', 'error');
         return null;
     }
 }

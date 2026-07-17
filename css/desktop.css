@@ -1272,14 +1272,14 @@ body.is-electron .d-auth-left button { -webkit-app-region:no-drag; }
     flex:0 0 auto;
 }
 
-/* Vùng nội dung tab con (phần tử ngay sau .group-tabs) là phần cuộn dọc duy nhất.
-   Board dùng .group-board, các tab khác dùng .group-panel — cả hai đều là một
-   wrapper đơn nên bộ chọn ~ * áp đúng vào vùng nội dung. */
-.group-detail-root > .group-tabs ~ * {
+/* Chỉ panel tab cuộn; header và thanh tab giữ nguyên vị trí. Giữ gutter scrollbar
+   cố định để việc dữ liệu xuất hiện không làm nội dung nhảy ngang. */
+.group-detail-root > .group-tab-surface {
     flex:1 1 auto;
     min-height:0;
     overflow-y:auto;
     overflow-x:hidden;
+    scrollbar-gutter:stable;
 }
 
 /* Req 2.1 / 2.4 / 2.5: Lớp chặn Entrance_Animation khi Quiet_Render.

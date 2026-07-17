@@ -479,7 +479,7 @@ function legacy_renderSettings_1() {
         </div>
     </div>
 
-    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.7.1')}</p>`;
+    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.7.3')}</p>`;
 }
 
 // ===== MOBILE DESKTOP-PARITY RENDERERS =====
@@ -2436,7 +2436,7 @@ function renderUpdateSection() {
     const version = escapeHtml(
         window.appState.appVersion
         || window.TingMobileUpdater?.INSTALLED_VERSION_NAME
-        || '1.7.1'
+        || '1.7.3'
     );
     const platform = getMobileUpdatePlatform();
     const cap = getMobileUpdateCapability(platform);
@@ -2568,7 +2568,7 @@ function renderSettings() {
             <div class="settings-item" onclick="signOut()"><div class="settings-item-icon" style="background:var(--danger-bg)">🚪</div><div class="settings-item-content"><div class="settings-item-title" style="color:var(--danger)">Đăng xuất</div></div></div>
         </div>
     </div></div>
-    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.7.1')}</p>`;
+    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.7.3')}</p>`;
     switchSettingsTab(window._settingsActiveTab || 'update');
 }
 
@@ -2985,6 +2985,9 @@ function renderAddForm(type, editData = null) {
                 <button type="button" class="quick-chip" onclick="closeInlineCategoryCreate()">Hủy</button>
             </div>
         </div>`;
+    const renderHistoryField = kind => typeof renderAddHistoryFieldButton === 'function'
+        ? renderAddHistoryFieldButton(kind, editData?.id || '')
+        : '';
     const historyButton = typeof renderAddHistoryOpenButton === 'function'
         ? renderAddHistoryOpenButton(editData?.id || '')
         : '';
@@ -3082,7 +3085,7 @@ function renderAddForm(type, editData = null) {
     <!-- TAB 3: Bổ sung -->
     <div class="add-wizard-panel" data-tab="3" id="add-tab-3" hidden>
         ${historyButton}
-        <div class="form-section-title">Ghi chú ${renderHintButton('Quét text rồi bấm Copy hoặc Code để đánh dấu. Link http/https sẽ tự nhận diện khi lưu.')}</div>
+        <div class="form-section-title add-field-title"><span>Ghi chú ${renderHintButton('Quét text rồi bấm Copy hoặc Code để đánh dấu. Link http/https sẽ tự nhận diện khi lưu.')}</span>${renderHistoryField('note')}</div>
         <div class="note-input-wrap">
             <div class="note-toolbar">
                 <button type="button" class="note-toolbar-btn" onclick="wrapNoteSelection('copy')">${renderNoteToolbarIcon('copy')} Copy</button>
@@ -3095,14 +3098,14 @@ function renderAddForm(type, editData = null) {
 https://example.com" style="min-height:110px" onfocus="markAddFormDateSkippedIfNeeded()" onblur="guideAddFormFromNote()">${escapeHtml(editData?.note || '')}</textarea>
         </div>
 
-        <div class="form-section-title">Ngu&#7891;n g&#7889;c / Ng&#432;&#7901;i b&#225;n <span class="optional-label">(T&#249;y ch&#7885;n)</span></div>
+        <div class="form-section-title add-field-title"><span>Ngu&#7891;n g&#7889;c / Ng&#432;&#7901;i b&#225;n <span class="optional-label">(T&#249;y ch&#7885;n)</span></span>${renderHistoryField('seller')}</div>
         <div class="input-group" style="margin-bottom:8px">
             <input type="text" id="add-seller-name" class="input" placeholder=" " style="padding-left:16px" value="${escapeHtml(editData?.sellerName || '')}" oninput="this.dataset.sellerAuto='false';syncSellerLinkFromForm()" onblur="guideAddFormFromSeller()" onkeydown="if(event.key==='Enter'){event.preventDefault();guideAddFormFromSeller()}">
             <label for="add-seller-name" class="input-label" style="left:16px">T&#234;n ng&#432;&#7901;i b&#225;n</label>
         </div>
         ${renderSellerPlatformPicker(editData?.sellerPlatform || 'other', editData?.sellerLink || '')}
 
-        <div class="form-section-title">Giá mua <span class="optional-label">(Tùy chọn)</span></div>
+        <div class="form-section-title add-field-title"><span>Giá mua <span class="optional-label">(Tùy chọn)</span></span>${renderHistoryField('price')}</div>
         <div class="input-group price-input-group" style="margin-bottom:8px">
             <input type="text" id="add-price" class="input" inputmode="decimal" autocomplete="off" placeholder=" " style="padding-left:16px" value="${editData?.purchaseAmount ?? editData?.purchasePrice ?? ''}" oninput="formatAccountPurchaseAmountField(this);updateAccountPurchaseConversionPreview()">
             <label for="add-price" class="input-label" style="left:16px">Số tiền gốc (để trống nếu không nhập)</label>

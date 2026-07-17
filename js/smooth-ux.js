@@ -146,10 +146,19 @@
 
     // ---------- Hiệu ứng chuyển trang ----------
     var pageEnterTimer = null;
+    function suppressNestedPageAnimations(content) {
+        if (!content) return;
+        // The page transition already covers the first paint. Removing nested
+        // card animations prevents them from starting after pageEnter ends.
+        content.querySelectorAll('.anim-fade-in-up, .anim-stagger').forEach(function (node) {
+            node.classList.remove('anim-fade-in-up', 'anim-stagger');
+        });
+    }
     function playPageEnter() {
         if (prefersReduced) return;
         var pc = document.getElementById('page-content');
         if (!pc) return;
+        suppressNestedPageAnimations(pc);
         pc.classList.remove('page-enter');
         clearTimeout(pageEnterTimer);
         requestAnimationFrame(function () {
