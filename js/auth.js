@@ -725,7 +725,13 @@ async function requireFreshSensitiveActionAuth(actionLabel = 'thao tác này') {
         }
 
         if (isPasswordProviderUser(currentUser)) {
-            const password = window.prompt(`Nhập mật khẩu đăng nhập của ${currentUser.email || 'tài khoản'} để ${actionLabel}:`);
+            const password = await promptAction({
+                title: 'Xác thực lại tài khoản',
+                message: `Nhập mật khẩu đăng nhập của ${currentUser.email || 'tài khoản'} để ${actionLabel}.`,
+                confirmLabel: 'Xác thực',
+                input: { type: 'password', label: 'Mật khẩu đăng nhập', autocomplete: 'current-password', maxLength: 256 },
+                validate: value => value ? true : 'Vui lòng nhập mật khẩu',
+            });
             if (!password) {
                 showToast('Đã huỷ xác thực', 'error');
                 return false;
@@ -796,7 +802,7 @@ async function changeLoginPassword(currentPassword, newPassword) {
 // ===== ĐĂNG XUẤT =====
 async function signOut() {
     try {
-        if (!confirm('Bạn chắc chắn muốn đăng xuất khỏi Ting!?')) return;
+        if (!await confirmAction({ variant: 'warning', title: 'Đăng xuất khỏi Ting!?', message: 'Bạn sẽ cần đăng nhập lại để tiếp tục sử dụng dữ liệu đã đồng bộ.', confirmLabel: 'Đăng xuất' })) return;
         await stopBackgroundNotificationCheck?.();
         if (window.appState?.isDemo) {
             stopAccountsRealtime?.();

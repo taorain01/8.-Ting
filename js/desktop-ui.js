@@ -17,6 +17,7 @@ function shouldSuppressDuplicateToast(msg, type) {
 }
 
 function showToast(msg, type='success') {
+    if (typeof showTingToast === 'function') return showTingToast(msg, type);
     if (shouldSuppressDuplicateToast(msg, type)) return;
     const c = document.getElementById('toast-container');
     const t = document.createElement('div');
@@ -681,7 +682,7 @@ function renderQuickAccountIconFilter(accounts = window.appState?.accounts || []
             ? `<span class="quick-platform-trigger-default" aria-hidden="true">#</span>`
         : `<span class="quick-platform-trigger-default" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16l-6 7v5l-4 2v-7L4 5z"/></svg></span>`;
 
-    let html = `<button type="button" class="quick-platform-trigger ${activeStat || activeTagStat ? 'has-active' : ''}" onclick="toggleQuickPlatformFilter(event)" title="${escapeHtml(triggerTitle)}" aria-haspopup="true" aria-expanded="${el.classList.contains('open') ? 'true' : 'false'}">
+    let html = `<button type="button" class="quick-platform-trigger ${activeStat || activeTagStat ? 'has-active' : ''}" onclick="toggleQuickPlatformFilter(event)" title="${escapeHtml(triggerTitle)}" aria-label="${escapeHtml(triggerTitle)}" aria-haspopup="true" aria-expanded="${el.classList.contains('open') ? 'true' : 'false'}">
         ${triggerIcon}
         <span class="quick-platform-trigger-count">${triggerBadge}</span>
     </button>
@@ -741,7 +742,9 @@ document.addEventListener('click', event => {
 });
 
 document.addEventListener('keydown', event => {
-    if (event.key === 'Escape') closeQuickPlatformFilter();
+    if (event.key !== 'Escape' || window.TingFeedback?.isOpen?.()) return;
+    if (typeof getTopDesktopTransientUi === 'function' && getTopDesktopTransientUi()) return;
+    closeQuickPlatformFilter();
 });
 
 function renderQuickFilterResultHead(platform, accounts, { showDetails = false, showExpired = false, detailKey = '' } = {}) {
@@ -1015,7 +1018,7 @@ function selectCategoryIcon(iconId) {
     });
 }
 
-function renderCategoryIcon(category, className = '') {
+function legacy_renderCategoryIcon_1(category, className = '') {
     const color = getSafeCategoryColor(category?.color);
     return `<span class="category-icon ${className}" style="--category-color:${color}">${escapeHtml(category?.icon || '📁')}</span>`;
 }
@@ -1040,7 +1043,7 @@ function renderCategoryPicker(selectedIds = []) {
     `).join('')}</div>`;
 }
 
-function renderAccountCategoryChips(acc, options = {}) {
+function legacy_renderAccountCategoryChips_1(acc, options = {}) {
     const categories = typeof getSortedCategories === 'function' ? getSortedCategories() : [];
     const ids = typeof getAccountCategoryIds === 'function' ? getAccountCategoryIds(acc) : (acc?.categoryIds || []);
     const values = ids.map(id => categories.find(category => category.id === id)).filter(Boolean);
@@ -1162,7 +1165,7 @@ function renderCategoryDetail(categoryId) {
     `;
 }
 
-function renderCategoryForm(category = null) {
+function legacy_renderCategoryForm_1(category = null) {
     return `
     <div class="form-section-title">Tên danh mục</div>
     <input type="text" id="category-name" class="input" placeholder="VD: Công Ty ShineOn" value="${escapeHtml(category?.name || '')}">
@@ -1348,11 +1351,11 @@ function mountSearchToolbarButtons(type, { hasStatusOrTagFilter = false, hasPlat
     const container = document.getElementById('search-toolbar-buttons');
     if (!container) return;
     container.innerHTML = `
-        <button class="toolbar-filter-btn ${hasStatusOrTagFilter ? 'has-filter' : ''}" onclick="toggleFilterPanel()" title="Lọc">
+        <button type="button" class="toolbar-filter-btn ${hasStatusOrTagFilter ? 'has-filter' : ''}" onclick="toggleFilterPanel()" title="Lọc" aria-label="Lọc theo trạng thái hoặc thẻ">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
             ${hasStatusOrTagFilter ? `<span class="toolbar-filter-dot"></span>` : ''}
         </button>
-        <button class="toolbar-platform-btn" onclick="togglePlatformPanel()" title="Lọc nền tảng">
+        <button type="button" class="toolbar-platform-btn" onclick="togglePlatformPanel()" title="Lọc nền tảng" aria-label="Lọc theo nền tảng">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
             ${hasPlatformFilter ? `<span class="toolbar-filter-dot"></span>` : ''}
         </button>`;
@@ -1365,7 +1368,7 @@ function unmountSearchToolbarButtons() {
     if (container) container.innerHTML = '';
 }
 
-function renderAccountList(type) {
+function renderAccountList(type, options = {}) {
     const accs = window.appState.accounts.filter(a=>a.type===type);
     const filter = window.appState.currentFilter || 'all';
     const tagFilter = window.appState.currentTagFilter || '';
@@ -1414,16 +1417,30 @@ function renderAccountList(type) {
     <div id="filter-panel" class="filter-panel" style="display:none">${renderFilterPanel(accs)}</div>
     <div id="platform-panel" class="platform-panel" style="display:none">${renderPlatformQuickFilter(accs)}</div>`;
 
+    let resultsHtml = '';
     if (filtered.length > 0) {
         const displayItems = buildAccountDisplayItems(filtered);
-        h += `<div class="d-account-stack anim-stagger">${displayItems.map(item => Array.isArray(item.accounts)
+        resultsHtml = `<div class="d-account-stack anim-stagger">${displayItems.map(item => Array.isArray(item.accounts)
             ? renderAccountGroup(item, type === 'personal', showExpired)
             : renderDesktopCard(item, type === 'personal', false, showExpired && isExpiredAccount(item))).join('')}</div>`;
     } else {
         // TẮT mà không còn Tai_Khoan_Con_Han nào -> trạng thái danh sách rỗng (Req 3.10)
-        h += `<div class="d-empty-state anim-fade-in-up"><div class="d-empty-state-icon">${type==='personal'?'🔒':'🛒'}</div><div class="d-empty-state-title">Không có tài khoản nào</div><div class="d-empty-state-desc">${hasActiveFilter?'Thử đổi bộ lọc hoặc xoá lọc':'Bấm "Thêm TK" để thêm mới'}</div></div>`;
+        resultsHtml = `<div class="d-empty-state anim-fade-in-up"><div class="d-empty-state-icon">${type==='personal'?'🔒':'🛒'}</div><div class="d-empty-state-title">Không có tài khoản nào</div><div class="d-empty-state-desc">${hasActiveFilter?'Thử đổi bộ lọc hoặc xoá lọc':'Bấm "Thêm TK" để thêm mới'}</div></div>`;
     }
-    document.getElementById('page-content').innerHTML = h;
+    const pageContent = document.getElementById('page-content');
+    const currentShell = pageContent.querySelector(`[data-account-list-shell="${type}"]`);
+    if (options.quiet && currentShell) {
+        const count = currentShell.querySelector('[data-account-result-count]');
+        const results = currentShell.querySelector('[data-account-results]');
+        if (count) count.textContent = String(filtered.length);
+        if (results) {
+            results.classList.add('search-results-quiet');
+            results.innerHTML = resultsHtml;
+        }
+        return;
+    }
+    h = h.replace('<span class="section-badge">', '<span class="section-badge" data-account-result-count>');
+    pageContent.innerHTML = `<div data-account-list-shell="${type}">${h}<div data-account-results>${resultsHtml}</div></div>`;
 
     // Chèn Nut_Loc/Nut_Loc_Nen_Tang vào ô tìm kiếm cho màn hình bought/personal (Req 2.2-2.7)
     if (typeof mountSearchToolbarButtons === 'function') {
@@ -1463,7 +1480,7 @@ function getGroupLockLabel(groupId) {
     return isGroupUnlocked?.(groupId) ? 'Mở' : 'Đã khoá';
 }
 
-function renderGroupCard(group) {
+function legacy_renderGroupCard_1(group) {
     const count = window.appState.sharedAccountCounts?.[group.id] ?? group.sharedAccountCount ?? 0;
     const unlocked = Boolean(isGroupUnlocked?.(group.id));
     return `<button class="group-card anim-fade-in-up" onclick="openGroupDetail('${escapeJsAttr(group.id)}')">
@@ -1478,7 +1495,7 @@ function renderGroupCard(group) {
     </button>`;
 }
 
-function renderGroupList() {
+function legacy_renderGroupList_1() {
     const groups = window.appState.groups || [];
     const query = String(window.appState.searchQuery || '').trim().toLowerCase();
     const filtered = query
@@ -1503,7 +1520,7 @@ function renderGroupList() {
     `;
 }
 
-function renderGroupMembers(group) {
+function legacy_renderGroupMembers_1(group) {
     const isOwner = group.role === 'owner';
     const ownerEmail = normalizeGroupEmail?.(group.ownerEmail) || group.ownerEmail || '';
     return `<div class="group-panel anim-fade-in-up">
@@ -1540,7 +1557,7 @@ function renderSharedAccountMeta(account) {
     return { platformRef, logoStyle, logoMark, expiryText };
 }
 
-function renderSharedSecretRows(group, account, decrypted) {
+function legacy_renderSharedSecretRows_1(group, account, decrypted) {
     const canRemove = group.role === 'owner' || account.sharedByUid === window.appState.user?.uid;
     return `<div class="shared-secret-rows">
         <div class="detail-row"><span class="detail-label">Tài khoản</span><span class="detail-value secret-value">${escapeHtml(decrypted.username || '')} <button class="copy-btn" onclick="copySharedField('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','username')" title="Copy tài khoản">${renderCopyIconSvg()}</button></span></div>
@@ -1555,7 +1572,7 @@ function renderCopyIconSvg() {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
 }
 
-function renderSharedAccountCard(group, account) {
+function legacy_renderSharedAccountCard_1(group, account) {
     const meta = renderSharedAccountMeta(account);
     const unlocked = Boolean(isGroupUnlocked?.(group.id));
     const key = `${group.id}:${account.id}`;
@@ -1585,7 +1602,7 @@ function renderSharedAccountCard(group, account) {
     </div>`;
 }
 
-function renderGroupSharedAccounts(group) {
+function legacy_renderGroupSharedAccounts_1(group) {
     const accounts = window.appState.sharedAccounts?.[group.id] || [];
     const unlocked = Boolean(isGroupUnlocked?.(group.id));
     return `<div class="group-panel group-shared-panel anim-fade-in-up">
@@ -1602,7 +1619,7 @@ function renderGroupSharedAccounts(group) {
     </div>`;
 }
 
-function renderGroupDetail(groupId) {
+function legacy_renderGroupDetail_1(groupId) {
     const group = getGroupById?.(groupId);
     if (!group) {
         renderGroupList();
@@ -1632,7 +1649,7 @@ function renderGroupDetail(groupId) {
 }
 
 // ===== GROUPS OVERRIDES: invites + shared edit approvals =====
-function renderGroupCard(group) {
+function legacy_renderGroupCard_2(group) {
     const count = window.appState.sharedAccountCounts?.[group.id] ?? group.sharedAccountCount ?? 0;
     const editCount = window.appState.sharedEditRequestCounts?.[group.id] ?? group.editRequestCount ?? 0;
     const unlocked = Boolean(isGroupUnlocked?.(group.id));
@@ -1648,7 +1665,7 @@ function renderGroupCard(group) {
     </button>`;
 }
 
-function renderGroupInviteCard(group) {
+function legacy_renderGroupInviteCard_1(group) {
     return `<div class="group-card group-invite-card anim-fade-in-up">
         <div class="group-card-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 12h-6"/><path d="m19 9 3 3-3 3"/><path d="M14 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="7.5" cy="7" r="4"/></svg>
@@ -1664,7 +1681,7 @@ function renderGroupInviteCard(group) {
     </div>`;
 }
 
-function renderGroupInviteSection(invites) {
+function legacy_renderGroupInviteSection_1(invites) {
     if (!invites.length) return '';
     return `<div class="group-invite-section anim-fade-in-up">
         <div class="section-header"><span class="section-title">Lời mời vào nhóm</span><span class="section-badge">${invites.length}</span></div>
@@ -1672,7 +1689,7 @@ function renderGroupInviteSection(invites) {
     </div>`;
 }
 
-function renderGroupList() {
+function legacy_renderGroupList_2() {
     const groups = window.appState.groups || [];
     const invites = window.appState.groupInvites || [];
     const query = String(window.appState.searchQuery || '').trim().toLowerCase();
@@ -1703,7 +1720,7 @@ function renderGroupList() {
     `;
 }
 
-function renderGroupMembers(group) {
+function legacy_renderGroupMembers_2(group) {
     const isOwner = group.role === 'owner';
     const ownerEmail = normalizeGroupEmail?.(group.ownerEmail) || group.ownerEmail || '';
     const pending = group.pendingMemberEmails || [];
@@ -1743,7 +1760,7 @@ function renderSharedTwoFaExtra(group, account, secret) {
     return `<div class="detail-row totp-web-row shared-twofa-web-row"><span class="detail-label"></span><button type="button" class="btn btn-sm btn-outline" onclick="openWeb2FA('${escapeJsAttr(secret)}')">🌐 Tạo mã 2FA trên web</button></div>`;
 }
 
-function renderSharedSecretRows(group, account, decrypted) {
+function legacy_renderSharedSecretRows_2(group, account, decrypted) {
     const canRemove = group.role === 'owner' || account.sharedByUid === window.appState.user?.uid;
     const pendingCount = (getSharedEditRequestsForAccount?.(group.id, account.id) || []).filter(request => request.status === 'pending').length;
     const twoFaSecret = decrypted.twoFaCode || '';
@@ -1794,7 +1811,7 @@ function renderSharedEditRequests(group) {
     </div>`;
 }
 
-function renderSharedAccountCard(group, account) {
+function legacy_renderSharedAccountCard_2(group, account) {
     const meta = renderSharedAccountMeta(account);
     const unlocked = Boolean(isGroupUnlocked?.(group.id));
     const key = `${group.id}:${account.id}`;
@@ -1843,7 +1860,7 @@ function renderGroupSharedAccounts(group) {
     </div>`;
 }
 
-function renderGroupDetail(groupId) {
+function legacy_renderGroupDetail_2(groupId) {
     const group = getGroupById?.(groupId);
     if (!group) {
         renderGroupList();
@@ -1992,8 +2009,8 @@ function renderGroupTabs(group) {
         { id: 'accounts', label: 'Tài khoản' },
         { id: 'members', label: 'Thành viên' },
     ];
-    return `<div class="group-tabs" role="tablist">
-        ${tabs.map(tab => `<button type="button" class="group-tab ${active === tab.id ? 'active' : ''}" onclick="setGroupDetailTab('${escapeJsAttr(tab.id)}')" title="${escapeHtml(tab.label)}">${escapeHtml(tab.label)}</button>`).join('')}
+    return `<div class="group-tabs" role="tablist" aria-label="Tab nhóm" onkeydown="handleAccessibleTabKeydown(event)">
+        ${tabs.map(tab => `<button type="button" id="group-tab-${escapeHtml(tab.id)}" class="group-tab ${active === tab.id ? 'active' : ''}" data-tab="${escapeHtml(tab.id)}" role="tab" aria-selected="${active === tab.id}" aria-controls="group-tab-panel" tabindex="${active === tab.id ? '0' : '-1'}" onclick="setGroupDetailTab('${escapeJsAttr(tab.id)}')" title="${escapeHtml(tab.label)}">${escapeHtml(tab.label)}</button>`).join('')}
     </div>`;
 }
 
@@ -2149,10 +2166,12 @@ function renderSharedSecretRows(group, account, decrypted) {
     const canEditSecret = group.role === 'owner' || account.sharedByUid === window.appState.user?.uid;
     const pendingCount = (getSharedEditRequestsForAccount?.(group.id, account.id) || []).filter(request => request.status === 'pending').length;
     const twoFaSecret = decrypted.twoFaCode || '';
+    const purchaseTime = typeof getAccountPurchaseTime === 'function' ? getAccountPurchaseTime(account) : (account.purchaseTime || '');
     return `<div class="shared-secret-rows">
         <div class="detail-row"><span class="detail-label">Tài khoản</span><span class="detail-value secret-value">${escapeHtml(decrypted.username || '')} <button class="copy-btn" onclick="copySharedField('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','username')" title="Copy tài khoản">${renderCopyIconSvg()}</button></span></div>
         <div class="detail-row"><span class="detail-label">Mật khẩu</span><span class="detail-value secret-value">${escapeHtml(decrypted.password || '')} <button class="copy-btn" onclick="copySharedField('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','password')" title="Copy mật khẩu">${renderCopyIconSvg()}</button></span></div>
         ${twoFaSecret ? `<div class="detail-row"><span class="detail-label">2FA</span><span class="detail-value secret-value">${escapeHtml(twoFaSecret)} <button class="copy-btn" onclick="copySharedField('${escapeJsAttr(group.id)}','${escapeJsAttr(account.id)}','2fa')" title="Copy 2FA">${renderCopyIconSvg()}</button></span></div>${renderSharedTwoFaExtra(group, account, twoFaSecret)}` : ''}
+        ${purchaseTime ? `<div class="detail-row"><span class="detail-label">Giờ mua</span><span class="detail-value">${escapeHtml(typeof formatTimeVN === 'function' ? formatTimeVN(purchaseTime) : purchaseTime)}</span></div>` : ''}
         ${decrypted.note ? `<div class="detail-row detail-note-row"><span class="detail-label">Ghi chú</span><div class="detail-note-value">${renderSmartNote(decrypted.note)}</div></div>` : ''}
         ${account.groupNote ? `<div class="detail-row detail-note-row"><span class="detail-label">Ghi chú nhóm</span><div class="detail-note-value">${renderSmartNote(account.groupNote)}</div></div>` : ''}
         <div class="shared-account-actions">
@@ -2493,7 +2512,9 @@ function renderGroupDetail(groupId, options = {}) {
             </div>
         </div>
         ${renderGroupTabs(group)}
-        ${tabContent}
+        <div id="group-tab-panel" class="group-tab-surface" role="tabpanel" aria-labelledby="group-tab-${escapeHtml(activeTab)}">
+            ${tabContent}
+        </div>
     `;
     // Firestore fires several snapshots per open (cache → server → metadata),
     // each landing as a separate quiet refresh. If the resulting DOM is identical
@@ -2959,6 +2980,7 @@ function renderDetail(accId) {
     const twoFaEye = needsMaster ? renderEyeButton(acc.id, 'twoFaCode', 'Hiện 2FA') : '';
 
     const sellerRow = renderSellerDetailRow(acc);
+    const purchaseTime = typeof getAccountPurchaseTime === 'function' ? getAccountPurchaseTime(acc) : (acc.purchaseTime || '');
 
     // Chế độ sửa nhanh đang bật cho đúng tài khoản này? (lớp render đọc appState.quickEdit)
     const quickEditActive = window.appState.quickEdit?.accId === accId && window.appState.quickEdit.active === true;
@@ -2993,7 +3015,7 @@ function renderDetail(accId) {
         <div class="d-detail-full">
             <div class="detail-header anim-fade-in-up">
                 <div class="detail-logo" style="${logoStyle};width:64px;height:64px;font-size:28px">${logoMark}</div>
-                <div><div class="detail-name">${acc.name}</div><span class="account-badge ${getStatusBadgeClass(acc.status)}">${getStatusText(acc.status)}</span></div>
+                <div><div class="detail-name">${escapeHtml(acc.name || '')}</div><span class="account-badge ${getStatusBadgeClass(acc.status)}">${getStatusText(acc.status)}</span></div>
                 <div class="detail-pref-actions" onclick="event.stopPropagation()">${renderPinButton(acc)}${renderFavoriteButton(acc)}</div>
             </div>
             <div class="detail-tag-line">
@@ -3009,6 +3031,7 @@ function renderDetail(accId) {
         ${secretSectionHtml}
         <div class="detail-section anim-fade-in-up">
             <div class="detail-row"><span class="detail-label">Ngày mua</span><span class="detail-value">${formatDateVN(acc.purchaseDate)}</span></div>
+            ${purchaseTime ? `<div class="detail-row"><span class="detail-label">Giờ mua</span><span class="detail-value">${escapeHtml(typeof formatTimeVN === 'function' ? formatTimeVN(purchaseTime) : purchaseTime)}</span></div>` : ''}
             ${acc.purchasePrice && typeof formatPriceVN === 'function' ? `<div class="detail-row"><span class="detail-label">Giá mua</span><span class="detail-value detail-price-value">${escapeHtml(formatPriceVN(acc.purchasePrice))}</span></div>` : ''}
             <div class="detail-row"><span class="detail-label">Hết hạn</span><span class="detail-value">${acc.expiryType==='lifetime'?'♾️ Vĩnh viễn':formatDateVN(acc.expiryDate)}</span></div>
             ${acc.expiryType!=='lifetime'?`<div class="detail-row"><span class="detail-label">Còn lại</span><span class="detail-value" style="color:${days<0?'var(--danger)':days<=5?'var(--warning)':'var(--success)'}">${days<0?'Đã hết '+Math.abs(days)+' ngày':days+' ngày'}</span></div>`:''}
@@ -3289,7 +3312,7 @@ function renderMinSupportedWarning(platform, status) {
 // hiệu hoá "Kiểm tra" theo Platform_Detector, định tuyến hành động theo nền tảng, và
 // khoá hành động khi đang tải (Requirements 1.1-1.6, 3.4/3.5/3.7, 4.4/4.6/4.8, 10.1-10.4).
 function renderUpdateSection() {
-    const version = escapeHtml(window.appState.appVersion || '1.6.0');
+    const version = escapeHtml(window.appState.appVersion || '1.7.0');
     const platform = getUpdatePlatform();
     const cap = getUpdateCapability(platform);
     const status = window.appState.updateStatus;
@@ -3334,6 +3357,9 @@ function renderUpdateSection() {
     const notesHtml = showReleaseInfo && notes
         ? `<div class="settings-update-notes">${notes}</div>`
         : '';
+    const releaseHistoryHtml = typeof renderTingReleaseHistory === 'function'
+        ? renderTingReleaseHistory()
+        : '';
 
     return `<div class="settings-group settings-update-group">
         <div class="settings-group-title">Cập nhật</div>
@@ -3355,6 +3381,7 @@ function renderUpdateSection() {
             ${supportNotice}
             <div class="settings-log-wrap">${renderUpdateLog()}</div>
         </div>
+        ${releaseHistoryHtml}
     </div>`;
 }
 
@@ -3381,21 +3408,21 @@ function renderSettings() {
     const isElectron = Boolean(window.electronAPI?.isElectron);
     const autoLock = Number(settings.autoLockMinutes ?? 5);
     document.getElementById('page-content').innerHTML = `
-    <div class="settings-tabbar" role="tablist">
-        <button class="settings-tab" data-tab="update" onclick="switchSettingsTab('update')"><span class="settings-tab-ico">🔄</span> Cập nhật</button>
-        <button class="settings-tab" data-tab="security" onclick="switchSettingsTab('security')"><span class="settings-tab-ico">🔒</span> Bảo mật</button>
-        <button class="settings-tab" data-tab="desktop" onclick="switchSettingsTab('desktop')"><span class="settings-tab-ico">🖥️</span> Desktop</button>
-        <button class="settings-tab" data-tab="notifications" onclick="switchSettingsTab('notifications')"><span class="settings-tab-ico">🔔</span> Thông báo</button>
-        <button class="settings-tab" data-tab="data" onclick="switchSettingsTab('data')"><span class="settings-tab-ico">💾</span> Dữ liệu</button>
+    <div class="settings-tabbar" role="tablist" aria-label="Mục cài đặt" onkeydown="handleAccessibleTabKeydown(event)">
+        <button type="button" id="settings-tab-update" class="settings-tab" data-tab="update" role="tab" aria-selected="false" aria-controls="settings-panel-update" tabindex="-1" onclick="switchSettingsTab('update')"><span class="settings-tab-ico">🔄</span> Cập nhật</button>
+        <button type="button" id="settings-tab-security" class="settings-tab" data-tab="security" role="tab" aria-selected="false" aria-controls="settings-panel-security" tabindex="-1" onclick="switchSettingsTab('security')"><span class="settings-tab-ico">🔒</span> Bảo mật</button>
+        <button type="button" id="settings-tab-desktop" class="settings-tab" data-tab="desktop" role="tab" aria-selected="false" aria-controls="settings-panel-desktop" tabindex="-1" onclick="switchSettingsTab('desktop')"><span class="settings-tab-ico">🖥️</span> Desktop</button>
+        <button type="button" id="settings-tab-notifications" class="settings-tab" data-tab="notifications" role="tab" aria-selected="false" aria-controls="settings-panel-notifications" tabindex="-1" onclick="switchSettingsTab('notifications')"><span class="settings-tab-ico">🔔</span> Thông báo</button>
+        <button type="button" id="settings-tab-data" class="settings-tab" data-tab="data" role="tab" aria-selected="false" aria-controls="settings-panel-data" tabindex="-1" onclick="switchSettingsTab('data')"><span class="settings-tab-ico">💾</span> Dữ liệu</button>
     </div>
     <div class="d-settings-panels">
-        <div class="settings-panel" data-panel="security"><div class="settings-group"><div class="settings-group-title">Bảo mật</div><div class="settings-card">
+        <div id="settings-panel-security" class="settings-panel" data-panel="security" role="tabpanel" aria-labelledby="settings-tab-security"><div class="settings-group"><div class="settings-group-title">Bảo mật</div><div class="settings-card">
             <div class="settings-item" onclick="handleChangeMasterPassword()"><div class="settings-item-icon" style="background:var(--accent-bg)">🔑</div><div class="settings-item-content"><div class="settings-item-title">Đổi Master PIN</div><div class="settings-item-desc">Xác thực lại tài khoản rồi đặt PIN mới 4 hoặc 6 số</div></div><svg class="settings-item-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg></div>
             <label class="settings-item settings-control ${isElectron ? '' : 'disabled'}"><div class="settings-item-icon" style="background:var(--warning-bg)">🔒</div><div class="settings-item-content"><div class="settings-item-title">Tự khoá sau</div><div class="settings-item-desc">${isElectron ? 'Khoá Master Password khi máy không hoạt động' : 'Chỉ khả dụng trên bản desktop'}</div></div><select class="settings-select" onchange="handleAutoLockChange(this.value)" ${isElectron ? '' : 'disabled'}><option value="1" ${autoLock===1?'selected':''}>1 phút</option><option value="5" ${autoLock===5?'selected':''}>5 phút</option><option value="15" ${autoLock===15?'selected':''}>15 phút</option><option value="30" ${autoLock===30?'selected':''}>30 phút</option><option value="0" ${autoLock===0?'selected':''}>Tắt</option></select></label>
             <label class="settings-item settings-control"><div class="settings-item-icon" style="background:var(--accent-bg)">🛒</div><div class="settings-item-content"><div class="settings-item-title">Khoá TK Mua bằng Master Password</div><div class="settings-item-desc">Tắt để xem/copy TK Mua nhanh, bật nếu muốn bảo vệ như mục Cá nhân</div></div><input class="settings-toggle" type="checkbox" onchange="handleProtectBoughtToggle(this)" ${settings.protectBoughtAccounts ? 'checked' : ''}></label>
             <label class="settings-item settings-control"><div class="settings-item-icon" style="background:var(--danger-bg)">🧹</div><div class="settings-item-content"><div class="settings-item-title">Tự xoá clipboard sau 30s</div><div class="settings-item-desc">Áp dụng khi copy mật khẩu, 2FA hoặc mã</div></div><input class="settings-toggle" type="checkbox" onchange="handleClipboardAutoClearToggle(this)" ${settings.clipboardAutoClear ? 'checked' : ''}></label>
         </div></div></div>
-        <div class="settings-panel" data-panel="desktop"><div class="settings-group"><div class="settings-group-title">Desktop</div><div class="settings-card">
+        <div id="settings-panel-desktop" class="settings-panel" data-panel="desktop" role="tabpanel" aria-labelledby="settings-tab-desktop"><div class="settings-group"><div class="settings-group-title">Desktop</div><div class="settings-card">
             <label class="settings-item settings-control ${isElectron ? '' : 'disabled'}"><div class="settings-item-icon" style="background:var(--success-bg)">🚀</div><div class="settings-item-content"><div class="settings-item-title">Tự khởi động cùng Windows</div><div class="settings-item-desc">${isElectron ? 'Mở Ting! khi đăng nhập Windows' : 'Chỉ khả dụng trên bản desktop'}</div></div><input class="settings-toggle" type="checkbox" onchange="handleAutoStartToggle(this)" ${settings.autoStart ? 'checked' : ''} ${isElectron ? '' : 'disabled'}></label>
             <label class="settings-item settings-control"><div class="settings-item-icon" style="background:var(--accent-bg)">🌗</div><div class="settings-item-content"><div class="settings-item-title">Giao diện</div><div class="settings-item-desc">Theo hệ thống, sáng hoặc tối</div></div><select class="settings-select" onchange="handleThemeChange(this.value)"><option value="system" ${settings.theme==='system'?'selected':''}>Hệ thống</option><option value="light" ${settings.theme==='light'?'selected':''}>Sáng</option><option value="dark" ${settings.theme==='dark'?'selected':''}>Tối</option></select></label>
             <label class="settings-item settings-control"><div class="settings-item-icon" style="background:var(--accent-bg)">🪪</div><div class="settings-item-content"><div class="settings-item-title">Ghi nhớ đăng nhập</div><div class="settings-item-desc">Giữ phiên Google/Email trên thiết bị này</div></div><select class="settings-select" onchange="handleRememberSignInChange(this.value)"><option value="forever" ${(typeof getAuthRememberMode === 'function' ? getAuthRememberMode() : 'forever') === 'forever' ? 'selected' : ''}>Vĩnh viễn</option><option value="30d" ${(typeof getAuthRememberMode === 'function' ? getAuthRememberMode() : 'forever') === '30d' ? 'selected' : ''}>30 ngày</option></select></label>
@@ -3404,7 +3431,7 @@ function renderSettings() {
                 <div class="shortcut-row"><span class="shortcut-label">Thêm nhanh</span><button type="button" class="shortcut-record-btn" id="shortcut-btn-quickAdd" onclick="startRecordingShortcut('quickAdd')" onkeydown="handleShortcutKeydown(event)" tabindex="0"><span class="shortcut-key-display">${typeof formatAcceleratorDisplay === 'function' ? formatAcceleratorDisplay(settings.shortcuts?.quickAdd || '') : (settings.shortcuts?.quickAdd || 'Ctrl + Shift + S')}</span></button>${settings.shortcuts?.quickAdd ? `<button type="button" class="shortcut-clear-btn" onclick="clearShortcut('quickAdd')" title="Xóa phím tắt">✕</button>` : ''}</div>
             </div><button type="button" class="btn btn-sm btn-outline settings-shortcut-reset" onclick="resetShortcuts()">Khôi phục mặc định</button>` : ''}</div></div>
         </div></div></div>
-        <div class="settings-panel" data-panel="notifications"><div class="settings-group"><div class="settings-group-title">Thông báo</div><div class="settings-card">
+        <div id="settings-panel-notifications" class="settings-panel" data-panel="notifications" role="tabpanel" aria-labelledby="settings-tab-notifications"><div class="settings-group"><div class="settings-group-title">Thông báo</div><div class="settings-card">
             <label class="settings-item settings-control"><div class="settings-item-icon" style="background:var(--warning-bg)">🔔</div><div class="settings-item-content"><div class="settings-item-title">Bật nhắc hạn</div><div class="settings-item-desc">Quét tài khoản sắp hoặc đã hết hạn</div></div><input class="settings-toggle" type="checkbox" onchange="handleNotificationsEnabledToggle(this)" ${notificationSettings.enabled ? 'checked' : ''}></label>
             <label class="settings-item settings-control ${isElectron ? '' : 'disabled'}"><div class="settings-item-icon" style="background:var(--accent-bg)">🪟</div><div class="settings-item-content"><div class="settings-item-title">Toast Windows</div><div class="settings-item-desc">${isElectron ? 'Hiện thông báo hệ thống Windows' : 'Trình duyệt sẽ dùng quyền Notification nếu có'}</div></div><input class="settings-toggle" type="checkbox" onchange="handleNativeNotificationsToggle(this)" ${notificationSettings.nativeEnabled ? 'checked' : ''}></label>
             <label class="settings-item settings-control"><div class="settings-item-icon" style="background:var(--success-bg)">🔔</div><div class="settings-item-content"><div class="settings-item-title">Chuông trong app</div><div class="settings-item-desc">Hiện badge và danh sách khi bấm icon chuông</div></div><input class="settings-toggle" type="checkbox" onchange="handleInAppNotificationsToggle(this)" ${notificationSettings.inAppEnabled ? 'checked' : ''}></label>
@@ -3416,8 +3443,8 @@ function renderSettings() {
             <div class="settings-item"><div class="settings-item-icon" style="background:var(--accent-bg)">⚙️</div><div class="settings-item-content"><div class="settings-item-title">Cài đặt thông báo Windows</div><div class="settings-item-desc">Bật banner, âm thanh và tắt Không làm phiền</div></div><button class="btn btn-sm btn-outline settings-inline-btn" onclick="openNotificationSettingsFromApp()">Mở</button></div>
             <div class="settings-item"><div class="settings-item-icon" style="background:var(--success-bg)">📅</div><div class="settings-item-content"><div class="settings-item-title">Gia hạn mặc định</div><div class="settings-item-desc">30 ngày</div></div></div>
         </div></div></div>
-        <div class="settings-panel" data-panel="update">${renderUpdateSection()}</div>
-        <div class="settings-panel" data-panel="data"><div class="settings-group"><div class="settings-group-title">Dữ liệu</div><div class="settings-card">
+        <div id="settings-panel-update" class="settings-panel" data-panel="update" role="tabpanel" aria-labelledby="settings-tab-update">${renderUpdateSection()}</div>
+        <div id="settings-panel-data" class="settings-panel" data-panel="data" role="tabpanel" aria-labelledby="settings-tab-data"><div class="settings-group"><div class="settings-group-title">Dữ liệu</div><div class="settings-card">
             <div class="settings-item" onclick="exportBackup()"><div class="settings-item-icon" style="background:#E0F2FE">📤</div><div class="settings-item-content"><div class="settings-item-title">Sao lưu ra file (.ting)</div><div class="settings-item-desc">Mã hoá bằng Master Password — lưu Google Drive, USB...</div></div><svg class="settings-item-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg></div>
             <div class="settings-item" onclick="importBackup()"><div class="settings-item-icon" style="background:#E0F2FE">📥</div><div class="settings-item-content"><div class="settings-item-title">Phục hồi từ file</div><div class="settings-item-desc">Khôi phục tài khoản từ file .ting đã sao lưu</div></div><svg class="settings-item-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg></div>
         </div></div></div>
@@ -3425,7 +3452,7 @@ function renderSettings() {
     switchSettingsTab(window._settingsActiveTab || 'update');
 }
 
-function switchSettingsTab(tab) {
+function switchSettingsTab(tab, options = {}) {
     const root = document.getElementById('page-content');
     if (!root || typeof root.querySelectorAll !== 'function') return;
     const tabs = Array.from(root.querySelectorAll('.settings-tab'));
@@ -3433,9 +3460,16 @@ function switchSettingsTab(tab) {
     const available = tabs.map(btn => btn.dataset.tab);
     if (!available.includes(tab)) tab = available[0];
     window._settingsActiveTab = tab;
-    tabs.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
+    tabs.forEach(btn => {
+        const active = btn.dataset.tab === tab;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-selected', String(active));
+        btn.tabIndex = active ? 0 : -1;
+    });
     root.querySelectorAll('.settings-panel').forEach(panel => {
-        panel.classList.toggle('active', panel.dataset.panel === tab);
+        const active = panel.dataset.panel === tab;
+        panel.classList.toggle('active', active);
+        panel.hidden = !active;
     });
 }
 
@@ -3896,6 +3930,8 @@ function renderAddForm(type, editData = null) {
     const authMethod = getAuthMethod(window.appState.addFormAuthMethod || 'email');
     const authMethodLabel = window.AUTH_METHOD_CONFIG?.[authMethod]?.label || 'Email';
     const purchaseValue = editData?.purchaseDate || today;
+    const purchaseTimeValue = (typeof getAccountPurchaseTime === 'function' ? getAccountPurchaseTime(editData || {}) : editData?.purchaseTime)
+        || (typeof formatLocalTimeInput === 'function' ? formatLocalTimeInput() : '');
     const expiryValue = editData?.expiryDate || defaultExpiryValue;
     const isLifetime = editData?.expiryType === 'lifetime';
     const rawValue = editData?.rawInput || [editData?.username, editData?.password, editData?.twoFaCode].filter(Boolean).join('|');
@@ -3913,6 +3949,9 @@ function renderAddForm(type, editData = null) {
                 <button type="button" class="quick-chip" onclick="closeInlineCategoryCreate()">Hủy</button>
             </div>
         </div>`;
+    const historyButton = typeof renderAddHistoryOpenButton === 'function'
+        ? renderAddHistoryOpenButton(editData?.id || '')
+        : '';
     return `
     <div class="add-wizard" id="add-wizard">
     ${renderAddWizardSteps()}
@@ -3968,6 +4007,7 @@ function renderAddForm(type, editData = null) {
         <div class="form-section-title">Thời hạn ${renderHintButton('Nhập linh hoạt: 30 = +30 ngày, 28/04 30 = mua 28/04 +30 ngày, 28/04 > 28/05 = khoảng ngày.')}</div>
         <input type="text" id="add-smart-date" class="input smart-date-input" value="${escapeHtml(smartDateValue)}" placeholder="30 ngày, 28/04 30, 28/04 > 28/05" oninput="markAddFormDateTouched();applySmartDateInput(this.value)" onblur="guideAddFormFromDate()" onkeydown="if(event.key==='Enter'){event.preventDefault();applySmartDateInput(this.value);guideAddFormFromDate()}">
         <input type="hidden" id="add-purchase" value="${escapeHtml(purchaseValue)}">
+        <input type="hidden" id="add-purchase-time" value="${escapeHtml(purchaseTimeValue)}">
         <input type="hidden" id="add-expiry" value="${escapeHtml(expiryValue)}">
         <div id="add-expiry-hint" class="quick-date-hint smart-date-preview"></div>
         <div class="smart-date-options">
@@ -3975,10 +4015,14 @@ function renderAddForm(type, editData = null) {
             <label class="quick-lifetime"><input type="checkbox" id="add-lifetime" onchange="handleAddLifetimeToggle(this);guideAddFormFromDate()"> Vĩnh viễn</label>
         </div>
         <div id="smart-date-details" class="smart-date-details" ${isEdit ? '' : 'hidden'}>
-            <div class="quick-date-grid">
+            <div class="quick-date-grid purchase-date-grid">
                 <div class="quick-date-field">
                     <label>Ngày mua</label>
                     <input type="date" id="add-purchase-detail" class="input" value="${escapeHtml(purchaseValue)}" onchange="setAddPurchaseDate(this.value);guideAddFormFromDate()">
+                </div>
+                <div class="quick-date-field">
+                    <label>Giờ mua</label>
+                    <input type="time" id="add-purchase-time-detail" class="input" value="${escapeHtml(purchaseTimeValue)}" onchange="document.getElementById('add-purchase-time').value=this.value">
                 </div>
                 <div class="quick-date-field">
                     <label>Ngày hết hạn</label>
@@ -4001,6 +4045,7 @@ function renderAddForm(type, editData = null) {
 
     <!-- TAB 3: Bổ sung -->
     <div class="add-wizard-panel" data-tab="3" id="add-tab-3" hidden>
+        ${historyButton}
         <div class="form-section-title">Ghi chú ${renderHintButton('Quét text rồi bấm Copy hoặc Code để đánh dấu. Link http/https sẽ tự nhận diện khi lưu.')}</div>
         <div class="note-input-wrap">
             <div class="note-toolbar">

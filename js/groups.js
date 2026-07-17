@@ -210,7 +210,7 @@ function runGroupsChangedRender() {
         renderGroupDetail(state.currentGroupId, { quiet: true });
     }
     if (page === 'group-design' && (!groupId || window.appState.currentGroupId === groupId) && typeof renderGroupDesign === 'function') {
-        renderGroupDesign(window.appState.currentGroupId || groupId);
+        renderGroupDesign(window.appState.currentGroupId || groupId, { quiet: true });
     }
 }
 
@@ -787,6 +787,56 @@ async function updateSharedAccountGroupMeta(groupId, accountId, patch = {}) {
     await db.collection('groups').doc(groupId).update({
         updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     }).catch(() => {});
+    return true;
+}
+
+async function updateSharedAccountGroupMetaBatch(groupId, updates = []) {
+    ensureGroupState();
+    if (!Array.isArray(updates) || !updates.length) return true;
+    if (updates.length > 500) throw new Error('Không thể sắp xếp quá 500 tài khoản trong một lần');
+
+    const group = getGroupById(groupId);
+    if (!group) throw new Error('Không tìm thấy nhóm');
+    const normalized = [];
+    const seen = new Set();
+    for (const item of updates) {
+        const accountId = String(item?.id || item?.accountId || '').trim();
+        if (!accountId || seen.has(accountId)) throw new Error('Danh sách sắp xếp tài khoản không hợp lệ');
+        seen.add(accountId);
+        const account = getSharedAccountByIdFromState(groupId, accountId);
+        if (!account || !canManageSharedAccount(group, account)) throw new Error('Không có quyền quản lý tài khoản trong danh sách');
+        if (!Object.prototype.hasOwnProperty.call(item, 'groupCategoryId')
+            || !Object.prototype.hasOwnProperty.call(item, 'groupSortOrder')) {
+            throw new Error('Thiếu vị trí danh mục hoặc thứ tự tài khoản');
+        }
+        if (!Number.isFinite(Number(item.groupSortOrder))) throw new Error('Thứ tự tài khoản không hợp lệ');
+        const patch = cleanSharedAccountGroupMetaPatch(item);
+        normalized.push({ accountId, patch });
+    }
+
+    if (window.appState.isDemo) {
+        normalized.forEach(({ accountId, patch }) => {
+            const account = getSharedAccountByIdFromState(groupId, accountId);
+            Object.assign(account, patch, { updatedAt: new Date() });
+        });
+        window.appState.sharedAccounts[groupId] = sortSharedAccountsForGroup(window.appState.sharedAccounts[groupId] || []);
+        notifyGroupsChanged(groupId);
+        return true;
+    }
+
+    const groupRef = db.collection('groups').doc(groupId);
+    const batch = db.batch();
+    const timestamp = firebase.firestore.FieldValue.serverTimestamp();
+    normalized.forEach(({ accountId, patch }) => {
+        batch.update(groupRef.collection('sharedAccounts').doc(accountId), {
+            ...patch,
+            updatedAt: timestamp,
+        });
+    });
+    // Firestore limits an atomic batch to 500 writes. At exactly 500 accounts,
+    // preserve atomicity by omitting the non-essential group timestamp write.
+    if (normalized.length < 500) batch.update(groupRef, { updatedAt: timestamp });
+    await batch.commit();
     return true;
 }
 
@@ -1547,6 +1597,7 @@ window.canManageSharedAccount = canManageSharedAccount;
 window.updateGroupAccountCategories = updateGroupAccountCategories;
 window.setGroupAccountManager = setGroupAccountManager;
 window.updateSharedAccountGroupMeta = updateSharedAccountGroupMeta;
+window.updateSharedAccountGroupMetaBatch = updateSharedAccountGroupMetaBatch;
 window.sortSharedAccountsForGroup = sortSharedAccountsForGroup;
 window.getSharedEditRequestById = getSharedEditRequestById;
 window.getSharedEditRequestsForAccount = getSharedEditRequestsForAccount;

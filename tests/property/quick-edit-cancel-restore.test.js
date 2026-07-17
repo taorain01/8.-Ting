@@ -24,7 +24,7 @@
 //   - renderDetail: ghi lại lần gọi + chụp trạng thái quickEdit và nguồn dữ liệu
 //     dùng để render (activeDecryptedAccount.data) tại thời điểm render.
 //   - updateAccountInDB: KHẲNG ĐỊNH KHÔNG được gọi khi huỷ (đếm số lần gọi = 0).
-//   - window.confirm: trả true (người dùng chọn "bỏ thay đổi").
+//   - confirmAction: trả true (người dùng chọn "bỏ thay đổi").
 //   - showToast: thu thập toast (không cần cho khôi phục thành công).
 // Kiểm chứng sau khi huỷ:
 //   1) window.appState.quickEdit === null (đã thoát Chế độ sửa nhanh).
@@ -65,14 +65,16 @@ const { sandbox } = loadDesktopApp({
         // Mock updateAccountInDB: nếu bị gọi khi huỷ là SAI → đếm để khẳng định = 0.
         updateAccountInDB: async () => { observed.dbCalls += 1; return true; },
         showToast: (msg, type) => { observed.toasts.push({ msg, type }); },
+        confirmAction: async () => true,
     },
 });
 
 // desktop-app.js gán đè window.appState khi nạp → nạp logic thuần + confirm SAU.
 sandbox.window.computeDirtyFields = core.computeDirtyFields;
 sandbox.window.QUICK_EDIT_FIELDS = core.QUICK_EDIT_FIELDS;
-// confirm trả true = người dùng chọn "bỏ thay đổi" khi có thay đổi chưa lưu.
-sandbox.window.confirm = () => true;
+// confirmAction trả true = người dùng chọn "bỏ thay đổi" khi có thay đổi chưa lưu.
+sandbox.window.confirmAction = async () => true;
+sandbox.confirmAction = sandbox.window.confirmAction;
 
 const cancelQuickEdit = sandbox.cancelQuickEdit;
 
@@ -150,12 +152,12 @@ function setupRound(savedValues, editedValues) {
 
 describe('Property 9 — huỷ bỏ khôi phục đúng giá trị đã lưu (Requirements 6.2, 6.4)', () => {
     it('sau khi huỷ + bỏ thay đổi: về Chế độ xem với giá trị đã lưu, không ghi giá trị chưa lưu', () => {
-        fc.assert(
-            fc.property(valuesArb, valuesArb, (savedValues, editedValues) => {
+        return fc.assert(
+            fc.asyncProperty(valuesArb, valuesArb, async (savedValues, editedValues) => {
                 const acc = setupRound(savedValues, editedValues);
 
                 // Người dùng huỷ Chế độ sửa nhanh (confirm trả true = bỏ thay đổi).
-                cancelQuickEdit(ACC_ID);
+                await cancelQuickEdit(ACC_ID);
 
                 const st = sandbox.window.appState;
 
@@ -183,12 +185,12 @@ describe('Property 9 — huỷ bỏ khôi phục đúng giá trị đã lưu (Re
     });
 
     it('không có thay đổi chưa lưu (edited == saved): huỷ vẫn về Chế độ xem, không ghi lưu trữ', () => {
-        fc.assert(
-            fc.property(valuesArb, (savedValues) => {
+        return fc.assert(
+            fc.asyncProperty(valuesArb, async (savedValues) => {
                 // editedValues bằng đúng savedValues → không dirty → không hỏi confirm.
                 const acc = setupRound(savedValues, savedValues);
 
-                cancelQuickEdit(ACC_ID);
+                await cancelQuickEdit(ACC_ID);
 
                 const st = sandbox.window.appState;
                 expect(st.quickEdit).toBeNull();

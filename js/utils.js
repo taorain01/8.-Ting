@@ -227,11 +227,158 @@ function debounce(fn, ms = 300) {
     return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
 }
 
+const ACCESSIBLE_CLICK_TARGET_SELECTOR = [
+    '.d-account-card[onclick]',
+    '.account-card[onclick]',
+    '.category-card[onclick]',
+    '.settings-item[onclick]',
+    '.group-card[onclick]',
+    '.group-list-card[onclick]',
+].join(',');
+
+function enhanceAccessibleClickTargets(root = document) {
+    if (!root?.querySelectorAll) return;
+    const targets = [];
+    if (root.matches?.(ACCESSIBLE_CLICK_TARGET_SELECTOR)) targets.push(root);
+    targets.push(...root.querySelectorAll(ACCESSIBLE_CLICK_TARGET_SELECTOR));
+    targets.forEach(target => {
+        if (!target.hasAttribute('role')) target.setAttribute('role', 'button');
+        if (!target.hasAttribute('tabindex')) target.tabIndex = 0;
+        if (!target.hasAttribute('aria-label')) {
+            const label = String(target.textContent || '').replace(/\s+/g, ' ').trim();
+            if (label) target.setAttribute('aria-label', label.slice(0, 180));
+        }
+    });
+}
+
+function initAccessibleClickTargets() {
+    if (
+        typeof document === 'undefined'
+        || typeof document.addEventListener !== 'function'
+        || typeof document.querySelectorAll !== 'function'
+        || window.__tingAccessibleClickTargetsReady
+    ) return;
+    window.__tingAccessibleClickTargetsReady = true;
+    enhanceAccessibleClickTargets(document);
+    document.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        const target = event.target?.closest?.(ACCESSIBLE_CLICK_TARGET_SELECTOR);
+        if (!target || event.target !== target) return;
+        event.preventDefault();
+        target.click();
+    });
+    if (typeof MutationObserver === 'function') {
+        const observer = new MutationObserver(records => records.forEach(record => {
+            record.addedNodes.forEach(node => {
+                if (node?.nodeType === 1) enhanceAccessibleClickTargets(node);
+            });
+        }));
+        observer.observe(document.body, { childList: true, subtree: true });
+        window.__tingAccessibleClickTargetsObserver = observer;
+    }
+}
+
+if (
+    typeof window !== 'undefined'
+    && typeof document !== 'undefined'
+    && typeof document.addEventListener === 'function'
+    && typeof document.querySelectorAll === 'function'
+) {
+    window.enhanceAccessibleClickTargets = enhanceAccessibleClickTargets;
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initAccessibleClickTargets);
+    else initAccessibleClickTargets();
+}
+
 /**
  * Lấy ngày hôm nay dạng YYYY-MM-DD
  */
+function formatLocalDateInput(value = new Date()) {
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
 function todayStr() {
-    return new Date().toISOString().split('T')[0];
+    return formatLocalDateInput(new Date());
+}
+
+/**
+ * Lấy giờ địa phương dạng HH:mm để lưu cùng ngày mua.
+ * Không dùng toISOString() vì ngày/giờ mua là dữ liệu theo múi giờ người dùng.
+ */
+function normalizeTimeInput(value, fallback = '') {
+    const match = String(value ?? '').trim().match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) return fallback;
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    if (hour > 23 || minute > 59) return fallback;
+    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function formatLocalTimeInput(value = new Date()) {
+    const supplied = normalizeTimeInput(value, '');
+    if (supplied) return supplied;
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function formatTimeVN(value) {
+    return normalizeTimeInput(value, '') || '—';
+}
+
+// Existing records may not have purchaseTime. createdAt is the closest safe
+// fallback and is intentionally only used when the explicit field is absent.
+function getAccountPurchaseTime(account = {}) {
+    const explicit = normalizeTimeInput(account.purchaseTime, '');
+    if (explicit) return explicit;
+    const createdAt = account.createdAt?.toDate?.() || account.createdAt;
+    return createdAt ? formatLocalTimeInput(createdAt) : '';
+}
+
+function handleAccessibleTabKeydown(event) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const tablist = event.currentTarget?.matches?.('[role="tablist"]')
+        ? event.currentTarget
+        : event.target?.closest?.('[role="tablist"]');
+    if (!tablist) return;
+    const tabs = Array.from(tablist.querySelectorAll('[role="tab"]')).filter(tab => !tab.disabled);
+    if (!tabs.length) return;
+    const current = event.target?.closest?.('[role="tab"]');
+    const currentIndex = Math.max(0, tabs.indexOf(current));
+    let nextIndex = currentIndex;
+    if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = tabs.length - 1;
+    else if (event.key === 'ArrowLeft') nextIndex = Math.max(0, currentIndex - 1);
+    else if (event.key === 'ArrowRight') nextIndex = Math.min(tabs.length - 1, currentIndex + 1);
+    event.preventDefault();
+    event.stopPropagation();
+    const next = tabs[nextIndex];
+    const nextTabId = next.dataset.tab || next.id;
+    next.focus({ preventScroll: true });
+    next.click();
+    requestAnimationFrame(() => {
+        const renderedTabs = Array.from(document.querySelectorAll('[role="tab"]'));
+        const rendered = renderedTabs.find(tab => (tab.dataset.tab || tab.id) === nextTabId) || next;
+        rendered.focus?.({ preventScroll: true });
+        rendered.scrollIntoView?.({
+            behavior: document.documentElement.classList.contains('reduced-motion') ? 'auto' : 'smooth',
+            block: 'nearest',
+            inline: 'center',
+        });
+    });
+}
+
+if (typeof window !== 'undefined') {
+    window.formatLocalDateInput = formatLocalDateInput;
+    window.normalizeTimeInput = normalizeTimeInput;
+    window.formatLocalTimeInput = formatLocalTimeInput;
+    window.formatTimeVN = formatTimeVN;
+    window.getAccountPurchaseTime = getAccountPurchaseTime;
+    window.handleAccessibleTabKeydown = handleAccessibleTabKeydown;
 }
 
 /**
@@ -273,6 +420,208 @@ function escapeJsString(value) {
 
 function escapeJsAttr(value) {
     return escapeHtml(escapeJsString(value));
+}
+
+const TING_RELEASE_HISTORY = Object.freeze([
+    {
+        version: '1.7.0', date: '17/07/2026', title: 'Ổn định PC/mobile và lịch sử phiên bản',
+        changes: [
+            'Thêm bảng lịch sử phiên bản: chọn một phiên bản để xem riêng phần thay đổi của phiên bản đó.',
+            'Nâng cấp backup/restore có xem trước, chọn dữ liệu, merge và xử lý conflict.',
+            'Cải thiện dialog, search/filter, vuốt tab, kéo thả nhóm, animation và accessibility trên PC/mobile.',
+            'Bổ sung giờ mua, ngày theo múi giờ địa phương, lịch sử dữ liệu đã nhập và các lớp bảo vệ XSS/CSP/Android backup.',
+        ],
+    },
+    {
+        version: '1.6.0', date: '15/07/2026', title: 'Smart Paste và form thêm tài khoản',
+        changes: [
+            'Nhận diện tài khoản, mật khẩu, 2FA, nền tảng, thời hạn, người bán và giá từ nội dung dán.',
+            'Form thêm tài khoản dạng wizard có hướng dẫn, lịch sử nhập và tag gói cước tùy chỉnh.',
+            'Cải thiện tạo nhanh danh mục và form thêm/sửa trên PC lẫn mobile.',
+        ],
+    },
+    {
+        version: '1.5.1', date: '13/07/2026', title: 'Chi tiết card và đồng bộ chia sẻ',
+        changes: [
+            'Xem thông tin chi tiết ngay trên card tài khoản.',
+            'Cải thiện bộ lọc nhanh và tiêu đề kết quả theo nền tảng.',
+            'Đồng bộ an toàn hơn giữa tài khoản gốc và tài khoản chia sẻ.',
+        ],
+    },
+    {
+        version: '1.5.0', date: '08/07/2026', title: 'Thiết kế lại Nhóm',
+        changes: [
+            'Thiết kế lại Board, danh mục, tài khoản, thành viên và cài đặt nhóm.',
+            'Thêm chế độ chỉnh sửa, sắp xếp danh mục và di chuyển tài khoản.',
+            'Bổ sung vai trò quản lý và luồng duyệt yêu cầu chỉnh sửa.',
+        ],
+    },
+    {
+        version: '1.4.3', date: '07/07/2026', title: 'Sửa nhanh và quản lý hết hạn',
+        changes: [
+            'Sửa nhanh tài khoản ngay tại màn hình chi tiết.',
+            'Thêm mật khẩu vào nhóm độc lập với mật khẩu giải mã dữ liệu chia sẻ.',
+            'Ẩn/hiện tài khoản hết hạn và nhóm thùng rác rõ ràng hơn.',
+        ],
+    },
+    {
+        version: '1.4.2', date: '05/07/2026', title: 'Điều hướng tài khoản nhóm',
+        changes: [
+            'Bấm tài khoản trên Board để chuyển tới đúng card trong tab Tài khoản.',
+            'Cải thiện release notes, trạng thái tải và dọn APK cập nhật cũ.',
+        ],
+    },
+    {
+        version: '1.4.1', date: '05/07/2026', title: 'Trung tâm cập nhật mới',
+        changes: [
+            'Thiết kế lại khu Cập nhật với trạng thái, lịch sử và thanh tiến trình.',
+            'Hiển thị phiên bản cạnh logo sidebar desktop và cải thiện installer Windows.',
+        ],
+    },
+    {
+        version: '1.4.0', date: '05/07/2026', title: 'Thiết kế Nhóm trên mobile',
+        changes: [
+            'Tạo danh mục nhóm tùy chỉnh với icon, màu và ghi chú.',
+            'Kéo thả để sắp xếp và chuyển tài khoản giữa các danh mục.',
+        ],
+    },
+    {
+        version: '1.3.9', date: '05/07/2026', title: 'Cài đặt và mật khẩu nhóm',
+        changes: [
+            'Cho phép tạo và tham gia nhóm không cần mật khẩu chung.',
+            'Thêm tab Cài đặt nhóm để đặt, đổi hoặc gỡ mật khẩu chung.',
+        ],
+    },
+    {
+        version: '1.3.8', date: '04/07/2026', title: 'Sinh trắc học và backup',
+        changes: [
+            'Mở khóa bằng vân tay hoặc khuôn mặt.',
+            'Xuất/nhập file backup mã hóa và thêm hiệu ứng mượt cho PC/mobile.',
+        ],
+    },
+    {
+        version: '1.3.7', date: '03/07/2026', title: 'Hotfix cập nhật Android',
+        changes: ['Sửa tải APK khi thiếu expectedSize và tiếp tục xác minh bằng SHA-256.'],
+    },
+    {
+        version: '1.3.6', date: '03/07/2026', title: 'Quick Add và danh mục nhóm',
+        changes: [
+            'Thêm cửa sổ Quick Add cho Electron.',
+            'Bổ sung danh mục, quyền quản lý và thứ tự tài khoản chia sẻ trong nhóm.',
+        ],
+    },
+    {
+        version: '1.3.5', date: '03/07/2026', title: 'Hotfix installer',
+        changes: ['Sửa installer Windows và luồng tải/mở bản cập nhật Android.'],
+    },
+    {
+        version: '1.3.4', date: '03/07/2026', title: 'Đồng bộ phát hành',
+        changes: ['Đồng bộ version desktop/Android và kiểm tra pipeline phát hành.'],
+    },
+    {
+        version: '1.3.2', date: '03/07/2026', title: 'Ổn định updater Android',
+        changes: ['Hoàn thiện phần native tải/cài APK và thông báo hết hạn nền.'],
+    },
+    {
+        version: '1.3.1', date: '03/07/2026', title: 'Hướng dẫn thêm tài khoản',
+        changes: ['Thêm luồng hướng dẫn nhập nền tảng, dữ liệu đăng nhập và thời hạn.'],
+    },
+    {
+        version: '1.3.0', date: '03/07/2026', title: 'Cập nhật đa nền tảng',
+        changes: [
+            'Thêm cập nhật trong ứng dụng cho Electron và Android.',
+            'Thêm workflow phát hành tự động và Nhóm chia sẻ tài khoản.',
+        ],
+    },
+    {
+        version: '1.0.0', date: '27/04/2026', title: 'Phiên bản đầu tiên',
+        changes: ['Khởi tạo Ting! với quản lý tài khoản, mã hóa dữ liệu và giao diện PC/mobile.'],
+    },
+]);
+
+function getTingReleaseHistory() {
+    return TING_RELEASE_HISTORY.map(item => ({ ...item, changes: [...item.changes] }));
+}
+
+function getSelectedTingReleaseVersion() {
+    const selected = String(window.__tingSelectedReleaseVersion || '');
+    return TING_RELEASE_HISTORY.some(item => item.version === selected)
+        ? selected
+        : TING_RELEASE_HISTORY[0].version;
+}
+
+function renderTingReleaseDetail(release) {
+    if (!release) return '';
+    return `<div class="release-history-detail-head">
+        <div>
+            <span class="release-history-eyebrow">Phiên bản ${escapeHtml(release.version)}</span>
+            <h4>${escapeHtml(release.title)}</h4>
+        </div>
+        <time datetime="${escapeHtml(release.date.split('/').reverse().join('-'))}">${escapeHtml(release.date)}</time>
+    </div>
+    <ul class="release-history-changes">${release.changes.map(change => `<li>${escapeHtml(change)}</li>`).join('')}</ul>`;
+}
+
+function renderTingReleaseHistory() {
+    const selected = getSelectedTingReleaseVersion();
+    const release = TING_RELEASE_HISTORY.find(item => item.version === selected) || TING_RELEASE_HISTORY[0];
+    return `<section class="release-history" data-release-history aria-labelledby="release-history-title">
+        <div class="release-history-heading">
+            <div>
+                <span class="release-history-kicker">Có gì mới?</span>
+                <h3 id="release-history-title">Lịch sử phiên bản</h3>
+            </div>
+            <span class="release-history-count">${TING_RELEASE_HISTORY.length} bản</span>
+        </div>
+        <div class="release-history-layout">
+            <div class="release-history-tabs" role="tablist" aria-label="Chọn phiên bản" onkeydown="handleAccessibleTabKeydown(event)">
+                ${TING_RELEASE_HISTORY.map((item, index) => {
+                    const active = item.version === release.version;
+                    return `<button type="button" id="release-tab-${escapeHtml(item.version.replace(/\./g, '-'))}" class="release-history-tab${active ? ' active' : ''}" data-tab="${escapeHtml(item.version)}" data-release-version="${escapeHtml(item.version)}" role="tab" aria-selected="${active}" aria-controls="release-history-detail" tabindex="${active ? '0' : '-1'}" onclick="selectTingReleaseVersion('${escapeJsAttr(item.version)}')">
+                        <span class="release-history-tab-version">v${escapeHtml(item.version)}</span>
+                        <span class="release-history-tab-date">${escapeHtml(item.date)}</span>
+                        ${index === 0 ? '<span class="release-history-new">Mới</span>' : ''}
+                    </button>`;
+                }).join('')}
+            </div>
+            <div id="release-history-detail" class="release-history-detail" data-release-detail role="tabpanel" aria-live="polite" aria-labelledby="release-tab-${escapeHtml(release.version.replace(/\./g, '-'))}">
+                ${renderTingReleaseDetail(release)}
+            </div>
+        </div>
+    </section>`;
+}
+
+function selectTingReleaseVersion(version) {
+    const release = TING_RELEASE_HISTORY.find(item => item.version === String(version || ''));
+    if (!release) return false;
+    window.__tingSelectedReleaseVersion = release.version;
+    const root = document.querySelector?.('[data-release-history]');
+    if (!root) return true;
+    root.querySelectorAll?.('[data-release-version]').forEach(button => {
+        const active = button.dataset.releaseVersion === release.version;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-selected', String(active));
+        button.setAttribute('tabindex', active ? '0' : '-1');
+    });
+    const detail = root.querySelector?.('[data-release-detail]');
+    if (detail) {
+        detail.innerHTML = renderTingReleaseDetail(release);
+        detail.setAttribute('aria-labelledby', `release-tab-${release.version.replace(/\./g, '-')}`);
+        detail.classList.remove('release-history-detail-enter');
+        const schedule = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : setTimeout;
+        schedule(() => detail.classList.add('release-history-detail-enter'), 0);
+        root.querySelector?.(`[data-release-version="${escapeJsAttr(release.version)}"]`)?.scrollIntoView?.({
+            behavior: document.documentElement?.classList?.contains('reduced-motion') ? 'auto' : 'smooth',
+            block: 'nearest', inline: 'center',
+        });
+    }
+    return true;
+}
+
+if (typeof window !== 'undefined') {
+    window.getTingReleaseHistory = getTingReleaseHistory;
+    window.renderTingReleaseHistory = renderTingReleaseHistory;
+    window.selectTingReleaseVersion = selectTingReleaseVersion;
 }
 
 function slugifyGroup(value) {
@@ -864,7 +1213,7 @@ function guideAddFormTo(target, options = {}) {
     const delay = Number.isFinite(options.delay) ? options.delay : 80;
 
     const scrollTarget = () => {
-        element.scrollIntoView({ behavior: options.behavior || 'smooth', block, inline: 'nearest' });
+        element.scrollIntoView({ behavior: document.documentElement.classList.contains('reduced-motion') ? 'auto' : (options.behavior || 'smooth'), block, inline: 'nearest' });
     };
     if (typeof requestAnimationFrame === 'function') {
         requestAnimationFrame(scrollTarget);
@@ -900,58 +1249,28 @@ function markAddFormDateSkippedIfNeeded() {
 function guideAddFormFromPlatform(platformId) {
     if (platformId && platformId !== 'other') recordAddPlatformSelection(platformId);
     const guide = getAddFormGuideState();
-    if (platformId === 'other') {
-        guideAddFormTo('add-name');
-        return;
-    }
     guide.pasteGuided = true;
-    // Sau khi chọn platform, showPlatformPlanPanel chạy animation và ẩn lưới
-    // platform (grid.hidden = true) ở mốc 260ms, khiến layout co lại và đẩy
-    // nội dung trồi lên. Nếu cuộn tới ô dán ngay bây giờ, vị trí cuộn sẽ bị
-    // lệch xuống vùng Ghi chú sau khi lưới bị ẩn. Vì vậy hoãn cuộn tới sau khi
-    // layout ổn định (> 260ms) để màn hình dừng đúng ở ô dán nhanh.
-    window.setTimeout(() => {
-        if (!guideAddFormTo('paste-input')) {
-            guideAddFormTo('add-smart-date');
-        }
-    }, 300);
+    // Đã bỏ auto-cuộn tới ô dán / tên dịch vụ (theo yêu cầu). Wizard chỉ
+    // chuyển tab (skip trang) và cuộn lên đầu mỗi lần, không cuộn tới field.
 }
 
 function handleQuickPasteGuidance() {
-    window.setTimeout(() => {
-        const paste = document.getElementById('paste-input');
-        const guide = getAddFormGuideState();
-        if (!paste?.value.trim() || guide.dateSkipped || guide.dateGuided) return;
-        // Nếu người dùng đã chủ động rời ô dán sang ô khác, coi như skip:
-        // không ép cuộn/focus về ô "Thời hạn", tôn trọng focus hiện tại.
-        if (document.activeElement !== paste) {
-            guide.dateSkipped = true; // ghi nhận skip khi đã rời ô dán
-            return;                   // không ép focus/cuộn
-        }
-        guide.dateGuided = true;
-        guideAddFormTo('add-smart-date');
-    }, 0);
+    // Đã bỏ auto-cuộn tới ô "Thời hạn" sau khi dán (theo yêu cầu).
 }
 
 function guideAddFormFromDate() {
     markAddFormDateTouched();
-    // Wizard: rời ô Thời hạn → thử auto-chuyển sang Tab 3 (R6.1).
-    // Không còn cuộn tới Ghi chú vì Ghi chú nằm ở Tab 3 (khác tab).
+    // Wizard: rời ô Thời hạn → thử auto-chuyển sang Tab 3 (skip trang).
+    // Không cuộn tới field; goAddTab tự cuộn lên đầu tab mới.
     if (typeof maybeAutoAdvanceToStep3 === 'function') maybeAutoAdvanceToStep3();
 }
 
 function guideAddFormFromNote() {
-    const textarea = document.getElementById('add-note');
-    const guide = getAddFormGuideState();
-    if (guide.sellerGuided || !textarea?.value.trim()) return;
-    guide.sellerGuided = true;
-    guideAddFormTo('add-seller-name');
+    // Đã bỏ auto-cuộn tới ô "Người bán" (theo yêu cầu).
 }
 
 function guideAddFormFromSeller() {
-    const seller = document.getElementById('add-seller-name');
-    if (!seller?.value.trim()) return;
-    guideAddFormTo('add-price');
+    // Đã bỏ auto-cuộn tới ô "Giá mua" (theo yêu cầu).
 }
 
 // ===== WIZARD 3 TAB (Thêm/Sửa TK) =====
@@ -995,12 +1314,15 @@ function goAddTab(tab, opts = {}) {
         panel.hidden = Number(panel.dataset.tab) !== tab;
     });
     updateAddWizardSteps();
+    // Chỉ cuộn lên đầu tab mới (skip trang), KHÔNG cuộn tới field chưa nhập.
     // Vùng cuộn thật của modal (index.html: #modal-body). KHÔNG có #modal-content.
     const modalBody = document.getElementById('modal-body');
     if (modalBody) modalBody.scrollTop = 0;
-    // Focus/căn mục đầu hợp lý của tab (không auto-focus để tránh bàn phím bật trên mobile)
-    if (tab === 2) guideAddFormTo('paste-input', { focus: false, block: 'start' });
-    if (tab === 3) guideAddFormTo('add-note', { focus: false, block: 'start' });
+    // Đề phòng trường hợp cửa sổ chính cũng cuộn (mobile), đưa về đầu wizard.
+    const wizard = document.getElementById('add-wizard');
+    if (wizard && typeof wizard.scrollIntoView === 'function') {
+        wizard.scrollIntoView({ block: 'start', behavior: 'auto' });
+    }
 }
 
 function skipPlatformStep() {
@@ -1304,41 +1626,6 @@ function decodeAddHistoryPayload(value) {
     }
 }
 
-function renderAddHistoryChip(label, onclick, title = '') {
-    const safeLabel = escapeHtml(label);
-    const safeTitle = escapeHtml(title || label);
-    return `<button type="button" class="add-history-chip" onclick="${onclick}" title="${safeTitle}">${safeLabel}</button>`;
-}
-
-function renderAddHistoryRow(kind, label, chips) {
-    if (!chips.length) return '';
-    return `<div class="add-history-row add-history-${kind}"><span class="add-history-title">${escapeHtml(label)}</span>${chips.join('')}</div>`;
-}
-
-function renderAddFormHistorySuggestions(editingId = '') {
-    const history = buildAddFormHistorySuggestions(editingId);
-    return {
-        note: renderAddHistoryRow('note', 'Gần đây', history.notes.map(item => {
-            const payload = escapeJsAttr(encodeAddHistoryPayload(item.value));
-            return renderAddHistoryChip(item.label, `applyAddHistoryNote('${payload}')`, item.value);
-        })),
-        seller: renderAddHistoryRow('seller', 'Gần đây', history.sellers.map(item => {
-            const name = escapeJsAttr(encodeAddHistoryPayload(item.name));
-            const platform = escapeJsAttr(item.platform || 'other');
-            const link = escapeJsAttr(encodeAddHistoryPayload(item.link || ''));
-            return renderAddHistoryChip(item.label, `applyAddHistorySeller('${name}','${platform}','${link}')`, item.name || item.link);
-        })),
-        price: renderAddHistoryRow('price', 'Gần đây', history.prices.map(item => {
-            const payload = escapeJsAttr(encodeAddHistoryPayload(String(item.value)));
-            return renderAddHistoryChip(item.label, `applyAddHistoryPrice('${payload}')`, item.label);
-        })),
-        bundle: renderAddHistoryRow('bundle', 'Bộ 3 gần đây', history.bundles.map(item => {
-            const payload = escapeJsAttr(encodeAddHistoryPayload(item));
-            return renderAddHistoryChip(item.label, `applyAddHistoryBundle('${payload}')`, `${item.label}: ${getAddHistoryPreview(item.note, 32)}`);
-        })),
-    };
-}
-
 function applyAddHistoryNote(encodedNote) {
     const textarea = document.getElementById('add-note');
     if (!textarea) return;
@@ -1403,6 +1690,135 @@ function applyAddHistoryBundle(encodedBundle) {
     if (bundle.purchasePrice) applyAddHistoryPrice(encodeAddHistoryPayload(String(bundle.purchasePrice)));
 }
 
+// ===== POPUP LỊCH SỬ ĐÃ NHẬP (gộp Ghi chú + Người bán + Giá) =====
+// Gộp toàn bộ gợi ý lịch sử vào MỘT popup gọn để dễ chọn và nhìn đầy đủ,
+// thay cho các hàng chip rải rác bị cắt cụt (...) dưới từng ô nhập.
+
+function formatAddHistoryPriceLabel(value) {
+    const formatted = typeof formatPriceInput === 'function'
+        ? formatPriceInput(value)
+        : String(value || '');
+    return formatted ? `${formatted} ₫` : '';
+}
+
+// Nút mở popup — chỉ hiện khi thực sự có lịch sử để chọn.
+function renderAddHistoryOpenButton(editingId = '') {
+    const history = buildAddFormHistorySuggestions(editingId);
+    const total = history.notes.length + history.sellers.length
+        + history.prices.length + history.bundles.length;
+    if (!total) return '';
+    return `<div class="add-history-anchor">
+        <button type="button" class="add-history-open-btn" onclick="toggleAddHistoryPopover(event)">
+            <span class="add-history-open-ic" aria-hidden="true">🕘</span>
+            <span class="add-history-open-tx">Lịch sử đã nhập</span>
+            <span class="add-history-open-count">${total}</span>
+            <span class="add-history-open-caret" aria-hidden="true">▾</span>
+        </button>
+        <div id="add-history-popover" class="add-history-popover" data-editing-id="${escapeHtml(editingId || '')}" hidden onclick="event.stopPropagation()"></div>
+    </div>`;
+}
+
+function renderAddHistorySectionWrap(kind, title, itemsHtml) {
+    if (!itemsHtml) return '';
+    return `<div class="add-history-section add-history-section-${kind}">
+        <div class="add-history-section-title">${escapeHtml(title)}</div>
+        <div class="add-history-section-items">${itemsHtml}</div>
+    </div>`;
+}
+
+function renderAddHistoryPopoverContent(editingId = '') {
+    const history = buildAddFormHistorySuggestions(editingId);
+    const sections = [];
+
+    if (history.bundles.length) {
+        const items = history.bundles.map(item => {
+            const payload = escapeJsAttr(encodeAddHistoryPayload(item));
+            const priceLabel = formatAddHistoryPriceLabel(item.purchasePrice);
+            const meta = [item.sellerName, priceLabel].filter(Boolean).join('  ·  ');
+            return `<button type="button" class="add-history-item add-history-item-bundle" onclick="applyAddHistoryBundle('${payload}');closeAddHistoryPopover()">
+                <span class="add-history-item-note">${escapeHtml(item.note)}</span>
+                ${meta ? `<span class="add-history-item-meta">${escapeHtml(meta)}</span>` : ''}
+            </button>`;
+        }).join('');
+        sections.push(renderAddHistorySectionWrap('bundle', 'Bộ đầy đủ · ghi chú + người bán + giá', items));
+    }
+
+    if (history.notes.length) {
+        const items = history.notes.map(item => {
+            const payload = escapeJsAttr(encodeAddHistoryPayload(item.value));
+            return `<button type="button" class="add-history-item" onclick="applyAddHistoryNote('${payload}');closeAddHistoryPopover()">${escapeHtml(item.value)}</button>`;
+        }).join('');
+        sections.push(renderAddHistorySectionWrap('note', 'Ghi chú', items));
+    }
+
+    if (history.sellers.length) {
+        const items = history.sellers.map(item => {
+            const name = escapeJsAttr(encodeAddHistoryPayload(item.name));
+            const platform = escapeJsAttr(item.platform || 'other');
+            const link = escapeJsAttr(encodeAddHistoryPayload(item.link || ''));
+            const sub = item.link ? `<span class="add-history-item-sub">${escapeHtml(item.link)}</span>` : '';
+            return `<button type="button" class="add-history-item add-history-item-seller" onclick="applyAddHistorySeller('${name}','${platform}','${link}');closeAddHistoryPopover()">
+                <span class="add-history-item-main">${escapeHtml(item.name)}</span>${sub}
+            </button>`;
+        }).join('');
+        sections.push(renderAddHistorySectionWrap('seller', 'Người bán', items));
+    }
+
+    if (history.prices.length) {
+        const items = history.prices.map(item => {
+            const payload = escapeJsAttr(encodeAddHistoryPayload(String(item.value)));
+            return `<button type="button" class="add-history-item add-history-item-price" onclick="applyAddHistoryPrice('${payload}');closeAddHistoryPopover()">${escapeHtml(formatAddHistoryPriceLabel(item.value) || item.label)}</button>`;
+        }).join('');
+        sections.push(renderAddHistorySectionWrap('price', 'Giá mua', items));
+    }
+
+    const body = sections.join('') || '<div class="add-history-empty">Chưa có lịch sử nào để chọn</div>';
+    return `<div class="add-history-popover-head">
+        <span class="add-history-popover-title">Lịch sử đã nhập</span>
+        <button type="button" class="add-history-popover-close" onclick="closeAddHistoryPopover()" aria-label="Đóng">✕</button>
+    </div>
+    <div class="add-history-popover-body">${body}</div>`;
+}
+
+function closeAddHistoryPopover() {
+    const popover = document.getElementById('add-history-popover');
+    if (popover) popover.hidden = true;
+    if (typeof document !== 'undefined') document.removeEventListener('keydown', handleAddHistoryEscape);
+}
+
+function handleAddHistoryEscape(event) {
+    if (event.key === 'Escape') closeAddHistoryPopover();
+}
+
+function toggleAddHistoryPopover(event) {
+    event?.stopPropagation?.();
+    const popover = document.getElementById('add-history-popover');
+    if (!popover) return;
+    const opening = popover.hidden;
+    popover.hidden = !opening;
+    if (!opening) {
+        document.removeEventListener('keydown', handleAddHistoryEscape);
+        return;
+    }
+    popover.innerHTML = renderAddHistoryPopoverContent(popover.dataset.editingId || '');
+    positionAddHistoryPopover(popover);
+    document.addEventListener('keydown', handleAddHistoryEscape);
+    setTimeout(() => document.addEventListener('click', closeAddHistoryPopover, { once: true }), 0);
+}
+
+// Lật popover lên trên khi khoảng trống bên dưới nút không đủ nhưng bên trên
+// rộng hơn — để luôn nhìn đầy đủ nội dung, không bị tràn/cắt đáy màn hình.
+function positionAddHistoryPopover(popover) {
+    if (!popover || typeof popover.getBoundingClientRect !== 'function') return;
+    const anchor = popover.parentElement;
+    if (!anchor?.getBoundingClientRect) return;
+    const rect = anchor.getBoundingClientRect();
+    const viewport = window.innerHeight || document.documentElement?.clientHeight || 0;
+    const spaceBelow = viewport - rect.bottom;
+    const spaceAbove = rect.top;
+    const needed = popover.offsetHeight || 320;
+    popover.classList.toggle('flip-up', spaceBelow < needed + 16 && spaceAbove > spaceBelow);
+}
 
 // ===== GIÁ MUA / TIỀN TỆ =====
 function parsePriceValue(value) {
@@ -1530,11 +1946,14 @@ if (typeof window !== 'undefined') {
     window.copyPasteSelectionToNote = copyPasteSelectionToNote;
     window.applySmartPasteMetadata = applySmartPasteMetadata;
     window.buildAddFormHistorySuggestions = buildAddFormHistorySuggestions;
-    window.renderAddFormHistorySuggestions = renderAddFormHistorySuggestions;
     window.applyAddHistoryNote = applyAddHistoryNote;
     window.applyAddHistorySeller = applyAddHistorySeller;
     window.applyAddHistoryPrice = applyAddHistoryPrice;
     window.applyAddHistoryBundle = applyAddHistoryBundle;
+    window.renderAddHistoryOpenButton = renderAddHistoryOpenButton;
+    window.renderAddHistoryPopoverContent = renderAddHistoryPopoverContent;
+    window.toggleAddHistoryPopover = toggleAddHistoryPopover;
+    window.closeAddHistoryPopover = closeAddHistoryPopover;
     window.parsePriceValue = parsePriceValue;
     window.formatPriceInput = formatPriceInput;
     window.formatPriceVN = formatPriceVN;

@@ -204,8 +204,9 @@ function loadInteractions(overrides = {}) {
   sandbox.updateSharedAccountGroupMeta = mk('updateSharedAccountGroupMeta');
   sandbox.showToast = (message, type) => { calls.toasts.push({ message, type }); };
   sandbox.renderGroupDetail = (...args) => { calls.renderGroupDetail.push(args); };
-  // confirm mặc định true (người dùng xác nhận); có thể ép false qua override.
-  sandbox.confirm = () => (overrides.confirm === undefined ? true : overrides.confirm);
+  // confirmAction mặc định true (người dùng xác nhận); có thể ép false qua override.
+  sandbox.confirmAction = async () => (overrides.confirm === undefined ? true : overrides.confirm);
+  win.confirmAction = sandbox.confirmAction;
 
   return { sandbox, dom, win, calls, exports: sandbox.__appExports };
 }

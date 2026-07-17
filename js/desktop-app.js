@@ -68,7 +68,7 @@ window.appState = {
         notifyOverdueDays: 3,
         shortcuts: { openApp: 'Control+Shift+T', quickAdd: 'Control+Shift+S' },
     },
-    appVersion: '1.6.0',
+    appVersion: '1.7.0',
     updateStatus: null,
     updateLog: [],
     visibleGroupNotes: {},
@@ -97,6 +97,33 @@ const MOCK_ACCOUNTS = [
 ];
 
 // ===== INIT =====
+function isDesktopShortcutEditableTarget(target) {
+    return Boolean(target?.closest?.('input, textarea, select, [contenteditable="true"]'));
+}
+
+function getTopDesktopTransientUi() {
+    if (window.TingFeedback?.isOpen?.()) return 'ting-dialog';
+    const spotlight = document.getElementById('spotlight-overlay');
+    if (spotlight?.style.display === 'flex') return 'spotlight';
+    const master = document.getElementById('master-pw-overlay');
+    if (master && master.style.display !== 'none' && master.classList.contains('open')) return 'master';
+    if (document.getElementById('modal-overlay')?.classList.contains('open')) return 'modal';
+    const notifications = document.getElementById('notification-dropdown');
+    if (notifications && !notifications.hidden) return 'notifications';
+    return '';
+}
+
+function closeTopDesktopTransientUi() {
+    const top = getTopDesktopTransientUi();
+    if (top === 'ting-dialog') return true;
+    if (top === 'spotlight') closeSpotlight?.();
+    else if (top === 'master') cancelMasterPasswordDialog?.();
+    else if (top === 'modal') closeModal?.();
+    else if (top === 'notifications') closeNotificationPanel?.();
+    else return false;
+    return true;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     initUserPreferences();
     setupAuthListener();
@@ -107,13 +134,26 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('auth-confirm-password')?.addEventListener('input', () => updatePasswordStrength(document.getElementById('auth-password')?.value || ''));
     // Ctrl+K → focus search
     document.addEventListener('keydown', e => {
-        if ((e.ctrlKey||e.metaKey) && e.key === 'k') { e.preventDefault(); document.getElementById('search-input')?.focus(); }
-        if ((e.ctrlKey||e.metaKey) && e.shiftKey && e.key.toLowerCase() === 't') { e.preventDefault(); openSpotlight(); }
+        const topUi = getTopDesktopTransientUi();
+        if (window.TingFeedback?.isOpen?.()) return;
+        if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase() === 'k') {
+            if (topUi || isDesktopShortcutEditableTarget(e.target)) return;
+            e.preventDefault();
+            document.getElementById('search-input')?.focus();
+        }
+        if ((e.ctrlKey||e.metaKey) && e.shiftKey && e.key.toLowerCase() === 't') {
+            if (topUi || isDesktopShortcutEditableTarget(e.target)) return;
+            e.preventDefault();
+            openSpotlight();
+        }
         if (e.key === 'Enter' && document.getElementById('spotlight-overlay')?.style.display === 'flex') {
             const first = getSpotlightMatches?.(document.getElementById('spotlight-input')?.value || '')?.[0];
             if (first) openSpotlightResult(first.id);
         }
-        if (e.key === 'Escape') { cancelMasterPasswordDialog?.(); closeModal(); closeNotificationPanel?.(); closeSpotlight?.(); }
+        if (e.key === 'Escape' && closeTopDesktopTransientUi()) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
     });
     document.addEventListener('click', e => {
         const dropdown = document.getElementById('notification-dropdown');
@@ -390,8 +430,8 @@ function initSmartNavigationInputs() {
 
 // ===== HEADER / SIDEBAR =====
 function formatSidebarVersion(version) {
-    const raw = String(version || '1.6.0').trim().replace(/^v/i, '');
-    return raw ? `v${raw}` : 'v1.6.0';
+    const raw = String(version || '1.7.0').trim().replace(/^v/i, '');
+    return raw ? `v${raw}` : 'v1.7.0';
 }
 
 function updateSidebarVersion() {
@@ -407,8 +447,17 @@ function updateHeader() {
     document.getElementById('sidebar-name').textContent = u.name;
     document.getElementById('sidebar-email').textContent = u.email;
     const av = document.getElementById('sidebar-avatar');
-    if (u.avatar) { av.innerHTML = `<img src="${u.avatar}" alt="">`; }
-    else { av.innerHTML = `<span>${u.name.charAt(0).toUpperCase()}</span>`; }
+    av.replaceChildren();
+    if (u.avatar) {
+        const image = document.createElement('img');
+        image.src = String(u.avatar);
+        image.alt = '';
+        av.appendChild(image);
+    } else {
+        const initial = document.createElement('span');
+        initial.textContent = String(u.name || '').charAt(0).toUpperCase();
+        av.appendChild(initial);
+    }
     updateSidebarVersion();
     // Nav badges
     const bought = window.appState.accounts.filter(a => a.type === 'bought').length;
@@ -444,16 +493,14 @@ function updateHeader() {
 }
 
 // ===== SEARCH & FILTER =====
-function handleSearch(v) {
-    window.appState.searchQuery = String(v || '');
-    window.appState.expandedGroups = {};
-    window.appState.visibleGroupNotes = {};
+let searchRenderTimer = null;
+function renderSearchState(options = {}) {
     const hasSearch = window.appState.searchQuery.trim().length > 0;
     const p = window.appState.currentPage;
-    if (p === 'bought') renderAccountList('bought');
-    else if (p === 'personal') renderAccountList('personal');
+    if (p === 'bought') renderAccountList('bought', options);
+    else if (p === 'personal') renderAccountList('personal', options);
     else if (p === 'groups') renderGroupList();
-    else if (p === 'group-detail') renderGroupDetail(window.appState.currentGroupId);
+    else if (p === 'group-detail') renderGroupDetail(window.appState.currentGroupId, options);
     else if (p === 'trash') renderTrashList();
     else if (p === 'categories') renderCategoriesPage();
     else if (p.startsWith('category:')) renderCategoryDetail(p.slice('category:'.length));
@@ -461,7 +508,19 @@ function handleSearch(v) {
     else if (p === 'dashboard') renderDashboard();
     else if (p === 'settings') renderSettings();
 }
-function clearSearch() { document.getElementById('search-input').value = ''; handleSearch(''); }
+function handleSearch(v, options = {}) {
+    window.appState.searchQuery = String(v || '');
+    clearTimeout(searchRenderTimer);
+    const render = () => renderSearchState({ quiet: true });
+    if (options.immediate) render();
+    else searchRenderTimer = setTimeout(render, 120);
+}
+function handleSearchKeydown(event) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    handleSearch(event.currentTarget?.value || '', { immediate: true });
+}
+function clearSearch() { document.getElementById('search-input').value = ''; handleSearch('', { immediate: true }); }
 function setFilter(f) {
     window.appState.currentFilter = f;
     window.appState.expandedGroups = {};
@@ -509,7 +568,7 @@ function setGlobalPlatformFilter(platform) {
     if (input) input.value = '';
     renderDashboard();
     renderQuickAccountIconFilter?.();
-    document.getElementById('page-content')?.scrollTo?.({ top: 0, behavior: 'smooth' });
+    document.getElementById('page-content')?.scrollTo?.({ top: 0, behavior: document.documentElement.classList.contains('reduced-motion') ? 'auto' : 'smooth' });
 }
 
 function setGlobalTagFilter(tag) {
@@ -748,7 +807,7 @@ async function deleteCategory(categoryId) {
     const category = getCategoryById(categoryId);
     if (!category) return;
     const count = getAccountsForCategory(categoryId).length;
-    if (!confirm(`Xoá danh mục "${category.name}"? ${count ? 'Tài khoản sẽ được gỡ khỏi danh mục này.' : ''}`)) return;
+    if (!await confirmAction({ variant: 'danger', title: 'Xoá danh mục?', message: `Danh mục "${category.name}" sẽ bị xoá.`, details: count ? `${count} tài khoản sẽ được gỡ khỏi danh mục này.` : '', confirmLabel: 'Xoá danh mục' })) return;
 
     const categories = getSortedCategories().filter(item => item.id !== categoryId);
     const ok = await persistCategories(categories);
@@ -1370,7 +1429,7 @@ async function handleResetMasterPassword() {
         showToast('Demo không reset Master PIN', 'error');
         return;
     }
-    const okToReset = confirm('Reset Master PIN sẽ xoá khoá hiện tại. Dữ liệu đã mã hoá bằng mã cũ có thể cần mã cũ để giải mã lại. Tiếp tục?');
+    const okToReset = await confirmAction({ variant: 'danger', title: 'Reset Master PIN?', message: 'Khoá hiện tại sẽ bị xoá và không thể hoàn tác.', details: 'Dữ liệu đã mã hoá bằng mã cũ có thể vẫn cần mã cũ để giải mã lại.', confirmationText: 'RESET', confirmationLabel: 'Nhập RESET để tiếp tục', confirmLabel: 'Reset Master PIN', dismissible: false });
     if (!okToReset) return;
 
     window.appState.masterChangeInProgress = true;
@@ -1842,15 +1901,15 @@ async function confirmQuickEdit(accId) {
 
 // Huỷ Chế độ sửa nhanh cho tài khoản `accId` — KHÔNG lưu bất kỳ thay đổi nào.
 // Luồng (Yêu cầu 6.x):
-//   1) Nếu có thay đổi chưa lưu (hasUnsavedQuickEditChanges) thì hiện hộp confirm():
-//        - Người dùng chọn "Huỷ" của confirm (false) → TIẾP TỤC SỬA, giữ nguyên
+//   1) Nếu có thay đổi chưa lưu (hasUnsavedQuickEditChanges) thì hiện hộp xác nhận:
+//        - Người dùng chọn "Huỷ" → TIẾP TỤC SỬA, giữ nguyên
 //          Chế độ sửa nhanh và mọi giá trị đang nhập (Yêu cầu 6.1, 6.3).
-//        - Người dùng chọn "OK" của confirm (true) → BỎ thay đổi, quay lại Chế độ xem.
+//        - Người dùng xác nhận → BỎ thay đổi, quay lại Chế độ xem.
 //   2) Khi bỏ thay đổi HOẶC không có thay đổi: xoá appState.quickEdit và renderDetail
 //      về Chế độ xem với Trường nhạy cảm masked (Yêu cầu 6.2, 6.4, 6.5).
 //   3) Nếu khôi phục/render Chế độ xem thất bại thì GIỮ Chế độ sửa nhanh + toast lỗi
 //      "Không thể quay lại Chế độ xem" (Yêu cầu 6.6).
-function cancelQuickEdit(accId) {
+async function cancelQuickEdit(accId) {
     const qe = window.appState.quickEdit;
     // Chỉ xử lý khi đang ở Chế độ sửa nhanh đúng tài khoản.
     if (!qe || !qe.active || qe.accId !== accId) return;
@@ -1859,13 +1918,13 @@ function cancelQuickEdit(accId) {
 
     // Yêu cầu 6.1: nếu có thay đổi chưa lưu → hỏi xác nhận trước khi bỏ.
     if (hasUnsavedQuickEditChanges()) {
-        const confirmFn = (typeof window !== 'undefined' && typeof window.confirm === 'function')
-            ? window.confirm
-            : (typeof confirm === 'function' ? confirm : null);
-        // Hộp confirm: OK = bỏ thay đổi, Cancel = tiếp tục sửa.
-        const discard = confirmFn
-            ? confirmFn('Bạn có thay đổi chưa lưu. Bỏ các thay đổi và quay lại Chế độ xem?')
-            : true;
+        const discard = await confirmAction({
+            variant: 'warning',
+            title: 'Bỏ thay đổi chưa lưu?',
+            message: 'Các thay đổi trong chế độ sửa nhanh sẽ không được lưu.',
+            confirmLabel: 'Bỏ thay đổi',
+            cancelLabel: 'Tiếp tục sửa',
+        });
         // Yêu cầu 6.3: người dùng chọn tiếp tục sửa → giữ nguyên Chế độ sửa nhanh.
         if (!discard) return;
     }
@@ -2195,7 +2254,7 @@ async function submitAcceptGroupInvite(groupId) {
 }
 
 async function handleCancelGroupInvite(groupId, email = '') {
-    if (!confirm('Huỷ lời mời này?')) return;
+    if (!await confirmAction({ variant: 'warning', title: 'Huỷ lời mời?', message: 'Người được mời sẽ không thể dùng lời mời hiện tại để tham gia nhóm.', confirmLabel: 'Huỷ lời mời' })) return;
     try {
         await cancelGroupInvite(groupId, email);
         showToast('Đã huỷ lời mời', 'success');
@@ -2205,7 +2264,7 @@ async function handleCancelGroupInvite(groupId, email = '') {
 }
 
 async function handleRemoveGroupMember(groupId, email) {
-    if (!confirm(`Xoá ${email} khỏi nhóm?`)) return;
+    if (!await confirmAction({ variant: 'danger', title: 'Xoá thành viên?', message: `${email} sẽ bị xoá khỏi nhóm.`, confirmLabel: 'Xoá thành viên' })) return;
     try {
         await removeGroupMember(groupId, email);
         showToast('Đã xoá thành viên', 'success');
@@ -2217,7 +2276,7 @@ async function handleRemoveGroupMember(groupId, email) {
 async function handleRenameGroup(groupId) {
     const group = getGroupById?.(groupId);
     if (!group) return;
-    const name = prompt('Tên nhóm mới:', group.name || '');
+    const name = await promptAction({ title: 'Đổi tên nhóm', message: 'Nhập tên mới cho nhóm.', confirmLabel: 'Lưu tên', input: { label: 'Tên nhóm', value: group.name || '', maxLength: 80 }, validate: value => value.trim() ? true : 'Tên nhóm không được để trống' });
     if (name === null) return;
     try {
         await renameGroup(groupId, name);
@@ -2230,7 +2289,7 @@ async function handleRenameGroup(groupId) {
 async function handleDeleteGroup(groupId) {
     const group = getGroupById?.(groupId);
     if (!group) return;
-    if (!confirm(`Xoá nhóm "${group.name}"?`)) return;
+    if (!await confirmAction({ variant: 'danger', title: 'Xoá nhóm vĩnh viễn?', message: `Nhóm "${group.name}" và dữ liệu chia sẻ liên quan sẽ bị xoá.`, confirmationText: 'XÓA', confirmationLabel: 'Nhập XÓA để tiếp tục', confirmLabel: 'Xoá nhóm', dismissible: false })) return;
     try {
         await deleteGroup(groupId);
         showToast('Đã xoá nhóm', 'success');
@@ -2240,7 +2299,7 @@ async function handleDeleteGroup(groupId) {
     }
 }
 
-function setGroupDetailTab(tab = 'board') {
+function setGroupDetailTab(tab = 'board', options = {}) {
     // Chuẩn hoá về đúng 3 tab con hợp lệ (board/accounts/members) qua hàm thuần normalizeGroupTab.
     // 'settings' KHÔNG phải tab con ⇒ sẽ bị đưa về 'board'; muốn mở cài đặt hãy dùng openGroupSettings (Req 3.4, 3.6).
     const normalized = typeof normalizeGroupTab === 'function'
@@ -2253,7 +2312,7 @@ function setGroupDetailTab(tab = 'board') {
     // Chuyển tab con ⇒ đặt lại Group_Tab về View_Mode TRƯỚC khi render lại (Req 5.1, 2.3),
     // tránh vô tình để lộ cụm Edit_Control khi quay lại tab "Bảng".
     window.appState.groupEditMode = resetGroupEditState();
-    renderGroupDetail(window.appState.currentGroupId);
+    renderGroupDetail(window.appState.currentGroupId, options);
 }
 
 // Bật/tắt Edit_Mode của Group_Tab qua nút bút chì (Edit_Toggle_Button) — Req 2.4, 2.5, 4.7.
@@ -2288,7 +2347,7 @@ function scrollToGroupAccountTarget(groupId, accountId) {
     const target = document.getElementById(getGroupAccountTargetId(groupId, accountId));
     if (!target) return false;
     const run = () => {
-        target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        target.scrollIntoView({ behavior: document.documentElement.classList.contains('reduced-motion') ? 'auto' : 'smooth', block: 'center', inline: 'nearest' });
         target.classList.add('group-account-highlight');
         window.setTimeout(() => target.classList.remove('group-account-highlight'), 1800);
     };
@@ -2345,7 +2404,7 @@ async function submitGroupPassword(groupId) {
 async function handleRemoveGroupPassword(groupId) {
     const group = getGroupById?.(groupId);
     if (!group) return;
-    if (!confirm('Gỡ mật khẩu chung? Thành viên sẽ xem tài khoản chia sẻ mà không cần nhập mật khẩu.')) return;
+    if (!await confirmAction({ variant: 'warning', title: 'Gỡ mật khẩu chung?', message: 'Thành viên sẽ xem tài khoản chia sẻ mà không cần nhập mật khẩu.', confirmLabel: 'Gỡ mật khẩu' })) return;
     try {
         await changeGroupSharedPassword(groupId, '');
         showToast('Đã gỡ mật khẩu chung', 'success');
@@ -2391,7 +2450,7 @@ async function submitJoinPassword(groupId) {
 async function handleRemoveGroupJoinPassword(groupId) {
     const group = getGroupById?.(groupId);
     if (!group) return;
-    if (!confirm('Gỡ mật khẩu vào nhóm? Người được mời sẽ tham gia mà không cần nhập mật khẩu.')) return;
+    if (!await confirmAction({ variant: 'warning', title: 'Gỡ mật khẩu vào nhóm?', message: 'Người được mời sẽ có thể tham gia mà không cần nhập mật khẩu.', confirmLabel: 'Gỡ mật khẩu' })) return;
     try {
         await removeGroupJoinPassword(groupId);
         showToast('Đã gỡ mật khẩu vào nhóm', 'success');
@@ -2523,7 +2582,7 @@ async function handleDeleteGroupCategory(groupId, categoryId) {
     // Chỉ những tài khoản thực sự đổi danh mục (từ categoryId về null) mới cần ghi.
     const affected = reassigned.filter((account, index) => account.groupCategoryId !== accounts[index]?.groupCategoryId);
     // Req 6.5: hộp xác nhận trước khi xoá.
-    if (!confirm(`Xoá danh mục "${category.name}"?${affected.length ? ` ${affected.length} tài khoản sẽ về Chưa phân loại.` : ''}`)) return;
+    if (!await confirmAction({ variant: 'danger', title: 'Xoá danh mục nhóm?', message: `Danh mục "${category.name}" sẽ bị xoá.`, details: affected.length ? `${affected.length} tài khoản sẽ chuyển về Chưa phân loại.` : '', confirmLabel: 'Xoá danh mục' })) return;
     try {
         await updateGroupAccountCategories(groupId, categories.filter(item => item.id !== categoryId).map((item, order) => ({ ...item, order })));
         await Promise.all(affected.map(account => updateSharedAccountGroupMeta(groupId, account.id, { groupCategoryId: null })));
@@ -2805,7 +2864,7 @@ async function handleRemoveSharedAccount(groupId, accountId) {
         showToast('Không có quyền gỡ tài khoản này', 'error');
         return;
     }
-    if (!confirm('Gỡ tài khoản này khỏi nhóm?')) return;
+    if (!await confirmAction({ variant: 'danger', title: 'Gỡ tài khoản khỏi nhóm?', message: 'Tài khoản sẽ không còn được chia sẻ trong nhóm này.', confirmLabel: 'Gỡ khỏi nhóm' })) return;
     try {
         await removeSharedAccount(groupId, accountId);
         delete window.appState.decryptedSharedAccounts?.[getSharedAccountCacheKey(groupId, accountId)];
@@ -2825,6 +2884,8 @@ function renderSharedAccountEditForm(group, account, decrypted) {
     defaultExpiry.setDate(defaultExpiry.getDate() + 30);
     const defaultExpiryValue = dateToInputValue(defaultExpiry);
     const purchaseValue = account.purchaseDate || today;
+    const purchaseTimeValue = (typeof getAccountPurchaseTime === 'function' ? getAccountPurchaseTime(account) : account.purchaseTime)
+        || (typeof formatLocalTimeInput === 'function' ? formatLocalTimeInput() : '');
     const expiryValue = account.expiryDate || defaultExpiryValue;
     const isLifetime = account.expiryType === 'lifetime';
     const rawValue = [decrypted?.username, decrypted?.password, decrypted?.twoFaCode].filter(Boolean).join('|');
@@ -2840,6 +2901,7 @@ function renderSharedAccountEditForm(group, account, decrypted) {
         <div class="form-section-title">Thời hạn</div>
         <input type="text" id="add-smart-date" class="input smart-date-input" value="${isLifetime ? 'Vĩnh viễn' : '30 ngày'}" placeholder="30 ngày, 28/04 30, 28/04 > 28/05" oninput="applySmartDateInput(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();applySmartDateInput(this.value)}">
         <input type="hidden" id="add-purchase" value="${escapeHtml(purchaseValue)}">
+        <input type="hidden" id="add-purchase-time" value="${escapeHtml(purchaseTimeValue)}">
         <input type="hidden" id="add-expiry" value="${escapeHtml(expiryValue)}">
         <div id="add-expiry-hint" class="quick-date-hint smart-date-preview"></div>
         <div class="smart-date-options">
@@ -2847,10 +2909,14 @@ function renderSharedAccountEditForm(group, account, decrypted) {
             <label class="quick-lifetime"><input type="checkbox" id="add-lifetime" onchange="handleAddLifetimeToggle(this)" ${isLifetime ? 'checked' : ''}> Vĩnh viễn</label>
         </div>
         <div id="smart-date-details" class="smart-date-details">
-            <div class="quick-date-grid">
+            <div class="quick-date-grid purchase-date-grid">
                 <div class="quick-date-field">
                     <label>Ngày mua</label>
                     <input type="date" id="add-purchase-detail" class="input" value="${escapeHtml(purchaseValue)}" onchange="setAddPurchaseDate(this.value)">
+                </div>
+                <div class="quick-date-field">
+                    <label>Giờ mua</label>
+                    <input type="time" id="add-purchase-time-detail" class="input" value="${escapeHtml(purchaseTimeValue)}" onchange="document.getElementById('add-purchase-time').value=this.value">
                 </div>
                 <div class="quick-date-field">
                     <label>Ngày hết hạn</label>
@@ -2903,6 +2969,9 @@ function collectSharedAccountEditInput(groupId, accountId) {
     if (!name) return { ok: false, message: 'Nhập tên dịch vụ' };
     const isLifetime = document.getElementById('add-lifetime')?.checked === true;
     const purchaseDate = document.getElementById('add-purchase')?.value || account?.purchaseDate || todayStr();
+    const purchaseTime = document.getElementById('add-purchase-time')?.value
+        || (typeof getAccountPurchaseTime === 'function' ? getAccountPurchaseTime(account) : account?.purchaseTime)
+        || (typeof formatLocalTimeInput === 'function' ? formatLocalTimeInput() : '');
     const expiryDate = isLifetime ? null : (document.getElementById('add-expiry')?.value || account?.expiryDate || '');
     if (!isLifetime && !expiryDate) return { ok: false, message: 'Chọn ngày hết hạn hoặc bật Vĩnh viễn' };
     const username = parsed.username || decrypted.username || '';
@@ -2921,6 +2990,7 @@ function collectSharedAccountEditInput(groupId, accountId) {
             serviceName: name,
             platform,
             purchaseDate,
+            purchaseTime,
             expiryDate,
             expiryType: isLifetime ? 'lifetime' : 'fixed',
             status: getStatusFromExpiry(expiryDate, isLifetime ? 'lifetime' : 'fixed'),
@@ -2980,7 +3050,7 @@ async function handleAcceptSharedEditRequest(groupId, requestId) {
         return;
     }
     // Giữ hộp xác nhận hiện có; huỷ xác nhận -> không làm gì.
-    if (!confirm('Duyệt thay đổi này?')) return;
+    if (!await confirmAction({ variant: 'info', title: 'Duyệt thay đổi?', message: 'Dữ liệu tài khoản chia sẻ sẽ được cập nhật theo yêu cầu này.', confirmLabel: 'Duyệt thay đổi' })) return;
     try {
         await acceptSharedEditRequest(groupId, requestId);
         // Xoá cache đã giải mã của account để buộc giải mã lại theo dữ liệu vừa được duyệt.
@@ -3005,7 +3075,7 @@ async function handleRejectSharedEditRequest(groupId, requestId) {
         return;
     }
     // Giữ hộp xác nhận hiện có; huỷ xác nhận -> không làm gì.
-    if (!confirm('Từ chối yêu cầu sửa này?')) return;
+    if (!await confirmAction({ variant: 'warning', title: 'Từ chối yêu cầu?', message: 'Các thay đổi được đề xuất sẽ không được áp dụng.', confirmLabel: 'Từ chối' })) return;
     try {
         await rejectSharedEditRequest(groupId, requestId);
         // Req 10.5: giao diện cập nhật đúng một lần qua realtime/notifyGroupsChanged sẵn có.
@@ -3331,7 +3401,7 @@ async function setLinkedAccountForExisting(accId, linkedId) {
 async function unlinkAccount(accId) {
     const acc = (window.appState.accounts || []).find(item => item.id === accId);
     if (!acc) return;
-    if (!confirm('Gỡ liên kết TK gốc cho tài khoản này?')) return;
+    if (!await confirmAction({ variant: 'warning', title: 'Gỡ liên kết tài khoản gốc?', message: 'Tài khoản này sẽ không còn dùng thông tin đăng nhập từ tài khoản gốc.', confirmLabel: 'Gỡ liên kết' })) return;
 
     if (window.appState.isDemo) {
         acc.linkedAccountId = null;
@@ -3614,7 +3684,7 @@ function previewParse() {
     if (smart && typeof applySmartPasteMetadata === 'function') applySmartPasteMetadata(smart);
     if (!el) return;
     if (!r || (!r.username && !r.password)) { el.innerHTML = ''; return; }
-    el.innerHTML = `<div class="parse-preview"><div class="parse-preview-item"><span class="parse-preview-label">Tài khoản</span><span class="parse-preview-value">${r.username || '—'}</span></div><div class="parse-preview-item"><span class="parse-preview-label">Mật khẩu</span><span class="parse-preview-value">${r.password || '—'}</span></div>${r.twoFaCode ? `<div class="parse-preview-item"><span class="parse-preview-label">2FA</span><span class="parse-preview-value">${r.twoFaCode}</span></div>` : ''}</div>`;
+    el.innerHTML = `<div class="parse-preview"><div class="parse-preview-item"><span class="parse-preview-label">Tài khoản</span><span class="parse-preview-value">${escapeHtml(r.username || '—')}</span></div><div class="parse-preview-item"><span class="parse-preview-label">Mật khẩu</span><span class="parse-preview-value">${escapeHtml(r.password || '—')}</span></div>${r.twoFaCode ? `<div class="parse-preview-item"><span class="parse-preview-label">2FA</span><span class="parse-preview-value">${escapeHtml(r.twoFaCode)}</span></div>` : ''}</div>`;
 }
 
 // Tự nhận diện người bán / nguồn từ link dán vào ô "Dán thông tin tài khoản"
@@ -3930,11 +4000,11 @@ function deletePlanTag(platformId, tag) {
     showToast(`Đã xoá "${tag}"`, 'success');
 }
 
-function renamePlanTag(platformId, oldTag) {
+async function renamePlanTag(platformId, oldTag) {
     if (!platformId || !oldTag) return;
     const tags = window.PLATFORM_PLAN_TAGS?.[platformId];
     if (!Array.isArray(tags)) return;
-    const newTag = prompt(`Đổi tên gói cước "${oldTag}" thành:`, oldTag);
+    const newTag = await promptAction({ title: 'Đổi tên gói cước', message: `Đổi tên gói "${oldTag}".`, confirmLabel: 'Lưu tên', input: { label: 'Tên gói cước', value: oldTag, maxLength: 60 }, validate: value => value.trim() ? true : 'Tên gói cước không được để trống' });
     if (!newTag || newTag.trim() === oldTag) return;
     const trimmed = newTag.trim();
     const oldKey = typeof normalizeTagKey === 'function' ? normalizeTagKey(oldTag) : oldTag.toLowerCase();
@@ -4522,6 +4592,10 @@ function buildAccountSaveInput(input = {}) {
 
     const isL = input.isLifetime === true || input.expiryType === 'lifetime';
     const purchaseDate = normalizeSaveDate(input.purchaseDate || todayStr(), todayStr());
+    const currentLocalTime = typeof formatLocalTimeInput === 'function' ? formatLocalTimeInput() : '';
+    const purchaseTime = typeof normalizeTimeInput === 'function'
+        ? normalizeTimeInput(input.purchaseTime, currentLocalTime)
+        : (String(input.purchaseTime || '').trim() || currentLocalTime);
     const hasExpiryQuick = input.expiryQuick !== undefined || input.duration !== undefined || input.expiryDays !== undefined;
     const quickExpiry = input.expiryQuick ?? input.duration ?? input.expiryDays;
     let expiryDate = isL ? null : normalizeSaveDate(input.expiryDate || '', '');
@@ -4574,6 +4648,7 @@ function buildAccountSaveInput(input = {}) {
             purchasePrice: (typeof parsePriceValue === 'function' ? parsePriceValue(input.purchasePrice) : (input.purchasePrice || null)) ?? null,
             displayUsername: maskUsername(sensitiveData.username),
             purchaseDate,
+            purchaseTime,
             expiryDate: expiryDate || null,
             expiryType: isL ? 'lifetime' : 'fixed',
             status: getStatusFromExpiry(expiryDate, isL ? 'lifetime' : 'fixed'),
@@ -4668,6 +4743,8 @@ async function saveNewAccount(type) {
     }
     const isL = document.getElementById('add-lifetime').checked;
     const pDate = document.getElementById('add-purchase').value || todayStr();
+    const pTime = document.getElementById('add-purchase-time')?.value
+        || (typeof formatLocalTimeInput === 'function' ? formatLocalTimeInput() : '');
     const eDate = isL ? null : document.getElementById('add-expiry').value;
     if (!isL && !eDate) {
         goAddTab?.(2, { manual: true });
@@ -4704,6 +4781,7 @@ async function saveNewAccount(type) {
         purchasePrice: purchasePrice ?? null,
         displayUsername: maskUsername(sensitiveData.username),
         purchaseDate: pDate,
+        purchaseTime: pTime,
         expiryDate: eDate || null,
         expiryType: isL ? 'lifetime' : 'fixed',
         status: getStatusFromExpiry(eDate, isL ? 'lifetime' : 'fixed'),
@@ -4799,9 +4877,9 @@ async function markAccountExpired(id) {
     if (!acc) return;
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
-    const expiryDate = typeof dateToInputValue === 'function'
-        ? dateToInputValue(yesterday)
-        : yesterday.toISOString().split('T')[0];
+    const expiryDate = typeof formatLocalDateInput === 'function'
+        ? formatLocalDateInput(yesterday)
+        : `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
     const update = { expiryDate, expiryType: 'fixed', status: 'expired' };
 
     if (window.appState.isDemo) {
@@ -4848,11 +4926,17 @@ function finishEditFormInit(acc) {
     const lifetimeInput = document.getElementById('add-lifetime');
     const detail = document.getElementById('smart-date-details');
     const purchaseDetail = document.getElementById('add-purchase-detail');
+    const purchaseTime = document.getElementById('add-purchase-time');
+    const purchaseTimeDetail = document.getElementById('add-purchase-time-detail');
     const expiryDetail = document.getElementById('add-expiry-detail');
     if (custom) custom.checked = true;
     if (detail) detail.hidden = false;
     if (lifetimeInput) lifetimeInput.checked = lifetime;
     if (purchaseDetail && acc.purchaseDate) purchaseDetail.value = acc.purchaseDate;
+    const purchaseTimeValue = (typeof getAccountPurchaseTime === 'function' ? getAccountPurchaseTime(acc) : acc.purchaseTime)
+        || (typeof formatLocalTimeInput === 'function' ? formatLocalTimeInput() : '');
+    if (purchaseTime) purchaseTime.value = purchaseTimeValue;
+    if (purchaseTimeDetail) purchaseTimeDetail.value = purchaseTimeValue;
     if (expiryDetail) {
         if (acc.expiryDate) expiryDetail.value = acc.expiryDate;
         expiryDetail.disabled = lifetime;
@@ -4903,6 +4987,9 @@ function collectEditedAccountInput(acc) {
         type: acc.type,
         platform: getCurrentAddPlatform() || acc.platform,
         purchaseDate: document.getElementById('add-purchase')?.value || acc.purchaseDate || todayStr(),
+        purchaseTime: document.getElementById('add-purchase-time')?.value
+            || (typeof getAccountPurchaseTime === 'function' ? getAccountPurchaseTime(acc) : acc.purchaseTime)
+            || (typeof formatLocalTimeInput === 'function' ? formatLocalTimeInput() : ''),
         expiryDate: document.getElementById('add-lifetime')?.checked ? null : (document.getElementById('add-expiry')?.value || acc.expiryDate || ''),
         expiryType: document.getElementById('add-lifetime')?.checked ? 'lifetime' : 'fixed',
         note: document.getElementById('add-note')?.value || '',
@@ -4975,9 +5062,9 @@ async function moveAccountToTrash(id) {
     const acc = window.appState.accounts.find(a => a.id === id);
     const linkedServices = typeof getLinkedServices === 'function' ? getLinkedServices(id) : [];
     const linkedWarning = linkedServices.length
-        ? `\n\nCó ${linkedServices.length} dịch vụ đang đăng nhập bằng TK này: ${linkedServices.slice(0, 3).map(item => item.name).join(', ')}${linkedServices.length > 3 ? '...' : ''}. Sau khi xoá, các dịch vụ đó sẽ hiện cảnh báo TK gốc.`
+        ? `Có ${linkedServices.length} dịch vụ đang đăng nhập bằng tài khoản này: ${linkedServices.slice(0, 3).map(item => item.name).join(', ')}${linkedServices.length > 3 ? '...' : ''}. Sau khi chuyển, các dịch vụ đó sẽ hiện cảnh báo tài khoản gốc.`
         : '';
-    if (!confirm(`Chuyển tài khoản này vào thùng rác? Bạn có thể khôi phục lại sau.${linkedWarning}`)) return;
+    if (!await confirmAction({ variant: 'danger', title: 'Chuyển vào thùng rác?', message: 'Bạn có thể khôi phục lại tài khoản này sau.', details: linkedWarning, confirmLabel: 'Chuyển vào thùng rác' })) return;
 
     if (window.appState.isDemo) {
         if (!acc) return;
@@ -5252,6 +5339,7 @@ async function handleQuickAddRequest(event = {}) {
         rawInput: payload.rawInput,
         isLifetime: Boolean(payload.isLifetime),
         purchaseDate: payload.purchaseDate || todayStr(),
+        purchaseTime: payload.purchaseTime || (typeof formatLocalTimeInput === 'function' ? formatLocalTimeInput() : ''),
         expiryDate: payload.expiryDate || '',
         expiryQuick: payload.expiryQuick || '30',
         platform: payload.platform,

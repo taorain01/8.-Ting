@@ -1,24 +1,13 @@
 // ============================================================================
-// Test KHÁM PHÁ Bug Condition — spec bugfix "paste-skip-input-validation".
+// Test HÀNH VI — `handleQuickPasteGuidance` sau khi GỠ auto-cuộn.
 //
-// Property 1: Bug Condition — Bỏ qua gợi ý khi người dùng đã rời ô dán.
+// Bối cảnh: theo yêu cầu người dùng, toàn bộ auto-cuộn tới field chưa nhập đã bị
+// gỡ bỏ. `handleQuickPasteGuidance` giờ là NO-OP: nó KHÔNG còn ép focus/cuộn về
+// `add-smart-date`, cũng KHÔNG thay đổi cờ guide. Wizard chỉ chuyển tab và cuộn
+// lên đầu mỗi lần (xử lý ở `goAddTab`), không dẫn dắt giữa các field.
 //
-// Đây là test khám phá của bugfix workflow: nó mã hóa HÀNH VI MONG MUỐN và
-// BẮT BUỘC THẤT BẠI trên mã CHƯA sửa (thất bại là bằng chứng lỗi tồn tại).
-// Sau khi sửa `handleQuickPasteGuidance`, chính test này phải PASS.
-//
-// Điều kiện lỗi (isBugCondition từ design):
-//   pasteHasContent === true
-//   AND NOT dateSkipped
-//   AND NOT dateGuided
-//   AND activeElementId !== 'paste-input'   (người dùng đã rời ô dán)
-//
-// Cách tiếp cận Scoped PBT: dựng DOM mô phỏng có theo dõi `document.activeElement`
-// + fake timers; sinh ngẫu nhiên `activeElementId` thuộc tập ô đích không phải
-// `paste-input` (`add-name`, `add-seller-name`, `add-price`) kết hợp nội dung dán
-// không rỗng.
-//
-// Validates: Requirements 2.1, 2.2, 2.3
+// Test này xác nhận: dù người dùng dán nội dung rồi rời ô dán sang ô khác, focus
+// vẫn giữ NGUYÊN ở ô người dùng chọn và không có tác dụng phụ nào lên cờ guide.
 // ============================================================================
 
 const fc = require('fast-check');
@@ -34,7 +23,6 @@ const otherTargetArb = fc.constantFrom(...OTHER_TARGET_IDS);
 
 /**
  * Nội dung dán KHÔNG rỗng sau khi trim: luôn có ít nhất một ký tự không-khoảng-trắng.
- * Ghép padding tùy ý (có thể là khoảng trắng) quanh một lõi không-khoảng-trắng.
  */
 const nonEmptyPasteArb = fc
   .tuple(
@@ -48,7 +36,7 @@ const nonEmptyPasteArb = fc
 
 /**
  * Mô phỏng: người dùng dán vào `paste-input` (đang giữ focus), guidance được
- * lên lịch, rồi người dùng lập tức chuyển focus sang `targetId`, sau đó timer chạy.
+ * gọi, rồi người dùng lập tức chuyển focus sang `targetId`, sau đó timer chạy.
  * Trả về trạng thái quan sát được sau khi mọi timer đã chạy.
  */
 function runPasteThenSwitchFocus(pasteContent, targetId) {
@@ -61,13 +49,13 @@ function runPasteThenSwitchFocus(pasteContent, targetId) {
   env.elements['paste-input'].value = pasteContent;
   env.setActiveElement('paste-input');
 
-  // Sự kiện onpaste kích hoạt guidance (lên lịch setTimeout).
+  // Sự kiện onpaste kích hoạt guidance (giờ là no-op).
   env.window.handleQuickPasteGuidance();
 
   // Người dùng chủ động chuyển focus sang ô khác NGAY sau khi dán.
   env.elements[targetId].focus();
 
-  // Cho toàn bộ timer chạy (guidance callback + focus trễ 80ms nếu có).
+  // Cho toàn bộ timer chạy (nếu có).
   env.runAllTimers();
 
   const active = env.getActiveElement();
@@ -79,20 +67,18 @@ function runPasteThenSwitchFocus(pasteContent, targetId) {
   };
 }
 
-// --- Property 1: Bug Condition -------------------------------------------
+// --- Property: no-op sau khi gỡ auto-cuộn --------------------------------
 
-describe('handleQuickPasteGuidance — Property 1: Bug Condition (khám phá)', () => {
-  it('KHI người dùng dán rồi rời ô dán sang ô khác THÌ focus PHẢI giữ nguyên (không bị kéo về add-smart-date), dateSkipped=true, dateGuided=false', () => {
+describe('handleQuickPasteGuidance — no-op sau khi gỡ auto-cuộn', () => {
+  it('KHI người dùng dán rồi rời ô dán sang ô khác THÌ focus giữ nguyên và cờ guide KHÔNG đổi (dateSkipped=false, dateGuided=false)', () => {
     fc.assert(
       fc.property(nonEmptyPasteArb, otherTargetArb, (pasteContent, targetId) => {
         const result = runPasteThenSwitchFocus(pasteContent, targetId);
 
-        // 2.1 + 2.3: KHÔNG được ép focus/cuộn về 'add-smart-date';
-        // focus phải giữ ở ô người dùng đã chủ động chọn.
+        // Không ép focus/cuộn về 'add-smart-date'; giữ ở ô người dùng đã chọn.
         expect(result.activeElementId).toBe(targetId);
-        // 2.2: coi việc rời ô dán là hành động skip.
-        expect(result.dateSkipped).toBe(true);
-        // Không đánh dấu đã guided (vì gợi ý đã bị bỏ qua).
+        // Hàm giờ là no-op: không đụng vào cờ guide.
+        expect(result.dateSkipped).toBe(false);
         expect(result.dateGuided).toBe(false);
       }),
       { numRuns: 100 },

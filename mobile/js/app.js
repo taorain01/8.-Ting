@@ -32,11 +32,12 @@ window.appState = {
     isOnline: typeof navigator === 'undefined' ? true : navigator.onLine !== false,
     firestoreFromCache: false,
     pendingSyncCount: 0,
-    appVersion: '1.6.0',
+    appVersion: '1.7.0',
     updateStatus: null,
     updateLog: [],
     expandedGroups: {},
     visibleGroupNotes: {},
+    backNavigationInFlight: false,
     // Cờ BẬT/TẮT "Hiển thị tài khoản hết hạn" cho màn hình TK Mua và Cá nhân.
     // Lưu theo phiên (KHÔNG persist); mặc định TẮT mỗi lần mở app. Hai màn hình
     // dùng cờ riêng, độc lập nhau. Chỉ tác động ở tab "Tất cả" (không lọc trạng thái).
@@ -98,39 +99,6 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ===== NAVIGATION / ROUTER =====
-function navigateTo(page) {
-    window.appState.previousPage = window.appState.currentPage;
-    window.appState.currentPage = page;
-    if (page !== 'detail') window.appState.activeDecryptedAccount = null;
-    if (page !== window.appState.previousPage) {
-        window.appState.expandedGroups = {};
-        window.appState.visibleGroupNotes = {};
-    }
-    window.appState.currentFilter = 'all';
-    window.appState.searchQuery = '';
-
-    // Cập nhật bottom nav active
-    document.querySelectorAll('.nav-item').forEach(item => {
-        item.classList.toggle('active', item.dataset.page === page);
-    });
-
-    // FAB: ẩn ở settings & detail
-    const fab = document.getElementById('fab-add');
-    fab.style.display = (page === 'settings' || page === 'detail') ? 'none' : '';
-
-    // Render page
-    switch (page) {
-        case 'dashboard': renderDashboard(); break;
-        case 'bought': renderAccountList('bought'); break;
-        case 'personal': handlePersonalPage(); break;
-        case 'settings': renderSettings(); break;
-    }
-
-    // Scroll lên đầu
-    document.getElementById('page-content').scrollTop = 0;
-    window.scrollTo(0, 0);
-}
-
 const NAV_STACK_LIMIT = 80;
 
 function getNavContentElement() {
@@ -308,11 +276,17 @@ function updateHeader() {
 
     // Avatar: ảnh Google hoặc chữ cái đầu
     const avatarEl = document.getElementById('header-avatar');
+    avatarEl.replaceChildren();
     if (user.avatar) {
-        avatarEl.innerHTML = `<img src="${user.avatar}" style="width:100%;height:100%;border-radius:50%;object-fit:cover" alt="">`;
+        const image = document.createElement('img');
+        image.src = String(user.avatar);
+        image.style.cssText = 'width:100%;height:100%;border-radius:50%;object-fit:cover';
+        image.alt = '';
+        avatarEl.appendChild(image);
     } else {
-        const initial = user.name.charAt(0).toUpperCase();
-        avatarEl.innerHTML = `<span>${initial}</span>`;
+        const initial = document.createElement('span');
+        initial.textContent = String(user.name || '').charAt(0).toUpperCase();
+        avatarEl.appendChild(initial);
     }
 
     // Badge thông báo: chỉ đếm mục chưa xem, danh sách trong chuông vẫn giữ đủ mục cần chú ý.
@@ -341,54 +315,12 @@ function toggleSearch() {
         document.getElementById('search-input').focus();
     }
 }
-function handleSearch(value) {
-    window.appState.searchQuery = value;
-    window.appState.expandedGroups = {};
-    window.appState.visibleGroupNotes = {};
-    const page = window.appState.currentPage;
-    if (page === 'bought') renderAccountList('bought');
-    else if (page === 'personal') renderAccountList('personal');
-    else if (page === 'dashboard') renderDashboard();
-}
 function clearSearch() {
     document.getElementById('search-input').value = '';
-    handleSearch('');
+    handleSearch('', { immediate: true });
 }
 
 // ===== FILTER =====
-function setFilter(filter) {
-    window.appState.currentFilter = filter;
-    window.appState.expandedGroups = {};
-    window.appState.visibleGroupNotes = {};
-    const page = window.appState.currentPage;
-    if (page === 'bought') renderAccountList('bought');
-    else if (page === 'personal') renderAccountList('personal');
-}
-
-function toggleAccountGroup(groupKey) {
-    window.appState.expandedGroups[groupKey] = !window.appState.expandedGroups[groupKey];
-    const page = window.appState.currentPage;
-    if (page === 'bought') renderAccountList('bought');
-    else if (page === 'personal') renderAccountList('personal');
-}
-
-function toggleAccountGroupNotes(groupKey) {
-    window.appState.visibleGroupNotes = window.appState.visibleGroupNotes || {};
-    if (window.appState.visibleGroupNotes[groupKey]) delete window.appState.visibleGroupNotes[groupKey];
-    else window.appState.visibleGroupNotes[groupKey] = true;
-    const page = window.appState.currentPage;
-    if (page === 'bought') renderAccountList('bought');
-    else if (page === 'personal') renderAccountList('personal');
-}
-
-function rerenderCurrentView(accountId) {
-    const page = window.appState.currentPage;
-    if (page === 'detail' && accountId) renderDetail(accountId);
-    else if (page === 'dashboard') renderDashboard();
-    else if (page === 'bought') renderAccountList('bought');
-    else if (page === 'personal') renderAccountList('personal');
-}
-
 async function updateAccountPreference(id, patch, successMessage) {
     const acc = window.appState.accounts.find(item => item.id === id);
     if (!acc) return;
@@ -434,201 +366,7 @@ async function handlePersonalPage() {
     if (unlocked) renderAccountList('personal');
 }
 
-function getMasterPasswordDialogEls() {
-    const overlay = document.getElementById('master-pw-overlay');
-    const input = document.getElementById('master-pw-input');
-    const title = overlay.querySelector('.master-pw-title');
-    const desc = overlay.querySelector('.master-pw-desc');
-    const label = overlay.querySelector('label[for="master-pw-input"]');
-    const button = overlay.querySelector('.master-pw-content .btn-primary');
-    return { overlay, input, title, desc, label, button };
-}
-
-async function showMasterPasswordDialog(reason = 'Để giải mã dữ liệu') {
-    const els = getMasterPasswordDialogEls();
-    let security = null;
-    try {
-        security = await getMasterPasswordHash();
-    } catch (error) {
-        console.error('❌ Lỗi kiểm tra Master Password:', error);
-        showToast('Không thể kiểm tra Master Password', 'error');
-        finishMasterPasswordDialog(false);
-        return;
-    }
-
-    const hasMasterPassword = Boolean(security?.masterPasswordHash && security?.masterPasswordSalt);
-    window.appState.masterSecurity = security;
-    window.appState.masterPasswordMode = hasMasterPassword ? 'unlock' : 'create';
-
-    els.title.textContent = hasMasterPassword ? 'Nhập Master Password' : 'Tạo Master Password';
-    els.desc.textContent = hasMasterPassword
-        ? reason
-        : 'Mật khẩu này dùng để mã hoá dữ liệu. Nếu quên sẽ không giải mã được dữ liệu cũ.';
-    els.label.textContent = hasMasterPassword ? 'Master Password' : 'Master Password mới';
-    els.button.textContent = hasMasterPassword ? 'Mở khoá' : 'Tạo và mở khoá';
-    els.button.disabled = false;
-    els.input.value = '';
-    els.overlay.style.display = 'flex';
-    els.overlay.classList.add('open');
-    setTimeout(() => els.input.focus(), 300);
-}
-
-async function requireMasterPassword(reason = 'Để giải mã dữ liệu') {
-    if (window.appState.masterUnlocked && window.appState.masterPassword) return true;
-
-    return new Promise((resolve) => {
-        window.appState.masterPasswordResolver = resolve;
-        showMasterPasswordDialog(reason);
-    });
-}
-
-function finishMasterPasswordDialog(success, value = null) {
-    const els = getMasterPasswordDialogEls();
-    if (success) {
-        els.overlay.style.display = 'none';
-        els.overlay.classList.remove('open');
-        els.input.value = '';
-    }
-
-    if (window.appState.masterPasswordResolver) {
-        window.appState.masterPasswordResolver(success);
-        window.appState.masterPasswordResolver = null;
-    }
-}
-
-function shakeMasterPasswordInput() {
-    const input = document.getElementById('master-pw-input');
-    input.parentElement.classList.add('anim-shake');
-    setTimeout(() => input.parentElement.classList.remove('anim-shake'), 400);
-}
-
-async function verifyMasterPassword() {
-    const els = getMasterPasswordDialogEls();
-    const masterPassword = els.input.value;
-    if (!masterPassword) {
-        shakeMasterPasswordInput();
-        return;
-    }
-
-    els.button.disabled = true;
-    const originalText = els.button.textContent;
-    els.button.textContent = 'Đang kiểm tra...';
-
-    try {
-        if (window.appState.masterPasswordMode === 'change-new') {
-            if (!pinMode || !/^\d{4}$|^\d{6}$/.test(masterPassword)) {
-                showToast('Master PIN cần đúng 4 hoặc 6 số', 'error');
-                shakeMasterPasswordInput();
-                clearMasterPasswordInput();
-                return;
-            }
-            window.appState.masterPinLength = requiredLength;
-            writeLocalSetting('masterPinLength', requiredLength);
-            finishMasterPasswordDialog(true, masterPassword);
-            return;
-        }
-
-        if (window.appState.masterPasswordMode === 'create') {
-            if (masterPassword.length < 6) {
-                showToast('Master Password cần ít nhất 6 ký tự', 'error');
-                shakeMasterPasswordInput();
-                return;
-            }
-
-            const salt = generateSalt();
-            const hash = await hashMasterPassword(masterPassword, salt);
-            const saved = await saveMasterPasswordHash(hash, salt);
-            if (!saved) throw new Error('Không lưu được Master Password');
-
-            window.appState.masterUnlocked = true;
-            window.appState.masterPassword = masterPassword;
-            finishMasterPasswordDialog(true);
-            showToast('Đã tạo Master Password', 'success');
-            return;
-        }
-
-        const security = window.appState.masterSecurity || await getMasterPasswordHash();
-        if (!security?.masterPasswordHash || !security?.masterPasswordSalt) {
-            window.appState.masterPasswordMode = 'create';
-            await showMasterPasswordDialog();
-            return;
-        }
-
-        const ok = await TingCrypto.verifyMasterPassword(
-            masterPassword,
-            security.masterPasswordHash,
-            security.masterPasswordSalt
-        );
-        if (!ok) {
-            showToast('Master Password không đúng', 'error');
-            shakeMasterPasswordInput();
-            return;
-        }
-
-        window.appState.masterUnlocked = true;
-        window.appState.masterPassword = masterPassword;
-        finishMasterPasswordDialog(true);
-        showToast('Đã mở khoá dữ liệu', 'success');
-    } catch (error) {
-        console.error('❌ Lỗi Master Password:', error);
-        showToast(error.message || 'Không thể mở khoá dữ liệu', 'error');
-        shakeMasterPasswordInput();
-    } finally {
-        els.button.disabled = false;
-        els.button.textContent = originalText;
-    }
-}
-
 // ===== ACCOUNT DETAIL =====
-async function getSensitiveAccountData(acc, reason = 'Để giải mã tài khoản') {
-    if (!acc) return null;
-    if (!acc.encryptedData || !acc.salt || !acc.iv) {
-        showToast('Tài khoản này chưa có dữ liệu mã hoá', 'error');
-        return null;
-    }
-
-    const unlocked = await requireMasterPassword(reason);
-    if (!unlocked) return null;
-
-    try {
-        return await decryptAccountData(acc, window.appState.masterPassword);
-    } catch (error) {
-        console.error('❌ Lỗi giải mã tài khoản:', error);
-        showToast('Không thể giải mã. Kiểm tra lại Master Password', 'error');
-        window.appState.masterUnlocked = false;
-        window.appState.masterPassword = null;
-        return null;
-    }
-}
-
-async function showDetail(accId) {
-    window.appState.previousPage = window.appState.currentPage;
-    window.appState.currentPage = 'detail';
-    document.getElementById('fab-add').style.display = 'none';
-    window.appState.activeDecryptedAccount = null;
-
-    const acc = window.appState.accounts.find(a => a.id === accId);
-    const decrypted = await getSensitiveAccountData(acc, 'Để xem chi tiết tài khoản');
-    if (decrypted) window.appState.activeDecryptedAccount = { id: accId, data: decrypted };
-    renderDetail(accId);
-}
-
-// ===== COPY FIELD =====
-async function copyField(accId, field) {
-    const acc = window.appState.accounts.find(a => a.id === accId);
-    if (!acc) return;
-    const decrypted = await getSensitiveAccountData(acc, 'Để copy thông tin tài khoản');
-    if (!decrypted) return;
-
-    let value = '', label = '';
-    switch (field) {
-        case 'username': value = decrypted.username; label = 'tài khoản'; break;
-        case 'password': value = decrypted.password; label = 'mật khẩu'; break;
-        case '2fa': value = decrypted.twoFaCode; label = '2FA'; break;
-    }
-    if (value) copyToClipboard(value, label);
-}
-
 function openExternalLink(url) {
     if (!url) return;
     window.open(url, '_blank', 'noopener,noreferrer');
@@ -700,9 +438,9 @@ async function markAccountExpired(id) {
     if (!acc) return;
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
-    const expiryDate = typeof dateToInputValue === 'function'
-        ? dateToInputValue(yesterday)
-        : yesterday.toISOString().split('T')[0];
+    const expiryDate = typeof formatLocalDateInput === 'function'
+        ? formatLocalDateInput(yesterday)
+        : `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
     const update = { expiryDate, expiryType: 'fixed', status: 'expired' };
     if (window.appState.isDemo) {
         Object.assign(acc, update);
@@ -728,15 +466,6 @@ async function copyNoteSegment(text) {
 async function copyNoteTextAndOpen(text, url) {
     if (url) openExternalLink(url);
     if (text) await copyToClipboard(text, 'mã');
-}
-
-async function deleteAccount(accId) {
-    if (!confirm('Bạn chắc chắn muốn xoá tài khoản này?')) return;
-    const success = await deleteAccountFromDB(accId);
-    if (success) {
-        showToast('Đã xoá tài khoản', 'success');
-        goBack();
-    }
 }
 
 // ===== EDIT (placeholder) =====
@@ -765,11 +494,17 @@ function finishEditFormInit(acc) {
     const lifetimeInput = document.getElementById('add-lifetime');
     const detail = document.getElementById('smart-date-details');
     const purchaseDetail = document.getElementById('add-purchase-detail');
+    const purchaseTime = document.getElementById('add-purchase-time');
+    const purchaseTimeDetail = document.getElementById('add-purchase-time-detail');
     const expiryDetail = document.getElementById('add-expiry-detail');
     if (custom) custom.checked = true;
     if (detail) detail.hidden = false;
     if (lifetimeInput) lifetimeInput.checked = lifetime;
     if (purchaseDetail && acc.purchaseDate) purchaseDetail.value = acc.purchaseDate;
+    const purchaseTimeValue = (typeof getAccountPurchaseTime === 'function' ? getAccountPurchaseTime(acc) : acc.purchaseTime)
+        || (typeof formatLocalTimeInput === 'function' ? formatLocalTimeInput() : '');
+    if (purchaseTime) purchaseTime.value = purchaseTimeValue;
+    if (purchaseTimeDetail) purchaseTimeDetail.value = purchaseTimeValue;
     if (expiryDetail) {
         if (acc.expiryDate) expiryDetail.value = acc.expiryDate;
         expiryDetail.disabled = lifetime;
@@ -817,6 +552,9 @@ function collectEditedAccountInput(acc) {
         type: acc.type,
         platform: getCurrentAddPlatform() || acc.platform,
         purchaseDate: document.getElementById('add-purchase')?.value || acc.purchaseDate || todayStr(),
+        purchaseTime: document.getElementById('add-purchase-time')?.value
+            || (typeof getAccountPurchaseTime === 'function' ? getAccountPurchaseTime(acc) : acc.purchaseTime)
+            || (typeof formatLocalTimeInput === 'function' ? formatLocalTimeInput() : ''),
         expiryDate: document.getElementById('add-lifetime')?.checked ? null : (document.getElementById('add-expiry')?.value || acc.expiryDate || ''),
         expiryType: document.getElementById('add-lifetime')?.checked ? 'lifetime' : 'fixed',
         note: document.getElementById('add-note')?.value || '',
@@ -1004,11 +742,6 @@ function togglePasswordVisibility(btn) {
     if (input) input.type = input.type === 'password' ? 'text' : 'password';
 }
 
-// ===== NOTIFICATIONS PANEL (placeholder) =====
-function showNotifications() {
-    showToast('Chức năng thông báo sẽ bổ sung sau', 'success');
-}
-
 // ===== MOBILE DESKTOP-PARITY EXTENSIONS =====
 Object.assign(window.appState, {
     currentTagFilter: window.appState.currentTagFilter || '',
@@ -1088,20 +821,32 @@ function navigateTo(page, isBack = false) {
     if (!isRestoring) resetNavScroll();
 }
 
-function handleSearch(value) {
-    window.appState.searchQuery = String(value || '');
-    window.appState.expandedGroups = {};
-    window.appState.visibleGroupNotes = {};
+let searchRenderTimer = null;
+function renderSearchState(options = {}) {
     const page = window.appState.currentPage;
-    if (page === 'bought') renderAccountList('bought');
-    else if (page === 'personal') renderAccountList('personal');
+    if (page === 'bought') renderAccountList('bought', options);
+    else if (page === 'personal') renderAccountList('personal', options);
     else if (page === 'groups') renderGroupList();
-    else if (page === 'group-detail') renderGroupDetail(window.appState.currentGroupId);
-    else if (page === 'group-design') renderGroupDesign(window.appState.currentGroupId);
+    else if (page === 'group-detail') renderGroupDetail(window.appState.currentGroupId, options);
+    else if (page === 'group-design') renderGroupDesign(window.appState.currentGroupId, options);
     else if (page === 'trash') renderTrashList();
     else if (page === 'categories') renderCategoriesPage();
     else if (page.startsWith('category:')) renderCategoryDetail(page.slice('category:'.length));
     else if (page === 'dashboard') renderDashboard();
+}
+
+function handleSearch(value, options = {}) {
+    window.appState.searchQuery = String(value || '');
+    clearTimeout(searchRenderTimer);
+    const render = () => renderSearchState({ quiet: true });
+    if (options.immediate) render();
+    else searchRenderTimer = setTimeout(render, 120);
+}
+
+function handleSearchKeydown(event) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    handleSearch(event.currentTarget?.value || '', { immediate: true });
 }
 
 function setFilter(filter) {
@@ -1153,7 +898,7 @@ function setGlobalPlatformFilter(platform) {
     if (bar) bar.classList.remove('hidden');
     renderDashboard();
     renderQuickAccountIconFilter?.();
-    document.getElementById('page-content')?.scrollTo?.({ top: 0, behavior: 'smooth' });
+    document.getElementById('page-content')?.scrollTo?.({ top: 0, behavior: document.documentElement.classList.contains('reduced-motion') ? 'auto' : 'smooth' });
 }
 
 function setGlobalTagFilter(tag) {
@@ -1248,6 +993,19 @@ function handleTingAndroidBackButton() {
 }
 
 function closeTransientUiFromBackButton() {
+    if (window.TingFeedback?.handleBack?.()) return true;
+    const masterOverlay = document.getElementById('master-pw-overlay');
+    if (masterOverlay?.classList.contains('open') && masterOverlay.style.display !== 'none') {
+        cancelMasterPasswordDialog?.();
+        return true;
+    }
+
+    const modalOverlay = document.getElementById('modal-overlay');
+    if (modalOverlay?.classList.contains('open')) {
+        closeModal?.();
+        return true;
+    }
+
     const platformPicker = document.getElementById('platform-picker-popover');
     if (platformPicker && !platformPicker.hidden) {
         closePlatformPicker?.();
@@ -1263,18 +1021,6 @@ function closeTransientUiFromBackButton() {
 
     if (document.querySelector('.quick-platform-filter.open')) {
         closeQuickPlatformFilter?.();
-        return true;
-    }
-
-    const masterOverlay = document.getElementById('master-pw-overlay');
-    if (masterOverlay?.classList.contains('open') && masterOverlay.style.display !== 'none') {
-        cancelMasterPasswordDialog?.();
-        return true;
-    }
-
-    const modalOverlay = document.getElementById('modal-overlay');
-    if (modalOverlay?.classList.contains('open')) {
-        closeModal?.();
         return true;
     }
 
@@ -1296,6 +1042,7 @@ function closeSearchBarFromBackButton() {
 }
 
 function navigateBackFromHardwareButton() {
+    if (window.appState.backNavigationInFlight) return true;
     const page = window.appState.currentPage || 'dashboard';
     const stack = Array.isArray(window.appState.navStack) ? window.appState.navStack : [];
     // Ở Tổng quan và không còn lịch sử -> để hệ thống xử lý thoát app
@@ -1306,7 +1053,15 @@ function navigateBackFromHardwareButton() {
         resetNavScroll();
         return true;
     }
-    goBack();
+    window.appState.backNavigationInFlight = true;
+    Promise.resolve(goBack())
+        .catch(error => {
+            console.error('Back navigation failed:', error);
+            showToast?.('Khong the quay lai luc nay', 'error');
+        })
+        .finally(() => {
+            window.appState.backNavigationInFlight = false;
+        });
     return true;
 }
 
@@ -1798,7 +1553,7 @@ async function deleteCategory(categoryId) {
     const category = getCategoryById(categoryId);
     if (!category) return;
     const count = getAccountsForCategory(categoryId).length;
-    if (!confirm(`Xoá danh mục "${category.name}"? ${count ? 'Tài khoản sẽ được gỡ khỏi danh mục này.' : ''}`)) return;
+    if (!await confirmAction({ variant: 'danger', title: 'Xoá danh mục?', message: `Danh mục "${category.name}" sẽ bị xoá.`, details: count ? `${count} tài khoản sẽ được gỡ khỏi danh mục này.` : '', confirmLabel: 'Xoá danh mục' })) return;
 
     if (!await persistCategories(getSortedCategories().filter(item => item.id !== categoryId))) return;
     const affected = (window.appState.accounts || []).filter(acc => getAccountCategoryIds(acc).includes(categoryId));
@@ -1844,47 +1599,9 @@ async function saveAccountCategories(id) {
     }
 }
 
-async function createInlineCategoryFromAddForm() {
-    const input = document.getElementById('inline-category-name');
-    const name = input?.value.trim();
-    if (!name) return;
-    const categories = getSortedCategories();
-    const category = {
-        id: createCategoryId(name),
-        name,
-        icon: 'folder',
-        color: '#6C5CE7',
-        order: categories.length,
-    };
-    if (!await persistCategories([...categories, category])) return;
-    const chip = `<label class="category-picker-chip active">
-        <input type="checkbox" name="add-category-id" value="${escapeJsAttr(category.id)}" checked onchange="this.closest('.category-picker-chip')?.classList.toggle('active', this.checked)">
-        ${renderCategoryIcon(category)}
-        <span class="category-picker-name">${escapeHtml(category.name)}</span>
-    </label>`;
-    const grid = document.querySelector('.category-picker-grid');
-    const empty = document.querySelector('.category-picker-empty');
-    if (grid) grid.insertAdjacentHTML('beforeend', chip);
-    else if (empty) empty.outerHTML = `<div class="category-picker-grid">${chip}</div>`;
-    input.value = '';
-    document.getElementById('inline-category-create-box')?.setAttribute('hidden', '');
-    showToast('Đã tạo danh mục', 'success');
-}
-
 function closeInlineCategoryCreate() {
     const box = document.getElementById('inline-category-create-box');
     if (box) box.hidden = true;
-}
-
-function toggleInlineCategoryCreate(event) {
-    event?.stopPropagation?.();
-    const box = document.getElementById('inline-category-create-box');
-    if (!box) return;
-    box.hidden = !box.hidden;
-    if (!box.hidden) {
-        document.getElementById('inline-category-name')?.focus();
-        setTimeout(() => document.addEventListener('click', closeInlineCategoryCreate, { once: true }), 0);
-    }
 }
 
 function getRevealKey(id, field) {
@@ -2124,7 +1841,7 @@ function scrollToGroupAccountTarget(groupId, accountId) {
     const target = document.getElementById(getGroupAccountTargetId(groupId, accountId));
     if (!target) return false;
     const run = () => {
-        target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        target.scrollIntoView({ behavior: document.documentElement.classList.contains('reduced-motion') ? 'auto' : 'smooth', block: 'center', inline: 'nearest' });
         target.classList.add('group-account-highlight');
         window.setTimeout(() => target.classList.remove('group-account-highlight'), 1800);
     };
@@ -2230,7 +1947,7 @@ async function submitAcceptGroupInvite(groupId) {
 }
 
 async function handleCancelGroupInvite(groupId, email = '') {
-    if (!confirm('Huỷ lời mời này?')) return;
+    if (!await confirmAction({ variant: 'warning', title: 'Huỷ lời mời?', message: 'Người được mời sẽ không thể dùng lời mời hiện tại để tham gia nhóm.', confirmLabel: 'Huỷ lời mời' })) return;
     try {
         await cancelGroupInvite(groupId, email);
         showToast('Đã huỷ lời mời', 'success');
@@ -2240,7 +1957,7 @@ async function handleCancelGroupInvite(groupId, email = '') {
 }
 
 async function handleRemoveGroupMember(groupId, email) {
-    if (!confirm(`Xoá ${email} khỏi nhóm?`)) return;
+    if (!await confirmAction({ variant: 'danger', title: 'Xoá thành viên?', message: `${email} sẽ bị xoá khỏi nhóm.`, confirmLabel: 'Xoá thành viên' })) return;
     try {
         await removeGroupMember(groupId, email);
         showToast('Đã xoá thành viên', 'success');
@@ -2252,7 +1969,7 @@ async function handleRemoveGroupMember(groupId, email) {
 async function handleRenameGroup(groupId) {
     const group = getGroupById?.(groupId);
     if (!group) return;
-    const name = prompt('Tên nhóm mới:', group.name || '');
+    const name = await promptAction({ title: 'Đổi tên nhóm', message: 'Nhập tên mới cho nhóm.', confirmLabel: 'Lưu tên', input: { label: 'Tên nhóm', value: group.name || '', maxLength: 80 }, validate: value => value.trim() ? true : 'Tên nhóm không được để trống' });
     if (name === null) return;
     try {
         await renameGroup(groupId, name);
@@ -2264,7 +1981,7 @@ async function handleRenameGroup(groupId) {
 
 async function handleDeleteGroup(groupId) {
     const group = getGroupById?.(groupId);
-    if (!group || !confirm(`Xoá nhóm "${group.name}"?`)) return;
+    if (!group || !await confirmAction({ variant: 'danger', title: 'Xoá nhóm vĩnh viễn?', message: `Nhóm "${group.name}" và dữ liệu chia sẻ liên quan sẽ bị xoá.`, confirmationText: 'XÓA', confirmationLabel: 'Nhập XÓA để tiếp tục', confirmLabel: 'Xoá nhóm', dismissible: false })) return;
     try {
         await deleteGroup(groupId);
         showToast('Đã xoá nhóm', 'success');
@@ -2274,13 +1991,14 @@ async function handleDeleteGroup(groupId) {
     }
 }
 
-function setGroupDetailTab(tab = 'board') {
+function setGroupDetailTab(tab = 'board', options = {}) {
     const allowed = new Set(['board', 'accounts', 'members', 'settings']);
     window.appState.currentGroupTab = allowed.has(tab) ? tab : 'board';
     // Chuyển tab con ⇒ đặt lại Group_Tab về View_Mode TRƯỚC khi render lại (Req 5.1, 2.3),
     // tránh vô tình để lộ cụm Edit_Control khi quay lại tab "Bảng".
     window.appState.groupEditMode = resetGroupEditState();
-    renderGroupDetail(window.appState.currentGroupId);
+    renderGroupDetail(window.appState.currentGroupId, options);
+    if (typeof finishMobileTabTransition === 'function') finishMobileTabTransition('.group-tabs', window.appState.currentGroupTab, options);
 }
 
 // Bật/tắt Edit_Mode của Group_Tab qua nút bút chì (Edit_Toggle_Button) — Req 2.4, 2.5, 4.7.
@@ -2330,7 +2048,7 @@ async function submitGroupPassword(groupId) {
 async function handleRemoveGroupPassword(groupId) {
     const group = getGroupById?.(groupId);
     if (!group) return;
-    if (!confirm('Gỡ mật khẩu chung? Thành viên sẽ xem tài khoản chia sẻ mà không cần nhập mật khẩu.')) return;
+    if (!await confirmAction({ variant: 'warning', title: 'Gỡ mật khẩu chung?', message: 'Thành viên sẽ xem tài khoản chia sẻ mà không cần nhập mật khẩu.', confirmLabel: 'Gỡ mật khẩu' })) return;
     try {
         await changeGroupSharedPassword(groupId, '');
         showToast('Đã gỡ mật khẩu chung', 'success');
@@ -2487,7 +2205,7 @@ async function handleDeleteGroupCategory(groupId, categoryId) {
     const category = categories.find(item => item.id === categoryId);
     if (!category) return;
     const affected = (window.appState.sharedAccounts?.[groupId] || []).filter(account => account.groupCategoryId === categoryId);
-    if (!confirm(`Xoá danh mục "${category.name}"?${affected.length ? ` ${affected.length} tài khoản sẽ về Tài khoản chưa xếp.` : ''}`)) return;
+    if (!await confirmAction({ variant: 'danger', title: 'Xoá danh mục nhóm?', message: `Danh mục "${category.name}" sẽ bị xoá.`, details: affected.length ? `${affected.length} tài khoản sẽ về Tài khoản chưa xếp.` : '', confirmLabel: 'Xoá danh mục' })) return;
     try {
         const nextCategories = categories.filter(item => item.id !== categoryId).map((item, order) => ({ ...item, order }));
         await updateGroupAccountCategories(groupId, nextCategories);
@@ -2554,6 +2272,11 @@ function initGroupDesignDragHandlers() {
     if (window.appState.groupDesignDragReady) return;
     window.appState.groupDesignDragReady = true;
     document.addEventListener('pointerdown', startGroupDesignDrag);
+    document.addEventListener('click', event => {
+        if (Date.now() >= Number(window.appState.groupDesignSuppressClickUntil || 0)) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+    }, true);
 }
 
 function getGroupDesignCategoryOrderFromDom() {
@@ -2630,10 +2353,10 @@ async function persistGroupDesignCategoryDrag(groupId, previousIds = []) {
     try {
         await updateGroupAccountCategories(groupId, ordered);
         showToast('Đã sắp xếp danh mục', 'success');
-        renderGroupDesign(groupId);
+        renderGroupDesign(groupId, { quiet: true });
     } catch (error) {
         applyGroupCategoriesLocal(groupId, previousCategories);
-        renderGroupDesign(groupId);
+        renderGroupDesign(groupId, { quiet: true });
         showToast(error.message || 'Không sắp xếp được danh mục', 'error');
     }
 }
@@ -2642,20 +2365,18 @@ async function persistGroupDesignAccountDrag(groupId, previousSnapshot = []) {
     const updates = collectGroupDesignAccountUpdates();
     const previousMap = new Map(previousSnapshot.map(item => [item.id, item]));
     const changed = updates.filter(update => !sameGroupDesignAccountPlacement(previousMap, update));
-    if (!changed.length) return;
+    if (!changed.length) {
+        renderGroupDesign(groupId, { quiet: true });
+        return;
+    }
     applyGroupDesignAccountUpdatesLocal(groupId, updates);
     try {
-        await Promise.all(changed.map(update => (
-            updateSharedAccountGroupMeta(groupId, update.id, {
-                groupCategoryId: update.groupCategoryId,
-                groupSortOrder: update.groupSortOrder,
-            })
-        )));
+        await updateSharedAccountGroupMetaBatch(groupId, changed.map(({ id, ...update }) => ({ accountId: id, ...update })));
         showToast('Đã cập nhật sắp xếp tài khoản', 'success');
-        renderGroupDesign(groupId);
+        renderGroupDesign(groupId, { quiet: true });
     } catch (error) {
         restoreGroupDesignAccountSnapshot(groupId, previousSnapshot);
-        renderGroupDesign(groupId);
+        renderGroupDesign(groupId, { quiet: true });
         showToast(error.message || 'Không sắp xếp được tài khoản', 'error');
     }
 }
@@ -2665,7 +2386,7 @@ function clearGroupDesignDropTargets() {
 }
 
 function startGroupDesignDrag(event) {
-    if (window.appState.currentPage !== 'group-design') return;
+    if (window.appState.currentPage !== 'group-design' || window.appState.groupDesignSaving || window.appState.groupDesignDrag) return;
     const handle = event.target.closest?.('[data-drag-handle]');
     const item = handle?.closest?.('[data-design-draggable]');
     if (!handle || !item) return;
@@ -2676,75 +2397,160 @@ function startGroupDesignDrag(event) {
         type,
         groupId,
         item,
+        handle,
         pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        lastX: event.clientX,
+        lastY: event.clientY,
+        active: false,
         moved: false,
+        frameId: null,
+        placeholder: null,
+        originalParent: item.parentElement,
+        originalNextSibling: item.nextSibling,
+        originalStyle: item.getAttribute('style'),
         previousCategoryIds: getGroupDesignCategoryOrderFromDom(),
         previousAccounts: getGroupDesignAccountSnapshot(groupId),
     };
     window.appState.groupDesignDrag = state;
-    item.classList.add('is-dragging');
-    document.body.classList.add('is-group-design-dragging');
+    try { handle.setPointerCapture(event.pointerId); } catch (_) { /* noop */ }
     document.addEventListener('pointermove', moveGroupDesignDrag, { passive: false });
     document.addEventListener('pointerup', finishGroupDesignDrag, { passive: false });
     document.addEventListener('pointercancel', cancelGroupDesignDrag, { passive: false });
+}
+
+function activateGroupDesignDrag(state) {
+    if (state.active) return;
+    const rect = state.item.getBoundingClientRect();
+    state.active = true;
+    state.moved = true;
+    state.offsetX = state.startX - rect.left;
+    state.offsetY = state.startY - rect.top;
+    state.placeholder = document.createElement(state.type === 'category' ? 'section' : 'div');
+    state.placeholder.className = `group-design-placeholder ${state.type}`;
+    state.placeholder.style.height = `${rect.height}px`;
+    state.placeholder.style.width = `${rect.width}px`;
+    state.originalParent.insertBefore(state.placeholder, state.item);
+    document.body.appendChild(state.item);
+    state.item.classList.add('is-dragging');
+    state.item.style.position = 'fixed';
+    state.item.style.left = `${rect.left}px`;
+    state.item.style.top = `${rect.top}px`;
+    state.item.style.width = `${rect.width}px`;
+    state.item.style.height = `${rect.height}px`;
+    state.item.style.zIndex = '10000';
+    state.item.style.pointerEvents = 'none';
+    state.item.style.margin = '0';
+    document.body.classList.add('is-group-design-dragging');
+}
+
+function getGroupDesignAutoScrollSpeed(clientY) {
+    const edge = 72;
+    if (clientY < edge) return -Math.ceil((edge - clientY) / 4);
+    if (clientY > window.innerHeight - edge) return Math.ceil((clientY - (window.innerHeight - edge)) / 4);
+    return 0;
+}
+
+function applyGroupDesignAutoScroll(speed) {
+    if (!speed) return;
+    const content = document.getElementById('page-content');
+    if (content && content.scrollHeight > content.clientHeight + 2) content.scrollTop += speed;
+    else window.scrollBy?.(0, speed);
+}
+
+function processGroupDesignDragFrame(state) {
+    state.frameId = null;
+    if (!state.active || window.appState.groupDesignDrag !== state) return;
+    state.item.style.left = `${state.lastX - state.offsetX}px`;
+    state.item.style.top = `${state.lastY - state.offsetY}px`;
+    const over = document.elementFromPoint(state.lastX, state.lastY);
+    if (over) {
+        if (state.type === 'category') {
+            const list = document.querySelector('[data-design-category-list]');
+            const target = over.closest?.('.group-design-category-card[data-category-id]');
+            if (list && target) {
+                const rect = target.getBoundingClientRect();
+                const before = state.lastY < rect.top + rect.height / 2;
+                list.insertBefore(state.placeholder, before ? target : target.nextSibling);
+            }
+        } else {
+            const zone = over.closest?.('.group-design-account-zone');
+            if (zone) {
+                clearGroupDesignDropTargets();
+                zone.classList.add('is-drop-target');
+                zone.querySelector('.group-design-empty')?.remove();
+                const targetAccount = over.closest?.('.group-design-account[data-account-id]');
+                if (targetAccount && zone.contains(targetAccount)) {
+                    const rect = targetAccount.getBoundingClientRect();
+                    const before = state.lastY < rect.top + rect.height / 2;
+                    zone.insertBefore(state.placeholder, before ? targetAccount : targetAccount.nextSibling);
+                } else if (state.placeholder.parentElement !== zone) {
+                    zone.appendChild(state.placeholder);
+                }
+            }
+        }
+    }
+    const scrollSpeed = getGroupDesignAutoScrollSpeed(state.lastY);
+    applyGroupDesignAutoScroll(scrollSpeed);
+    if (scrollSpeed && window.appState.groupDesignDrag === state) {
+        state.frameId = requestAnimationFrame(() => processGroupDesignDragFrame(state));
+    }
 }
 
 function moveGroupDesignDrag(event) {
     const state = window.appState.groupDesignDrag;
     if (!state || event.pointerId !== state.pointerId) return;
     event.preventDefault();
-    state.moved = true;
-    const over = document.elementFromPoint(event.clientX, event.clientY);
-    if (!over) return;
-
-    if (state.type === 'category') {
-        const list = document.querySelector('[data-design-category-list]');
-        const target = over.closest?.('.group-design-category-card[data-category-id]');
-        if (!list || !target || target === state.item) return;
-        const rect = target.getBoundingClientRect();
-        const before = event.clientY < rect.top + rect.height / 2;
-        list.insertBefore(state.item, before ? target : target.nextSibling);
-        return;
-    }
-
-    if (state.type === 'account') {
-        const zone = over.closest?.('.group-design-account-zone');
-        if (!zone) return;
-        clearGroupDesignDropTargets();
-        zone.classList.add('is-drop-target');
-        zone.querySelector('.group-design-empty')?.remove();
-        const targetAccount = over.closest?.('.group-design-account[data-account-id]:not(.is-dragging)');
-        if (targetAccount && zone.contains(targetAccount)) {
-            const rect = targetAccount.getBoundingClientRect();
-            const before = event.clientY < rect.top + rect.height / 2;
-            zone.insertBefore(state.item, before ? targetAccount : targetAccount.nextSibling);
-        } else if (state.item.parentElement !== zone) {
-            zone.appendChild(state.item);
-        }
-        state.item.dataset.categoryId = zone.dataset.dropCategoryId || '';
-    }
+    state.lastX = event.clientX;
+    state.lastY = event.clientY;
+    if (!state.active && Math.hypot(event.clientX - state.startX, event.clientY - state.startY) < 8) return;
+    activateGroupDesignDrag(state);
+    if (!state.frameId) state.frameId = requestAnimationFrame(() => processGroupDesignDragFrame(state));
 }
 
 async function finishGroupDesignDrag(event) {
     const state = window.appState.groupDesignDrag;
     if (!state || event.pointerId !== state.pointerId) return;
     event.preventDefault();
-    cleanupGroupDesignDrag();
-    if (!state.moved) return;
-    if (state.type === 'category') await persistGroupDesignCategoryDrag(state.groupId, state.previousCategoryIds);
-    else await persistGroupDesignAccountDrag(state.groupId, state.previousAccounts);
+    state.lastX = event.clientX;
+    state.lastY = event.clientY;
+    if (state.active) processGroupDesignDragFrame(state);
+    cleanupGroupDesignDrag(false);
+    if (!state.active || !state.moved) return;
+    window.appState.groupDesignSuppressClickUntil = Date.now() + 360;
+    window.appState.groupDesignSaving = true;
+    try {
+        if (state.type === 'category') await persistGroupDesignCategoryDrag(state.groupId, state.previousCategoryIds);
+        else await persistGroupDesignAccountDrag(state.groupId, state.previousAccounts);
+    } finally {
+        window.appState.groupDesignSaving = false;
+    }
 }
 
 function cancelGroupDesignDrag(event) {
     const state = window.appState.groupDesignDrag;
     if (!state || event.pointerId !== state.pointerId) return;
-    cleanupGroupDesignDrag();
-    renderGroupDesign(state.groupId);
+    cleanupGroupDesignDrag(true);
+    renderGroupDesign(state.groupId, { quiet: true });
 }
 
-function cleanupGroupDesignDrag() {
+function cleanupGroupDesignDrag(cancelled = false) {
     const state = window.appState.groupDesignDrag;
-    if (state?.item) state.item.classList.remove('is-dragging');
+    if (!state) return;
+    if (state.frameId) cancelAnimationFrame(state.frameId);
+    if (state.active && state.item) {
+        const destination = cancelled ? state.originalParent : state.placeholder?.parentElement;
+        const reference = cancelled ? state.originalNextSibling : state.placeholder;
+        if (destination) destination.insertBefore(state.item, reference && reference.parentElement === destination ? reference : null);
+        state.placeholder?.remove();
+        state.item.classList.remove('is-dragging');
+        if (state.originalStyle == null) state.item.removeAttribute('style');
+        else state.item.setAttribute('style', state.originalStyle);
+    }
+    try {
+        if (state.handle?.hasPointerCapture?.(state.pointerId)) state.handle.releasePointerCapture(state.pointerId);
+    } catch (_) { /* noop */ }
     window.appState.groupDesignDrag = null;
     clearGroupDesignDropTargets();
     document.body.classList.remove('is-group-design-dragging');
@@ -2837,7 +2643,7 @@ async function handleRemoveSharedAccount(groupId, accountId) {
         showToast('Không có quyền gỡ tài khoản này', 'error');
         return;
     }
-    if (!confirm('Gỡ tài khoản này khỏi nhóm?')) return;
+    if (!await confirmAction({ variant: 'danger', title: 'Gỡ tài khoản khỏi nhóm?', message: 'Tài khoản sẽ không còn được chia sẻ trong nhóm này.', confirmLabel: 'Gỡ khỏi nhóm' })) return;
     try {
         await removeSharedAccount(groupId, accountId);
         delete window.appState.decryptedSharedAccounts?.[getSharedAccountCacheKey(groupId, accountId)];
@@ -2857,6 +2663,8 @@ function renderSharedAccountEditForm(group, account, decrypted) {
     defaultExpiry.setDate(defaultExpiry.getDate() + 30);
     const defaultExpiryValue = dateToInputValue(defaultExpiry);
     const purchaseValue = account.purchaseDate || today;
+    const purchaseTimeValue = (typeof getAccountPurchaseTime === 'function' ? getAccountPurchaseTime(account) : account.purchaseTime)
+        || (typeof formatLocalTimeInput === 'function' ? formatLocalTimeInput() : '');
     const expiryValue = account.expiryDate || defaultExpiryValue;
     const isLifetime = account.expiryType === 'lifetime';
     const rawValue = [decrypted?.username, decrypted?.password, decrypted?.twoFaCode].filter(Boolean).join('|');
@@ -2870,6 +2678,7 @@ function renderSharedAccountEditForm(group, account, decrypted) {
         <div class="form-section-title">Thời hạn</div>
         <input type="text" id="add-smart-date" class="input smart-date-input" value="${isLifetime ? 'Vĩnh viễn' : '30 ngày'}" placeholder="30 ngày, 28/04 30, 28/04 > 28/05" oninput="applySmartDateInput(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();applySmartDateInput(this.value)}">
         <input type="hidden" id="add-purchase" value="${escapeHtml(purchaseValue)}">
+        <input type="hidden" id="add-purchase-time" value="${escapeHtml(purchaseTimeValue)}">
         <input type="hidden" id="add-expiry" value="${escapeHtml(expiryValue)}">
         <div id="add-expiry-hint" class="quick-date-hint smart-date-preview"></div>
         <div class="smart-date-options">
@@ -2877,8 +2686,9 @@ function renderSharedAccountEditForm(group, account, decrypted) {
             <label class="quick-lifetime"><input type="checkbox" id="add-lifetime" onchange="handleAddLifetimeToggle(this)" ${isLifetime ? 'checked' : ''}> Vĩnh viễn</label>
         </div>
         <div id="smart-date-details" class="smart-date-details">
-            <div class="quick-date-grid">
+            <div class="quick-date-grid purchase-date-grid">
                 <div class="quick-date-field"><label>Ngày mua</label><input type="date" id="add-purchase-detail" class="input" value="${escapeHtml(purchaseValue)}" onchange="setAddPurchaseDate(this.value)"></div>
+                <div class="quick-date-field"><label>Giờ mua</label><input type="time" id="add-purchase-time-detail" class="input" value="${escapeHtml(purchaseTimeValue)}" onchange="document.getElementById('add-purchase-time').value=this.value"></div>
                 <div class="quick-date-field"><label>Ngày hết hạn</label><input type="date" id="add-expiry-detail" class="input" value="${escapeHtml(expiryValue)}" onchange="setExpiryDate(inputValueToDate(this.value), 'tuỳ chỉnh')"></div>
             </div>
         </div>
@@ -2926,6 +2736,9 @@ function collectSharedAccountEditInput(groupId, accountId) {
     if (!name) return { ok: false, message: 'Nhập tên dịch vụ' };
     const isLifetime = document.getElementById('add-lifetime')?.checked === true;
     const purchaseDate = document.getElementById('add-purchase')?.value || account?.purchaseDate || todayStr();
+    const purchaseTime = document.getElementById('add-purchase-time')?.value
+        || (typeof getAccountPurchaseTime === 'function' ? getAccountPurchaseTime(account) : account?.purchaseTime)
+        || (typeof formatLocalTimeInput === 'function' ? formatLocalTimeInput() : '');
     const expiryDate = isLifetime ? null : (document.getElementById('add-expiry')?.value || account?.expiryDate || '');
     if (!isLifetime && !expiryDate) return { ok: false, message: 'Chọn ngày hết hạn hoặc bật Vĩnh viễn' };
     const username = parsed.username || decrypted.username || '';
@@ -2944,6 +2757,7 @@ function collectSharedAccountEditInput(groupId, accountId) {
             serviceName: name,
             platform,
             purchaseDate,
+            purchaseTime,
             expiryDate,
             expiryType: isLifetime ? 'lifetime' : 'fixed',
             status: getStatusFromExpiry(expiryDate, isLifetime ? 'lifetime' : 'fixed'),
@@ -2990,7 +2804,7 @@ async function submitSharedAccountEdit(groupId, accountId) {
 
 async function handleAcceptSharedEditRequest(groupId, requestId) {
     const request = getSharedEditRequestById?.(groupId, requestId);
-    if (!request || !confirm('Duyệt thay đổi này?')) return;
+    if (!request || !await confirmAction({ variant: 'info', title: 'Duyệt thay đổi?', message: 'Dữ liệu tài khoản chia sẻ sẽ được cập nhật theo yêu cầu này.', confirmLabel: 'Duyệt thay đổi' })) return;
     try {
         await acceptSharedEditRequest(groupId, requestId);
         if (request.accountId) delete window.appState.decryptedSharedAccounts?.[getSharedAccountCacheKey(groupId, request.accountId)];
@@ -3001,7 +2815,7 @@ async function handleAcceptSharedEditRequest(groupId, requestId) {
 }
 
 async function handleRejectSharedEditRequest(groupId, requestId) {
-    if (!confirm('Từ chối yêu cầu sửa này?')) return;
+    if (!await confirmAction({ variant: 'warning', title: 'Từ chối yêu cầu?', message: 'Các thay đổi được đề xuất sẽ không được áp dụng.', confirmLabel: 'Từ chối' })) return;
     try {
         await rejectSharedEditRequest(groupId, requestId);
         showToast('Đã từ chối yêu cầu', 'success');
@@ -3246,7 +3060,7 @@ async function setLinkedAccountForExisting(accId, linkedId) {
 async function unlinkAccount(accId) {
     const acc = (window.appState.accounts || []).find(item => item.id === accId);
     if (!acc) return;
-    if (!confirm('Gỡ liên kết TK gốc cho tài khoản này?')) return;
+    if (!await confirmAction({ variant: 'warning', title: 'Gỡ liên kết tài khoản gốc?', message: 'Tài khoản này sẽ không còn dùng thông tin đăng nhập từ tài khoản gốc.', confirmLabel: 'Gỡ liên kết' })) return;
 
     if (window.appState.isDemo) {
         acc.linkedAccountId = null;
@@ -3529,7 +3343,7 @@ function previewParse() {
     if (smart && typeof applySmartPasteMetadata === 'function') applySmartPasteMetadata(smart);
     if (!el) return;
     if (!r || (!r.username && !r.password)) { el.innerHTML = ''; return; }
-    el.innerHTML = `<div class="parse-preview"><div class="parse-preview-item"><span class="parse-preview-label">Tài khoản</span><span class="parse-preview-value">${r.username || '—'}</span></div><div class="parse-preview-item"><span class="parse-preview-label">Mật khẩu</span><span class="parse-preview-value">${r.password || '—'}</span></div>${r.twoFaCode ? `<div class="parse-preview-item"><span class="parse-preview-label">2FA</span><span class="parse-preview-value">${r.twoFaCode}</span></div>` : ''}</div>`;
+    el.innerHTML = `<div class="parse-preview"><div class="parse-preview-item"><span class="parse-preview-label">Tài khoản</span><span class="parse-preview-value">${escapeHtml(r.username || '—')}</span></div><div class="parse-preview-item"><span class="parse-preview-label">Mật khẩu</span><span class="parse-preview-value">${escapeHtml(r.password || '—')}</span></div>${r.twoFaCode ? `<div class="parse-preview-item"><span class="parse-preview-label">2FA</span><span class="parse-preview-value">${escapeHtml(r.twoFaCode)}</span></div>` : ''}</div>`;
 }
 
 // Tự nhận diện người bán / nguồn từ link dán vào ô "Dán thông tin tài khoản"
@@ -3842,11 +3656,11 @@ function deletePlanTag(platformId, tag) {
     showToast(`Đã xoá "${tag}"`, 'success');
 }
 
-function renamePlanTag(platformId, oldTag) {
+async function renamePlanTag(platformId, oldTag) {
     if (!platformId || !oldTag) return;
     const tags = window.PLATFORM_PLAN_TAGS?.[platformId];
     if (!Array.isArray(tags)) return;
-    const newTag = prompt(`Đổi tên gói cước "${oldTag}" thành:`, oldTag);
+    const newTag = await promptAction({ title: 'Đổi tên gói cước', message: `Đổi tên gói "${oldTag}".`, confirmLabel: 'Lưu tên', input: { label: 'Tên gói cước', value: oldTag, maxLength: 60 }, validate: value => value.trim() ? true : 'Tên gói cước không được để trống' });
     if (!newTag || newTag.trim() === oldTag) return;
     const trimmed = newTag.trim();
     const oldKey = typeof normalizeTagKey === 'function' ? normalizeTagKey(oldTag) : oldTag.toLowerCase();
@@ -4424,6 +4238,10 @@ function buildAccountSaveInput(input = {}) {
 
     const isL = input.isLifetime === true || input.expiryType === 'lifetime';
     const purchaseDate = normalizeSaveDate(input.purchaseDate || todayStr(), todayStr());
+    const currentLocalTime = typeof formatLocalTimeInput === 'function' ? formatLocalTimeInput() : '';
+    const purchaseTime = typeof normalizeTimeInput === 'function'
+        ? normalizeTimeInput(input.purchaseTime, currentLocalTime)
+        : (String(input.purchaseTime || '').trim() || currentLocalTime);
     const hasExpiryQuick = input.expiryQuick !== undefined || input.duration !== undefined || input.expiryDays !== undefined;
     const quickExpiry = input.expiryQuick ?? input.duration ?? input.expiryDays;
     let expiryDate = isL ? null : normalizeSaveDate(input.expiryDate || '', '');
@@ -4476,6 +4294,7 @@ function buildAccountSaveInput(input = {}) {
             purchasePrice: (typeof parsePriceValue === 'function' ? parsePriceValue(input.purchasePrice) : (input.purchasePrice || null)) ?? null,
             displayUsername: maskUsername(sensitiveData.username),
             purchaseDate,
+            purchaseTime,
             expiryDate: expiryDate || null,
             expiryType: isL ? 'lifetime' : 'fixed',
             status: getStatusFromExpiry(expiryDate, isL ? 'lifetime' : 'fixed'),
@@ -4570,6 +4389,8 @@ async function saveNewAccount(type) {
     }
     const isL = document.getElementById('add-lifetime').checked;
     const pDate = document.getElementById('add-purchase').value || todayStr();
+    const pTime = document.getElementById('add-purchase-time')?.value
+        || (typeof formatLocalTimeInput === 'function' ? formatLocalTimeInput() : '');
     const eDate = isL ? null : document.getElementById('add-expiry').value;
     if (!isL && !eDate) {
         goAddTab?.(2, { manual: true });
@@ -4606,6 +4427,7 @@ async function saveNewAccount(type) {
         purchasePrice: purchasePrice ?? null,
         displayUsername: maskUsername(sensitiveData.username),
         purchaseDate: pDate,
+        purchaseTime: pTime,
         expiryDate: eDate || null,
         expiryType: isL ? 'lifetime' : 'fixed',
         status: getStatusFromExpiry(eDate, isL ? 'lifetime' : 'fixed'),
@@ -4660,10 +4482,8 @@ async function deleteAccount(accId) {
 async function moveAccountToTrash(id) {
     const acc = window.appState.accounts.find(a => a.id === id);
     const linkedServices = typeof getLinkedServices === 'function' ? getLinkedServices(id) : [];
-    const warning = linkedServices.length
-        ? `\n\nCó ${linkedServices.length} dịch vụ đang đăng nhập bằng TK này.`
-        : '';
-    if (!confirm(`Chuyển tài khoản này vào thùng rác? Bạn có thể khôi phục lại sau.${warning}`)) return;
+    const warning = linkedServices.length ? `Có ${linkedServices.length} dịch vụ đang đăng nhập bằng tài khoản này.` : '';
+    if (!await confirmAction({ variant: 'danger', title: 'Chuyển vào thùng rác?', message: 'Bạn có thể khôi phục lại tài khoản này sau.', details: warning, confirmLabel: 'Chuyển vào thùng rác' })) return;
     if (window.appState.isDemo) {
         if (!acc) return;
         window.appState.accounts = window.appState.accounts.filter(a => a.id !== id);
@@ -5338,7 +5158,7 @@ async function handleResetMasterPassword() {
         showToast('Demo không reset Master PIN', 'error');
         return;
     }
-    const okToReset = confirm('Reset Master PIN sẽ xoá khoá hiện tại. Dữ liệu đã mã hoá bằng mã cũ có thể cần mã cũ để giải mã lại. Tiếp tục?');
+    const okToReset = await confirmAction({ variant: 'danger', title: 'Reset Master PIN?', message: 'Khoá hiện tại sẽ bị xoá và không thể hoàn tác.', details: 'Dữ liệu đã mã hoá bằng mã cũ có thể vẫn cần mã cũ để giải mã lại.', confirmationText: 'RESET', confirmationLabel: 'Nhập RESET để tiếp tục', confirmLabel: 'Reset Master PIN', dismissible: false });
     if (!okToReset) return;
 
     window.appState.masterChangeInProgress = true;

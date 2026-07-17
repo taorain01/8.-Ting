@@ -58,6 +58,9 @@ firebase-service-account*.json
 # Local workflow notes and private setup files
 workflow/
 
+# Spec files — local planning docs, KHÔNG push lên GitHub
+docs/spec-*.md
+
 # Editor directories and files
 .idea
 .vscode

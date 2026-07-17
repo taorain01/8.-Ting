@@ -230,6 +230,7 @@ const MIME_TYPES = {
   '.svg': 'image/svg+xml',
   '.txt': 'text/plain; charset=utf-8',
 };
+const CONTENT_SECURITY_POLICY = "default-src 'self'; script-src 'self' https://www.gstatic.com; script-src-attr 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://raw.githubusercontent.com https://api.github.com; frame-src 'self' https://*.firebaseapp.com https://accounts.google.com; media-src 'self' data: blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self' https://accounts.google.com";
 
 function isNavigationAbort(error) {
   const message = error?.message || String(error || '');
@@ -317,6 +318,9 @@ function createLocalServer() {
       res.writeHead(200, {
         'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
         'Cache-Control': 'no-store',
+        'Content-Security-Policy': CONTENT_SECURITY_POLICY,
+        'X-Content-Type-Options': 'nosniff',
+        'Referrer-Policy': 'no-referrer',
       });
       logRequest(200, path.relative(APP_ROOT, filePath));
       fs.createReadStream(filePath).pipe(res);

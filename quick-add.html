@@ -2,6 +2,7 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; form-action 'self'">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ting! Thêm nhanh</title>
   <link rel="stylesheet" href="css/quick-add.css">
@@ -90,6 +91,10 @@
             <input id="quick-purchase" type="date">
           </label>
           <label class="quick-field">
+            <span class="quick-label">Giờ mua</span>
+            <input id="quick-purchase-time" type="time">
+          </label>
+          <label class="quick-field">
             <span class="quick-label">Ngày hết hạn</span>
             <input id="quick-expiry" type="date">
           </label>
@@ -130,6 +135,7 @@
         smartDate: document.getElementById('quick-smart-date'),
         lifetime: document.getElementById('quick-lifetime'),
         purchase: document.getElementById('quick-purchase'),
+        purchaseTime: document.getElementById('quick-purchase-time'),
         expiry: document.getElementById('quick-expiry'),
         preview: document.getElementById('quick-parse-preview'),
         platform: document.getElementById('quick-platform-chip'),
@@ -218,6 +224,11 @@
       function todayIso() {
         const now = new Date();
         return dateToInputValue(now);
+      }
+
+      function currentTimeInput() {
+        const now = new Date();
+        return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
       }
 
       function dateToInputValue(date) {
@@ -620,6 +631,7 @@
         els.name.dataset.autoFilled = '';
         els.lifetime.dataset.userTouched = '';
         els.purchase.value = todayIso();
+        els.purchaseTime.value = currentTimeInput();
         els.smartDate.value = '30 ngày';
         applySmartDateInput();
         renderQuickContext();
@@ -677,6 +689,7 @@
           rawInput: els.raw.value,
           type: els.type.value,
           purchaseDate: els.purchase.value,
+          purchaseTime: els.purchaseTime.value,
           expiryDate: els.expiry.value,
           expiryQuick: els.smartDate.value,
           isLifetime: els.lifetime.checked,

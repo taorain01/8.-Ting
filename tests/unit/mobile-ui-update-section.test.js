@@ -41,7 +41,7 @@ function loadMobileUi(windowOverrides = {}) {
   const pageContent = makeStubElement();
   const windowObj = Object.assign({
     appState: {
-      appVersion: '1.6.0',
+      appVersion: '1.7.0',
       updateStatus: null,
       updateLog: [],
       settings: { theme: 'system' },
@@ -89,14 +89,14 @@ describe('mobile Settings update section', () => {
     exports.renderSettings();
 
     expect(pageContent.innerHTML).toContain('Phiên bản');
-    expect(pageContent.innerHTML).toContain('Ting! v1.6.0');
+    expect(pageContent.innerHTML).toContain('Ting! v1.7.0');
     expect(pageContent.innerHTML).toContain('Kiểm tra');
   });
 
   it('shows Update button when Android update is available', () => {
     const { exports } = loadMobileUi({
       appState: {
-        appVersion: '1.6.0',
+        appVersion: '1.7.0',
         updateStatus: { status: 'update-available', info: { latestVersion: '1.3.10', releaseNotes: 'Fix' } },
         updateLog: [],
         settings: { theme: 'system' },
@@ -113,10 +113,10 @@ describe('mobile Settings update section', () => {
   it('hides same-version release info when already up to date', () => {
     const { exports } = loadMobileUi({
       appState: {
-        appVersion: '1.6.0',
+        appVersion: '1.7.0',
         updateStatus: {
           status: 'up-to-date',
-          info: { latestVersion: '1.6.0', releaseNotes: '<p>Current release notes</p>' },
+          info: { latestVersion: '1.7.0', releaseNotes: '<p>Current release notes</p>' },
         },
         updateLog: [],
         settings: { theme: 'system' },

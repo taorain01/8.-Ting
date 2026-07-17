@@ -193,6 +193,22 @@ describe('renderQuickEditSection — số ô chỉnh sửa theo Auth_Method', ()
 });
 
 describe('renderDetail — vị trí nút Sửa nhanh & giữ nguyên các nút hành động', () => {
+  it('chỉ hiện giờ mua trong chi tiết, không đưa giờ ra thông tin thẻ danh sách', () => {
+    const acc = makeBoughtAccount({ id: 'acc-time', purchaseTime: '14:35' });
+    const { sandbox, elements } = loadUi({
+      appState: { accounts: [acc], trashAccounts: [], settings: {} },
+    });
+
+    sandbox.renderDetail('acc-time');
+    const detailHtml = elements['page-content'].innerHTML;
+    const cardDetailsHtml = sandbox.renderAccountCardDetails(acc, '30 ngày');
+
+    expect(detailHtml).toContain('Giờ mua');
+    expect(detailHtml).toContain('14:35');
+    expect(cardDetailsHtml).not.toContain('Giờ mua');
+    expect(cardDetailsHtml).not.toContain('14:35');
+  });
+
   it('Chế độ xem: nút Sửa nhanh đặt liền trước "✏️ Sửa", giữ nút Chia sẻ/Sửa/Xoá và nút mắt/copy', () => {
     const acc = makePersonalEncryptedAccount({ id: 'acc-view' });
     const { sandbox, elements } = loadUi({

@@ -2,7 +2,8 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com; script-src-attr 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseapp.com https://raw.githubusercontent.com https://api.github.com; frame-src 'self' https://*.firebaseapp.com https://accounts.google.com; media-src 'self' data: blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self' https://accounts.google.com">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
     <meta name="description" content="Ting! - Quản lý tài khoản thông minh, bảo mật, đồng bộ cloud">
     <meta name="theme-color" content="#6C5CE7">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -184,12 +185,14 @@
             <div class="search-filter-row">
                 <div class="search-input-wrap">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-                    <input type="text" id="search-input" class="search-input" placeholder="Tìm tài khoản..." oninput="handleSearch(this.value)">
-                    <button class="search-clear" onclick="clearSearch()">
+                    <input type="text" id="search-input" class="search-input" placeholder="Tìm tài khoản..." oninput="handleSearch(this.value)" onkeydown="handleSearchKeydown(event)">
+                    <button type="button" class="search-clear" onclick="clearSearch()" aria-label="Xóa nội dung tìm kiếm">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
                 </div>
-                <div id="quick-platform-filter" class="quick-platform-filter" aria-label="Lọc nhanh theo dịch vụ"></div>
+                <div class="search-actions">
+                    <div id="quick-platform-filter" class="quick-platform-filter" aria-label="Lọc nhanh theo dịch vụ"></div>
+                </div>
             </div>
         </div>
 
@@ -345,6 +348,7 @@
     <script src="js/shared/platform-detector.js"></script>
     <script src="js/mobile-updater.js"></script>
     <script src="js/background-check.js"></script>
+    <script src="js/dialogs.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/crypto.js"></script>
     <script src="js/db.js"></script>

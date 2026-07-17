@@ -70,11 +70,18 @@ function updateHeader() {
 
     // Avatar: ảnh Google hoặc chữ cái đầu
     const avatarEl = document.getElementById('header-avatar');
+    avatarEl.replaceChildren();
     if (user.avatar) {
-        avatarEl.innerHTML = `<img src="${user.avatar}" style="width:100%;height:100%;border-radius:50%;object-fit:cover" alt="">`;
+        const image = document.createElement('img');
+        image.src = String(user.avatar);
+        image.alt = '';
+        image.style.cssText = 'width:100%;height:100%;border-radius:50%;object-fit:cover';
+        avatarEl.appendChild(image);
     } else {
         const initial = user.name.charAt(0).toUpperCase();
-        avatarEl.innerHTML = `<span>${initial}</span>`;
+        const fallback = document.createElement('span');
+        fallback.textContent = initial;
+        avatarEl.appendChild(fallback);
     }
 
     // Badge thông báo
@@ -354,9 +361,9 @@ function previewParse() {
     if (!result || (!result.username && !result.password)) { el.innerHTML = ''; return; }
     el.innerHTML = `
         <div class="parse-preview">
-            <div class="parse-preview-item"><span class="parse-preview-label">Tài khoản</span><span class="parse-preview-value">${result.username || '—'}</span></div>
-            <div class="parse-preview-item"><span class="parse-preview-label">Mật khẩu</span><span class="parse-preview-value">${result.password || '—'}</span></div>
-            ${result.twoFaCode ? `<div class="parse-preview-item"><span class="parse-preview-label">2FA</span><span class="parse-preview-value">${result.twoFaCode}</span></div>` : ''}
+            <div class="parse-preview-item"><span class="parse-preview-label">Tài khoản</span><span class="parse-preview-value">${escapeHtml(result.username || '—')}</span></div>
+            <div class="parse-preview-item"><span class="parse-preview-label">Mật khẩu</span><span class="parse-preview-value">${escapeHtml(result.password || '—')}</span></div>
+            ${result.twoFaCode ? `<div class="parse-preview-item"><span class="parse-preview-label">2FA</span><span class="parse-preview-value">${escapeHtml(result.twoFaCode)}</span></div>` : ''}
         </div>`;
 }
 

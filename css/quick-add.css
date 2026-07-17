@@ -106,10 +106,15 @@ textarea {
 }
 
 .quick-grid,
-.quick-secondary-grid,
-.quick-date-grid {
+.quick-secondary-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.quick-date-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 

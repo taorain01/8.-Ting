@@ -12,10 +12,11 @@
     if (window.__tingSmoothUX) return;
     window.__tingSmoothUX = true;
 
+    var reducedMotionQuery = null;
     var prefersReduced = false;
     try {
-        prefersReduced = window.matchMedia &&
-            window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        reducedMotionQuery = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+        prefersReduced = Boolean(reducedMotionQuery?.matches);
     } catch (e) { prefersReduced = false; }
 
     var supportsIO = typeof window.IntersectionObserver === 'function';
@@ -27,7 +28,6 @@
 
     // Selector các phần tử được "hé lộ" khi cuộn tới
     var REVEAL_SELECTOR = [
-        '.account-card', '.d-account-card',
         '.summary-card', '.d-summary-card',
         '.account-group', '.detail-section',
         '.quick-filter-result-head', '.d-alert-banner'
@@ -39,18 +39,36 @@
 
     // ---------- Reveal on scroll ----------
     var revealObserver = null;
-    if (supportsIO && !prefersReduced) {
-        revealObserver = new IntersectionObserver(function (entries) {
+    function createRevealObserver() {
+        if (!supportsIO || prefersReduced) return null;
+        return new IntersectionObserver(function (entries) {
             for (var i = 0; i < entries.length; i++) {
                 var en = entries[i];
                 if (en.isIntersecting) {
                     en.target.classList.add('in-view');
-                    revealObserver.unobserve(en.target);
+                    revealObserver?.unobserve?.(en.target);
                 }
             }
         }, { root: null, rootMargin: '0px 0px -8% 0px', threshold: 0.04 });
     }
-
+    revealObserver = createRevealObserver();
+    function updateReducedMotion(next) {
+        var changed = prefersReduced !== Boolean(next);
+        prefersReduced = Boolean(next);
+        document.documentElement.classList.toggle('reduced-motion', prefersReduced);
+        if (prefersReduced) {
+            revealObserver?.disconnect?.();
+            revealObserver = null;
+        } else if (!revealObserver) {
+            revealObserver = createRevealObserver();
+        }
+        if (changed && prefersReduced) {
+            document.querySelectorAll('.reveal-init').forEach(function (el) { el.classList.add('in-view'); });
+        }
+    }
+    if (reducedMotionQuery?.addEventListener) reducedMotionQuery.addEventListener('change', function (event) { updateReducedMotion(event.matches); });
+    else if (reducedMotionQuery?.addListener) reducedMotionQuery.addListener(function (event) { updateReducedMotion(event.matches); });
+    updateReducedMotion(prefersReduced);
     function markReveal(el, instant) {
         if (!el || el.__revealBound) return;
         el.__revealBound = true;
@@ -77,12 +95,24 @@
         }
     }
 
+    function scanRevealNodes(nodes, instant) {
+        for (var i = 0; i < nodes.length; i++) {
+            var node = nodes[i];
+            if (node.nodeType !== 1 || node.matches('.ripple, .toast-progress, .page-enter')) continue;
+            var quiet = Boolean(node.closest?.('.search-results-quiet, .group-detail-quiet') || node.matches('.search-results-quiet, .group-detail-quiet'));
+            if (node.matches(REVEAL_SELECTOR)) markReveal(node, instant || quiet);
+            node.querySelectorAll?.(REVEAL_SELECTOR).forEach(function (el) { markReveal(el, instant || quiet); });
+        }
+    }
+
     // Theo dõi #page-content để quét lại sau mỗi lần render.
     // Nếu render dồn dập (vd gõ tìm kiếm) → hiện ngay, không animate để tránh chớp.
     var rescanQueued = false;
     var lastScanAt = 0;
     var BURST_MS = 500;
-    function queueRescan() {
+    var pendingRevealNodes = [];
+    function queueRescan(nodes) {
+        if (nodes?.length) pendingRevealNodes.push.apply(pendingRevealNodes, nodes);
         if (rescanQueued) return;
         rescanQueued = true;
         requestAnimationFrame(function () {
@@ -90,7 +120,8 @@
             var now = Date.now();
             var instant = (now - lastScanAt) < BURST_MS;
             lastScanAt = now;
-            scanReveal(null, instant);
+            var nodes = pendingRevealNodes.splice(0);
+            if (nodes.length) scanRevealNodes(nodes, instant);
         });
     }
 
@@ -98,7 +129,15 @@
         var pc = document.getElementById('page-content');
         if (!pc) return;
         try {
-            var mo = new MutationObserver(function () { queueRescan(); });
+            var mo = new MutationObserver(function (records) {
+                var added = [];
+                records.forEach(function (record) {
+                    record.addedNodes.forEach(function (node) {
+                        if (node.nodeType === 1 && !node.matches('.ripple, .toast-progress, .page-enter')) added.push(node);
+                    });
+                });
+                if (added.length) queueRescan(added);
+            });
             mo.observe(pc, { childList: true, subtree: true });
         } catch (e) { /* ignore */ }
         lastScanAt = Date.now();
@@ -106,14 +145,17 @@
     }
 
     // ---------- Hiệu ứng chuyển trang ----------
+    var pageEnterTimer = null;
     function playPageEnter() {
         if (prefersReduced) return;
         var pc = document.getElementById('page-content');
         if (!pc) return;
         pc.classList.remove('page-enter');
-        // reflow để restart animation
-        void pc.offsetWidth;
-        pc.classList.add('page-enter');
+        clearTimeout(pageEnterTimer);
+        requestAnimationFrame(function () {
+            pc.classList.add('page-enter');
+            pageEnterTimer = setTimeout(function () { pc.classList.remove('page-enter'); }, 220);
+        });
     }
 
     function wrapNavigation() {
@@ -139,8 +181,7 @@
         if (!target) return;
         // Đảm bảo có thể chứa ripple tuyệt đối
         var cs = window.getComputedStyle(target);
-        if (cs.position === 'static') target.style.position = 'relative';
-        if (cs.overflow === 'visible') target.style.overflow = 'hidden';
+        var needsHost = cs.position === 'static' || cs.overflow === 'visible';
         var rect = target.getBoundingClientRect();
         var size = Math.max(rect.width, rect.height);
         var span = document.createElement('span');
@@ -150,14 +191,18 @@
         var cy = (e.clientY != null ? e.clientY : rect.top + rect.height / 2) - rect.top - size / 2;
         span.style.left = cx + 'px';
         span.style.top = cy + 'px';
+        if (needsHost) target.classList.add('ripple-host');
         target.appendChild(span);
-        setTimeout(function () { if (span.parentNode) span.parentNode.removeChild(span); }, 620);
+        setTimeout(function () {
+            if (span.parentNode) span.parentNode.removeChild(span);
+            if (needsHost && !target.querySelector('.ripple')) target.classList.remove('ripple-host');
+        }, 620);
     }
 
     // ---------- Haptics nhẹ ----------
     var HAPTIC_SELECTOR = '.copy-btn, .fab, .nav-item, .d-nav-item, .renew-btn';
     function tinyHaptic(e) {
-        if (!canVibrate || !isTouch) return;
+        if (prefersReduced || !canVibrate || !isTouch) return;
         var t = e.target && e.target.closest ? e.target.closest(HAPTIC_SELECTOR) : null;
         if (!t) return;
         try { navigator.vibrate(9); } catch (err) { /* ignore */ }

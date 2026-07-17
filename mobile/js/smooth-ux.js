@@ -12,10 +12,11 @@
     if (window.__tingSmoothUX) return;
     window.__tingSmoothUX = true;
 
+    var reducedMotionQuery = null;
     var prefersReduced = false;
     try {
-        prefersReduced = window.matchMedia &&
-            window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        reducedMotionQuery = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+        prefersReduced = Boolean(reducedMotionQuery?.matches);
     } catch (e) { prefersReduced = false; }
 
     var supportsIO = typeof window.IntersectionObserver === 'function';
@@ -27,7 +28,6 @@
 
     // Selector các phần tử được "hé lộ" khi cuộn tới
     var REVEAL_SELECTOR = [
-        '.account-card', '.d-account-card',
         '.summary-card', '.d-summary-card',
         '.account-group', '.detail-section',
         '.quick-filter-result-head', '.d-alert-banner'
@@ -39,17 +39,36 @@
 
     // ---------- Reveal on scroll ----------
     var revealObserver = null;
-    if (supportsIO && !prefersReduced) {
-        revealObserver = new IntersectionObserver(function (entries) {
+    function createRevealObserver() {
+        if (!supportsIO || prefersReduced) return null;
+        return new IntersectionObserver(function (entries) {
             for (var i = 0; i < entries.length; i++) {
                 var en = entries[i];
                 if (en.isIntersecting) {
                     en.target.classList.add('in-view');
-                    revealObserver.unobserve(en.target);
+                    revealObserver?.unobserve?.(en.target);
                 }
             }
         }, { root: null, rootMargin: '0px 0px -8% 0px', threshold: 0.04 });
     }
+    revealObserver = createRevealObserver();
+    function updateReducedMotion(next) {
+        var changed = prefersReduced !== Boolean(next);
+        prefersReduced = Boolean(next);
+        document.documentElement.classList.toggle('reduced-motion', prefersReduced);
+        if (prefersReduced) {
+            revealObserver?.disconnect?.();
+            revealObserver = null;
+        } else if (!revealObserver) {
+            revealObserver = createRevealObserver();
+        }
+        if (changed && prefersReduced) {
+            document.querySelectorAll('.reveal-init').forEach(function (el) { el.classList.add('in-view'); });
+        }
+    }
+    if (reducedMotionQuery?.addEventListener) reducedMotionQuery.addEventListener('change', function (event) { updateReducedMotion(event.matches); });
+    else if (reducedMotionQuery?.addListener) reducedMotionQuery.addListener(function (event) { updateReducedMotion(event.matches); });
+    updateReducedMotion(prefersReduced);
 
     function markReveal(el, instant) {
         if (!el || el.__revealBound) return;
@@ -77,12 +96,24 @@
         }
     }
 
+    function scanRevealNodes(nodes, instant) {
+        for (var i = 0; i < nodes.length; i++) {
+            var node = nodes[i];
+            if (node.nodeType !== 1 || node.matches('.ripple, .toast-progress, .page-enter')) continue;
+            var quiet = Boolean(node.closest?.('.search-results-quiet, .group-detail-quiet') || node.matches('.search-results-quiet, .group-detail-quiet'));
+            if (node.matches(REVEAL_SELECTOR)) markReveal(node, instant || quiet);
+            node.querySelectorAll?.(REVEAL_SELECTOR).forEach(function (el) { markReveal(el, instant || quiet); });
+        }
+    }
+
     // Theo dõi #page-content để quét lại sau mỗi lần render.
     // Nếu render dồn dập (vd gõ tìm kiếm) → hiện ngay, không animate để tránh chớp.
     var rescanQueued = false;
     var lastScanAt = 0;
     var BURST_MS = 500;
-    function queueRescan() {
+    var pendingRevealNodes = [];
+    function queueRescan(nodes) {
+        if (nodes?.length) pendingRevealNodes.push.apply(pendingRevealNodes, nodes);
         if (rescanQueued) return;
         rescanQueued = true;
         requestAnimationFrame(function () {
@@ -90,7 +121,8 @@
             var now = Date.now();
             var instant = (now - lastScanAt) < BURST_MS;
             lastScanAt = now;
-            scanReveal(null, instant);
+            var nodes = pendingRevealNodes.splice(0);
+            if (nodes.length) scanRevealNodes(nodes, instant);
         });
     }
 
@@ -98,7 +130,15 @@
         var pc = document.getElementById('page-content');
         if (!pc) return;
         try {
-            var mo = new MutationObserver(function () { queueRescan(); });
+            var mo = new MutationObserver(function (records) {
+                var added = [];
+                records.forEach(function (record) {
+                    record.addedNodes.forEach(function (node) {
+                        if (node.nodeType === 1 && !node.matches('.ripple, .toast-progress, .page-enter')) added.push(node);
+                    });
+                });
+                if (added.length) queueRescan(added);
+            });
             mo.observe(pc, { childList: true, subtree: true });
         } catch (e) { /* ignore */ }
         lastScanAt = Date.now();
@@ -106,14 +146,17 @@
     }
 
     // ---------- Hiệu ứng chuyển trang ----------
+    var pageEnterTimer = null;
     function playPageEnter() {
         if (prefersReduced) return;
         var pc = document.getElementById('page-content');
         if (!pc) return;
         pc.classList.remove('page-enter');
-        // reflow để restart animation
-        void pc.offsetWidth;
-        pc.classList.add('page-enter');
+        clearTimeout(pageEnterTimer);
+        requestAnimationFrame(function () {
+            pc.classList.add('page-enter');
+            pageEnterTimer = setTimeout(function () { pc.classList.remove('page-enter'); }, 220);
+        });
     }
 
     function wrapNavigation() {
@@ -139,8 +182,7 @@
         if (!target) return;
         // Đảm bảo có thể chứa ripple tuyệt đối
         var cs = window.getComputedStyle(target);
-        if (cs.position === 'static') target.style.position = 'relative';
-        if (cs.overflow === 'visible') target.style.overflow = 'hidden';
+        var needsHost = cs.position === 'static' || cs.overflow === 'visible';
         var rect = target.getBoundingClientRect();
         var size = Math.max(rect.width, rect.height);
         var span = document.createElement('span');
@@ -150,14 +192,18 @@
         var cy = (e.clientY != null ? e.clientY : rect.top + rect.height / 2) - rect.top - size / 2;
         span.style.left = cx + 'px';
         span.style.top = cy + 'px';
+        if (needsHost) target.classList.add('ripple-host');
         target.appendChild(span);
-        setTimeout(function () { if (span.parentNode) span.parentNode.removeChild(span); }, 620);
+        setTimeout(function () {
+            if (span.parentNode) span.parentNode.removeChild(span);
+            if (needsHost && !target.querySelector('.ripple')) target.classList.remove('ripple-host');
+        }, 620);
     }
 
     // ---------- Haptics nhẹ ----------
     var HAPTIC_SELECTOR = '.copy-btn, .fab, .nav-item, .d-nav-item, .renew-btn';
     function tinyHaptic(e) {
-        if (!canVibrate || !isTouch) return;
+        if (prefersReduced || !canVibrate || !isTouch) return;
         var t = e.target && e.target.closest ? e.target.closest(HAPTIC_SELECTOR) : null;
         if (!t) return;
         try { navigator.vibrate(9); } catch (err) { /* ignore */ }
@@ -188,32 +234,45 @@
     }
 
     // ---------- Vuốt ngang để chuyển tab (màn Nhóm & Cài đặt) ----------
-    // Trên mobile, cho phép lướt trái/phải trong vùng nội dung để nhảy nhanh
-    // giữa các tab con thay vì phải bấm từng nút tab.
-    var SWIPE_MIN_X = 55;      // quãng ngang tối thiểu (px) để tính là vuốt chuyển tab
-    var SWIPE_MAX_OFF = 0.6;   // |dy| phải nhỏ hơn |dx| * hệ số này (vuốt phải đủ "ngang")
-    var SWIPE_MAX_MS = 700;    // thời gian tối đa của một cú vuốt
+    var SWIPE_MIN_X = 64;
+    var SWIPE_MAX_OFF = 0.45;
+    var SWIPE_MAX_MS = 600;
     var GROUP_TAB_ORDER = ['board', 'accounts', 'members', 'settings'];
+    var SWIPE_IGNORE = [
+        'button', 'a', 'input', 'textarea', 'select', '[role="button"]',
+        '[data-drag-handle]', '[data-no-swipe]', '.settings-tabbar', '.group-tabs',
+        '.horizontal-scroll', '[data-horizontal-scroll]'
+    ].join(',');
 
-    // Bỏ qua khi vuốt bắt đầu trên các phần tử cần thao tác ngang riêng
-    // (thanh tab tự cuộn, ô nhập, thanh trượt, danh sách vuốt-để-xoá...).
-    var SWIPE_IGNORE = 'input, textarea, select, .settings-tabbar, .group-tabs, [data-no-swipe]';
+    function isHorizontalScrollTarget(target) {
+        var node = target;
+        while (node && node.id !== 'page-content') {
+            if (node.scrollWidth > node.clientWidth + 4) {
+                var overflowX = window.getComputedStyle(node).overflowX;
+                if (overflowX === 'auto' || overflowX === 'scroll') return true;
+            }
+            node = node.parentElement;
+        }
+        return false;
+    }
 
-    function getSwipeContext() {
+    function getSwipeContext(target) {
         var pc = document.getElementById('page-content');
         if (!pc) return null;
-        if (pc.querySelector('.group-tabs')) {
+        var surface = target?.closest?.('.group-tab-panel, .settings-panel.active');
+        if (!surface || !pc.contains(surface)) return null;
+        if (pc.querySelector('.group-tabs') && surface.classList.contains('group-tab-panel')) {
             var gCurrent = (window.appState && window.appState.currentGroupTab) || 'board';
             return {
                 order: GROUP_TAB_ORDER.slice(),
                 current: gCurrent,
-                apply: function (next) {
-                    if (typeof window.setGroupDetailTab === 'function') window.setGroupDetailTab(next);
+                apply: function (next, options) {
+                    if (typeof window.setGroupDetailTab === 'function') window.setGroupDetailTab(next, options);
                 }
             };
         }
         var tabbar = pc.querySelector('.settings-tabbar');
-        if (tabbar) {
+        if (tabbar && surface.classList.contains('settings-panel')) {
             var order = Array.prototype.map.call(
                 tabbar.querySelectorAll('.settings-tab'),
                 function (btn) { return btn.dataset.tab; }
@@ -225,8 +284,8 @@
             return {
                 order: order,
                 current: sCurrent,
-                apply: function (next) {
-                    if (typeof window.switchSettingsTab === 'function') window.switchSettingsTab(next);
+                apply: function (next, options) {
+                    if (typeof window.switchSettingsTab === 'function') window.switchSettingsTab(next, options);
                 }
             };
         }
@@ -234,43 +293,68 @@
     }
 
     function setupSwipeTabs() {
-        if (!isTouch) return; // chỉ bật trên thiết bị cảm ứng
+        if (!isTouch || !window.PointerEvent) return;
         var pc = document.getElementById('page-content');
         if (!pc) return;
-        var startX = 0, startY = 0, startAt = 0, tracking = false;
+        var gesture = null;
+        var suppressClickUntil = 0;
 
-        pc.addEventListener('touchstart', function (e) {
-            if (!e.touches || e.touches.length !== 1) { tracking = false; return; }
-            var t = e.target;
-            if (t && t.closest && t.closest(SWIPE_IGNORE)) { tracking = false; return; }
-            if (!getSwipeContext()) { tracking = false; return; }
-            startX = e.touches[0].clientX;
-            startY = e.touches[0].clientY;
-            startAt = Date.now();
-            tracking = true;
-        }, { passive: true });
+        function resetGesture(event) {
+            if (gesture && pc.hasPointerCapture?.(gesture.pointerId)) {
+                try { pc.releasePointerCapture(gesture.pointerId); } catch (_) { /* noop */ }
+            }
+            gesture = null;
+        }
 
-        pc.addEventListener('touchend', function (e) {
-            if (!tracking) return;
-            tracking = false;
-            var touch = (e.changedTouches && e.changedTouches[0]) || null;
-            if (!touch) return;
-            var dx = touch.clientX - startX;
-            var dy = touch.clientY - startY;
-            if (Date.now() - startAt > SWIPE_MAX_MS) return;
+        pc.addEventListener('pointerdown', function (event) {
+            if (event.pointerType === 'mouse' && event.button !== 0) return;
+            if (window.appState?.groupDesignDrag || window.appState?.groupDesignSaving) return;
+            if (event.target?.closest?.(SWIPE_IGNORE) || isHorizontalScrollTarget(event.target)) return;
+            var context = getSwipeContext(event.target);
+            if (!context) return;
+            gesture = {
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startY: event.clientY,
+                startAt: Date.now(),
+                context: context
+            };
+            try { pc.setPointerCapture(event.pointerId); } catch (_) { /* noop */ }
+        });
+
+        pc.addEventListener('pointercancel', resetGesture);
+        pc.addEventListener('lostpointercapture', function (event) {
+            if (gesture?.pointerId === event.pointerId) gesture = null;
+        });
+        pc.addEventListener('pointerup', function (event) {
+            if (!gesture || gesture.pointerId !== event.pointerId) return;
+            var current = gesture;
+            resetGesture(event);
+            var dx = event.clientX - current.startX;
+            var dy = event.clientY - current.startY;
+            if (Date.now() - current.startAt > SWIPE_MAX_MS) return;
             if (Math.abs(dx) < SWIPE_MIN_X) return;
             if (Math.abs(dy) > Math.abs(dx) * SWIPE_MAX_OFF) return;
-
-            var ctx = getSwipeContext();
+            if (window.appState?.groupDesignDrag || window.appState?.groupDesignSaving) return;
+            var ctx = getSwipeContext(event.target) || current.context;
             if (!ctx) return;
             var idx = ctx.order.indexOf(ctx.current);
             if (idx < 0) idx = 0;
-            // Vuốt sang trái (dx<0) → tab kế tiếp; vuốt phải (dx>0) → tab trước.
             var nextIdx = dx < 0 ? idx + 1 : idx - 1;
             if (nextIdx < 0 || nextIdx >= ctx.order.length) return;
-            if (canVibrate) { try { navigator.vibrate(9); } catch (err) { /* ignore */ } }
-            ctx.apply(ctx.order[nextIdx]);
-        }, { passive: true });
+            suppressClickUntil = Date.now() + 360;
+            if (!prefersReduced && canVibrate) { try { navigator.vibrate(9); } catch (err) { /* ignore */ } }
+            ctx.apply(ctx.order[nextIdx], {
+                direction: dx < 0 ? 'left' : 'right',
+                fromSwipe: true
+            });
+        });
+
+        pc.addEventListener('click', function (event) {
+            if (Date.now() >= suppressClickUntil) return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+        }, true);
     }
 
     // ---------- Khởi động ----------
