@@ -424,6 +424,15 @@ function escapeJsAttr(value) {
 
 const TING_RELEASE_HISTORY = Object.freeze([
     {
+        version: '1.7.1', date: '17/07/2026', title: 'Chi tiêu và quy đổi theo giao dịch',
+        changes: [
+            'Thêm khu Chi tiêu trên dashboard, tự ghi nhận tiền mua tài khoản và hỗ trợ khoản chi thủ công.',
+            'Bổ sung biểu đồ, thống kê theo tài khoản hoặc nền tảng cùng nhiều bộ lọc thời gian.',
+            'Lưu loại tiền, tỷ giá và giá trị quy đổi VND tại đúng thời điểm giao dịch.',
+            'Mở tài khoản từ khoản chi rồi quay lại đúng vị trí, đồng thời đưa dữ liệu chi tiêu vào backup/restore.',
+        ],
+    },
+    {
         version: '1.7.0', date: '17/07/2026', title: 'Ổn định PC/mobile và lịch sử phiên bản',
         changes: [
             'Thêm bảng lịch sử phiên bản: chọn một phiên bản để xem riêng phần thay đổi của phiên bản đó.',

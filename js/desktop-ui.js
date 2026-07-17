@@ -815,6 +815,8 @@ function renderDashboard() {
         </div>
     </div>`;
 
+    if (typeof renderExpenseDashboardCard === 'function') h += renderExpenseDashboardCard();
+
     if (platformFilter) {
         const allMatches = sortAccountsByPriority(accs.filter(acc => isDashboardSuggestionAccount(acc) && accountMatchesPlatformQuickFilter(acc, platformFilter)));
         const showExpired = typeof getShowExpiredState === 'function' ? getShowExpiredState('dashboard') : false;
@@ -3032,7 +3034,7 @@ function renderDetail(accId) {
         <div class="detail-section anim-fade-in-up">
             <div class="detail-row"><span class="detail-label">Ngày mua</span><span class="detail-value">${formatDateVN(acc.purchaseDate)}</span></div>
             ${purchaseTime ? `<div class="detail-row"><span class="detail-label">Giờ mua</span><span class="detail-value">${escapeHtml(typeof formatTimeVN === 'function' ? formatTimeVN(purchaseTime) : purchaseTime)}</span></div>` : ''}
-            ${acc.purchasePrice && typeof formatPriceVN === 'function' ? `<div class="detail-row"><span class="detail-label">Giá mua</span><span class="detail-value detail-price-value">${escapeHtml(formatPriceVN(acc.purchasePrice))}</span></div>` : ''}
+            ${(acc.purchaseAmount || acc.purchasePrice) ? `<div class="detail-row"><span class="detail-label">Giá mua</span><span class="detail-value detail-price-value">${escapeHtml(typeof formatAccountPurchaseMoney === 'function' ? formatAccountPurchaseMoney(acc) : formatPriceVN(acc.purchasePrice))}</span></div>` : ''}
             <div class="detail-row"><span class="detail-label">Hết hạn</span><span class="detail-value">${acc.expiryType==='lifetime'?'♾️ Vĩnh viễn':formatDateVN(acc.expiryDate)}</span></div>
             ${acc.expiryType!=='lifetime'?`<div class="detail-row"><span class="detail-label">Còn lại</span><span class="detail-value" style="color:${days<0?'var(--danger)':days<=5?'var(--warning)':'var(--success)'}">${days<0?'Đã hết '+Math.abs(days)+' ngày':days+' ngày'}</span></div>`:''}
             ${acc.expiryType!=='lifetime'?`<div style="margin-top:12px"><div style="font-size:13px;font-weight:600;margin-bottom:8px">Gia hạn nhanh</div><div class="renew-options"><button class="renew-btn" onclick="renewAccount('${acc.id}',7)">+7 ngày</button><button class="renew-btn" onclick="renewAccount('${acc.id}',15)">+15</button><button class="renew-btn" onclick="renewAccount('${acc.id}',30)">+30</button><button class="renew-btn" onclick="renewAccount('${acc.id}',90)">+90</button><button class="renew-btn" onclick="renewAccount('${acc.id}',365)">+365</button>${acc.status!=='expired'?`<button class="renew-btn renew-btn-expire" onclick="markAccountExpired('${acc.id}')" title="Đặt hết hạn ngay hôm nay">⏱️ Hết hạn ngay</button>`:''}</div></div>`:''}
@@ -3312,7 +3314,7 @@ function renderMinSupportedWarning(platform, status) {
 // hiệu hoá "Kiểm tra" theo Platform_Detector, định tuyến hành động theo nền tảng, và
 // khoá hành động khi đang tải (Requirements 1.1-1.6, 3.4/3.5/3.7, 4.4/4.6/4.8, 10.1-10.4).
 function renderUpdateSection() {
-    const version = escapeHtml(window.appState.appVersion || '1.7.0');
+    const version = escapeHtml(window.appState.appVersion || '1.7.1');
     const platform = getUpdatePlatform();
     const cap = getUpdateCapability(platform);
     const status = window.appState.updateStatus;
@@ -4068,10 +4070,10 @@ https://example.com" style="min-height:110px" onfocus="markAddFormDateSkippedIfN
 
         <div class="form-section-title">Giá mua <span class="optional-label">(Tùy chọn)</span></div>
         <div class="input-group price-input-group" style="margin-bottom:8px">
-            <input type="text" id="add-price" class="input" inputmode="numeric" autocomplete="off" placeholder=" " style="padding-left:16px" value="${editData?.purchasePrice ? formatPriceInput(editData.purchasePrice) : ''}" oninput="formatPriceField(this)">
-            <label for="add-price" class="input-label" style="left:16px">VD: 50.000 (để trống nếu không nhập)</label>
-            <span class="price-suffix" aria-hidden="true">₫</span>
+            <input type="text" id="add-price" class="input" inputmode="decimal" autocomplete="off" placeholder=" " style="padding-left:16px" value="${editData?.purchaseAmount ?? editData?.purchasePrice ?? ''}" oninput="formatAccountPurchaseAmountField(this);updateAccountPurchaseConversionPreview()">
+            <label for="add-price" class="input-label" style="left:16px">Số tiền gốc (để trống nếu không nhập)</label>
         </div>
+        ${typeof renderAccountPurchaseCurrencyControls === 'function' ? renderAccountPurchaseCurrencyControls(editData || {}) : ''}
 
         <div class="add-wizard-nav">
             <button type="button" class="btn btn-outline" onclick="goAddTab(2, { manual: true })">‹ Quay lại</button>

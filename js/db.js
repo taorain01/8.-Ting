@@ -68,6 +68,8 @@ function loadAccountsRealtime() {
             });
             window.appState.accounts = accounts;
             window.appState.trashAccounts = trashAccounts;
+            window.appState.accountsLoaded = true;
+            if (typeof backfillAccountExpenses === 'function') backfillAccountExpenses();
             updateHeader();
             if (typeof checkExpiryAndNotify === 'function') {
                 checkExpiryAndNotify(accounts);
@@ -83,12 +85,14 @@ function loadAccountsRealtime() {
             else if (page === 'personal') renderAccountList('personal');
             else if (page === 'trash') renderTrashList();
             else if (page === 'categories') renderCategoriesPage();
+            else if (page === 'expenses' && typeof renderExpensesPage === 'function') renderExpensesPage();
             else if (page.startsWith('category:')) renderCategoryDetail(page.slice('category:'.length));
         }, (error) => {
             console.error('❌ Lỗi load accounts:', error);
             if (typeof setSyncMetadata === 'function') setSyncMetadata({ pendingWrites: 0 });
             window.appState.accounts = [];
             window.appState.trashAccounts = [];
+            window.appState.accountsLoaded = true;
             if (typeof updateHeader === 'function') updateHeader();
             const page = window.appState.currentPage;
             if (page === 'dashboard' && typeof renderDashboard === 'function') renderDashboard();
@@ -106,10 +110,11 @@ function stopAccountsRealtime() {
         accountsUnsubscribe();
         accountsUnsubscribe = null;
     }
+    if (window.appState) window.appState.accountsLoaded = false;
 }
 
 // ===== THÊM TÀI KHOẢN =====
-async function addAccountToDB(accountData) {
+async function addAccountToDB(accountData, options = {}) {
     const userId = auth.currentUser?.uid;
     if (!userId) { showToast('Chưa đăng nhập', 'error'); return null; }
 
@@ -126,6 +131,14 @@ async function addAccountToDB(accountData) {
             updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
         });
         console.log('✅ Đã thêm tài khoản:', docRef.id);
+        if (options.recordPurchaseExpense !== false && typeof syncInitialPurchaseExpenseFromAccount === 'function') {
+            try {
+                await syncInitialPurchaseExpenseFromAccount({ id: docRef.id, ...safeData });
+            } catch (expenseError) {
+                console.warn('Expense purchase record failed:', expenseError);
+                showToast('Đã lưu tài khoản nhưng chưa ghi được khoản chi', 'warning');
+            }
+        }
         return docRef.id;
     } catch (error) {
         console.error('❌ Lỗi thêm TK:', error);
@@ -135,7 +148,7 @@ async function addAccountToDB(accountData) {
 }
 
 // ===== CẬP NHẬT TÀI KHOẢN =====
-async function updateAccountInDB(accountId, updateData) {
+async function updateAccountInDB(accountId, updateData, options = {}) {
     const userId = auth.currentUser?.uid;
     if (!userId) return false;
 
@@ -170,6 +183,17 @@ async function updateAccountInDB(accountId, updateData) {
             await batch.commit();
         } else {
             await accountRef.update({ ...safeData, updatedAt: timestamp });
+        }
+        const purchaseKeys = ['purchasePrice', 'purchaseAmount', 'purchaseCurrency', 'purchaseExchangeRateToVnd', 'purchaseDate', 'purchaseTime', 'name', 'platform', 'sellerName'];
+        const shouldSyncPurchase = !options.skipExpenseSync
+            && purchaseKeys.some(key => Object.prototype.hasOwnProperty.call(updateData || {}, key));
+        if (shouldSyncPurchase && typeof syncInitialPurchaseExpenseFromAccount === 'function') {
+            try {
+                await syncInitialPurchaseExpenseFromAccount({ ...plainAccount, id: accountId });
+            } catch (expenseError) {
+                console.warn('Expense purchase sync failed:', expenseError);
+                showToast('Đã lưu tài khoản nhưng chưa đồng bộ được khoản chi', 'warning');
+            }
         }
         console.log('✅ Đã cập nhật TK:', accountId);
         return true;

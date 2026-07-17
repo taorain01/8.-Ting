@@ -19,7 +19,7 @@ function makeClassList() {
 }
 
 function loadReleaseHistory() {
-  const buttons = ['1.7.0', '1.6.0'].map(version => ({
+  const buttons = ['1.7.1', '1.7.0', '1.6.0'].map(version => ({
     dataset: { releaseVersion: version },
     classList: makeClassList(),
     attributes: {},
@@ -61,9 +61,10 @@ describe('Release history selector', () => {
     const html = exports.renderTingReleaseHistory();
 
     expect(html).toContain('Lịch sử phiên bản');
+    expect(html).toContain('data-release-version="1.7.1"');
     expect(html).toContain('data-release-version="1.7.0"');
     expect(html).toContain('data-release-version="1.6.0"');
-    expect(html).toContain('Ổn định PC/mobile và lịch sử phiên bản');
+    expect(html).toContain('Chi tiêu và quy đổi theo giao dịch');
     expect((html.match(/role="tabpanel"/g) || []).length).toBe(1);
   });
 
@@ -73,7 +74,7 @@ describe('Release history selector', () => {
     expect(exports.selectTingReleaseVersion('1.6.0')).toBe(true);
     expect(window.__tingSelectedReleaseVersion).toBe('1.6.0');
     expect(buttons[0].attributes['aria-selected']).toBe('false');
-    expect(buttons[1].attributes['aria-selected']).toBe('true');
+    expect(buttons[2].attributes['aria-selected']).toBe('true');
     expect(detail.innerHTML).toContain('Smart Paste và form thêm tài khoản');
     expect(detail.innerHTML).not.toContain('Ổn định PC/mobile và lịch sử phiên bản');
   });

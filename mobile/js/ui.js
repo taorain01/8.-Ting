@@ -360,6 +360,8 @@ function renderDashboard() {
             </div>
         </div>`;
 
+    if (typeof renderExpenseDashboardCard === 'function') html += renderExpenseDashboardCard();
+
     if (platformFilter) {
         const matches = sortAccountsByPriority(accounts.filter(acc => isDashboardSuggestionAccount(acc) && accountMatchesPlatformQuickFilter(acc, platformFilter)));
         html += renderQuickFilterResultHead(platformFilter, matches);
@@ -477,7 +479,7 @@ function legacy_renderSettings_1() {
         </div>
     </div>
 
-    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.7.0')}</p>`;
+    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.7.1')}</p>`;
 }
 
 // ===== MOBILE DESKTOP-PARITY RENDERERS =====
@@ -1335,7 +1337,7 @@ function renderDetail(accId) {
     <div class="detail-section anim-fade-in-up">
         <div class="detail-row"><span class="detail-label">Ngày mua</span><span class="detail-value">${formatDateVN(acc.purchaseDate)}</span></div>
         ${purchaseTime ? `<div class="detail-row"><span class="detail-label">Giờ mua</span><span class="detail-value">${escapeHtml(typeof formatTimeVN === 'function' ? formatTimeVN(purchaseTime) : purchaseTime)}</span></div>` : ''}
-        ${acc.purchasePrice && typeof formatPriceVN === 'function' ? `<div class="detail-row"><span class="detail-label">Giá mua</span><span class="detail-value detail-price-value">${escapeHtml(formatPriceVN(acc.purchasePrice))}</span></div>` : ''}
+        ${(acc.purchaseAmount || acc.purchasePrice) ? `<div class="detail-row"><span class="detail-label">Giá mua</span><span class="detail-value detail-price-value">${escapeHtml(typeof formatAccountPurchaseMoney === 'function' ? formatAccountPurchaseMoney(acc) : formatPriceVN(acc.purchasePrice))}</span></div>` : ''}
         <div class="detail-row"><span class="detail-label">Ngày hết hạn</span><span class="detail-value">${acc.expiryType === 'lifetime' ? '∞ Vĩnh viễn' : formatDateVN(acc.expiryDate)}</span></div>
         ${acc.expiryType !== 'lifetime' ? `<div class="detail-row"><span class="detail-label">Còn lại</span><span class="detail-value" style="color:${days < 0 ? 'var(--danger)' : days <= 5 ? 'var(--warning)' : 'var(--success)'}">${days < 0 ? 'Đã hết ' + Math.abs(days) + ' ngày' : days + ' ngày'}</span></div>` : ''}
     </div>
@@ -2434,7 +2436,7 @@ function renderUpdateSection() {
     const version = escapeHtml(
         window.appState.appVersion
         || window.TingMobileUpdater?.INSTALLED_VERSION_NAME
-        || '1.7.0'
+        || '1.7.1'
     );
     const platform = getMobileUpdatePlatform();
     const cap = getMobileUpdateCapability(platform);
@@ -2566,7 +2568,7 @@ function renderSettings() {
             <div class="settings-item" onclick="signOut()"><div class="settings-item-icon" style="background:var(--danger-bg)">🚪</div><div class="settings-item-content"><div class="settings-item-title" style="color:var(--danger)">Đăng xuất</div></div></div>
         </div>
     </div></div>
-    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.7.0')}</p>`;
+    <p style="text-align:center;font-size:12px;color:var(--text-tertiary);margin-top:24px">Ting! v${escapeHtml(window.appState.appVersion || '1.7.1')}</p>`;
     switchSettingsTab(window._settingsActiveTab || 'update');
 }
 
@@ -3102,10 +3104,10 @@ https://example.com" style="min-height:110px" onfocus="markAddFormDateSkippedIfN
 
         <div class="form-section-title">Giá mua <span class="optional-label">(Tùy chọn)</span></div>
         <div class="input-group price-input-group" style="margin-bottom:8px">
-            <input type="text" id="add-price" class="input" inputmode="numeric" autocomplete="off" placeholder=" " style="padding-left:16px" value="${editData?.purchasePrice ? formatPriceInput(editData.purchasePrice) : ''}" oninput="formatPriceField(this)">
-            <label for="add-price" class="input-label" style="left:16px">VD: 50.000 (để trống nếu không nhập)</label>
-            <span class="price-suffix" aria-hidden="true">₫</span>
+            <input type="text" id="add-price" class="input" inputmode="decimal" autocomplete="off" placeholder=" " style="padding-left:16px" value="${editData?.purchaseAmount ?? editData?.purchasePrice ?? ''}" oninput="formatAccountPurchaseAmountField(this);updateAccountPurchaseConversionPreview()">
+            <label for="add-price" class="input-label" style="left:16px">Số tiền gốc (để trống nếu không nhập)</label>
         </div>
+        ${typeof renderAccountPurchaseCurrencyControls === 'function' ? renderAccountPurchaseCurrencyControls(editData || {}) : ''}
 
         <div class="add-wizard-nav">
             <button type="button" class="btn btn-outline" onclick="goAddTab(2, { manual: true })">‹ Quay lại</button>

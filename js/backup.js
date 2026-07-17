@@ -33,6 +33,7 @@
             accounts: Array.isArray(s.accounts) ? s.accounts : [],
             trashAccounts: Array.isArray(s.trashAccounts) ? s.trashAccounts : [],
             customCategories: Array.isArray(s.customCategories) ? s.customCategories : [],
+            expenses: Array.isArray(s.expenses) ? s.expenses : [],
         };
     }
 
@@ -51,6 +52,7 @@
                 accounts: data.accounts.length,
                 categories: data.customCategories.length,
                 trash: data.trashAccounts.length,
+                expenses: data.expenses.length,
             },
             payload: encrypted, // { encryptedData, salt, iv }
         };
@@ -155,6 +157,7 @@
             accounts: accounts,
             trashAccounts: trashAccounts,
             customCategories: Array.isArray(data?.customCategories) ? data.customCategories.filter(function (item) { return item?.id && item?.name; }) : [],
+            expenses: Array.isArray(data?.expenses) ? data.expenses.filter(function (item) { return item && item.amountVnd; }) : [],
         };
     }
 
@@ -260,6 +263,7 @@
 
     function remapBackupAccount(account, idMap, isDeleted) {
         var restored = Object.assign({}, account);
+        restored.__backupSourceId = account?.id || null;
         delete restored.id;
         delete restored.pendingSync;
         restored.categoryIds = (Array.isArray(account?.categoryIds) ? account.categoryIds : [])
@@ -271,13 +275,29 @@
     }
 
     async function persistBackupAccount(account) {
+        var payload = Object.assign({}, account);
+        delete payload.__backupSourceId;
         if (window.appState?.isDemo) {
-            var restored = Object.assign({ id: 'restored_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7) }, account);
+            var restored = Object.assign({ id: 'restored_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7) }, payload);
             (restored.isDeleted ? window.appState.trashAccounts : window.appState.accounts).unshift(restored);
             return restored.id;
         }
         if (typeof addAccountToDB !== 'function') throw new Error('Không thể ghi dữ liệu tài khoản');
-        return addAccountToDB(account);
+        return addAccountToDB(payload, { recordPurchaseExpense: false });
+    }
+
+    async function persistBackupExpense(expense, accountIdMap) {
+        if (typeof saveExpense !== 'function') return null;
+        var payload = Object.assign({}, expense);
+        delete payload.id;
+        delete payload.createdAt;
+        delete payload.updatedAt;
+        delete payload.pendingSync;
+        var sourceAccountId = String(expense?.accountId || '');
+        payload.accountId = sourceAccountId ? (accountIdMap[sourceAccountId] || null) : null;
+        payload.source = expense?.source || 'backup-restore';
+        payload.sourceKey = expense?.sourceKey ? 'restored:' + expense.sourceKey : '';
+        return saveExpense(payload);
     }
 
     async function applyBackupRestore(selection) {
@@ -298,16 +318,32 @@
         var accounts = [];
         if (includeActive) accounts = accounts.concat(preview.activeAccounts.map(function (item) { return remapBackupAccount(item, categoryPlan.idMap, false); }));
         if (includeTrash) accounts = accounts.concat(preview.trashAccounts.map(function (item) { return remapBackupAccount(item, categoryPlan.idMap, true); }));
-        var result = { attempted: accounts.length, restored: 0, failed: 0, categoriesAdded: includeCategories ? categoryPlan.added.length : 0, conflicts: preview.conflicts };
+        var result = { attempted: accounts.length, restored: 0, failed: 0, expensesRestored: 0, expenseFailures: 0, categoriesAdded: includeCategories ? categoryPlan.added.length : 0, conflicts: preview.conflicts };
+        var accountIdMap = {};
         for (var i = 0; i < accounts.length; i += 1) {
             try {
-                if (await persistBackupAccount(accounts[i])) result.restored += 1;
-                else result.failed += 1;
+                var sourceId = String(accounts[i]?.__backupSourceId || '');
+                var restoredId = await persistBackupAccount(accounts[i]);
+                if (restoredId) {
+                    result.restored += 1;
+                    if (sourceId) accountIdMap[sourceId] = restoredId;
+                } else result.failed += 1;
             } catch (error) {
                 result.failed += 1;
                 console.warn('Bỏ qua 1 tài khoản khi phục hồi:', error);
             }
         }
+        var backupExpenses = Array.isArray(parsed.data.expenses) ? parsed.data.expenses : [];
+        for (var expenseIndex = 0; expenseIndex < backupExpenses.length; expenseIndex += 1) {
+            try {
+                if (await persistBackupExpense(backupExpenses[expenseIndex], accountIdMap)) result.expensesRestored += 1;
+                else result.expenseFailures += 1;
+            } catch (expenseError) {
+                result.expenseFailures += 1;
+                console.warn('Skip one expense during restore:', expenseError);
+            }
+        }
+        if (typeof backfillAccountExpenses === 'function') await backfillAccountExpenses();
         if (typeof updateHeader === 'function') updateHeader();
         return result;
     }
@@ -343,6 +379,7 @@
             pendingRestore = null;
             var message = 'Đã phục hồi ' + result.restored + '/' + result.attempted + ' tài khoản';
             if (result.categoriesAdded) message += ', ' + result.categoriesAdded + ' danh mục';
+            if (result.expensesRestored) message += ', ' + result.expensesRestored + ' khoản chi';
             if (typeof showToast === 'function') showToast(message, result.failed ? 'warning' : 'success');
             return result;
         } catch (error) {
@@ -367,7 +404,7 @@
             return null;
         }
         var parsed = await parseBackupForRestore(fileText, master, window.appState);
-        var total = parsed.preview.counts.active + parsed.preview.counts.trash + parsed.preview.counts.categories;
+        var total = parsed.preview.counts.active + parsed.preview.counts.trash + parsed.preview.counts.categories + parsed.data.expenses.length;
         if (!total && !parsed.preview.conflicts.length) {
             if (typeof showToast === 'function') showToast('File backup không có dữ liệu để khôi phục', 'error');
             return parsed;

@@ -13,7 +13,13 @@ bộ quá nhỏ.
 
 ## Chưa phát hành
 
-- Sửa Android CI không chạy được `gradlew` trên runner Linux sau khi checkout.
+## 1.7.1 - 2026-07-17
+
+- Thêm khu Chi tiêu trên dashboard, tự ghi nhận tiền mua tài khoản và cho phép nhập khoản chi thủ công.
+- Thêm biểu đồ, tổng hợp theo tài khoản/nền tảng và bộ lọc tuần, tháng, quý, năm hoặc khoảng ngày tùy chọn.
+- Hỗ trợ nhiều loại tiền, lưu tỷ giá và giá trị quy đổi VND đúng tại thời điểm giao dịch.
+- Cho phép mở thẳng tài khoản từ khoản chi rồi quay lại đúng vị trí, bộ lọc và trạng thái trước đó.
+- Đưa dữ liệu chi tiêu vào backup/restore và sửa Android CI không chạy được `gradlew` trên runner Linux.
 
 ## 1.7.0 - 2026-07-17
 

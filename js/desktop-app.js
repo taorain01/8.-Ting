@@ -8,6 +8,9 @@ window.appState = {
     user: { uid: null, name: 'Người dùng', email: '', avatar: null },
     accounts: [],
     trashAccounts: [],
+    expenses: [],
+    expensesLoaded: false,
+    accountsLoaded: false,
     customCategories: [],
     groups: [],
     groupInvites: [],
@@ -68,10 +71,11 @@ window.appState = {
         notifyOverdueDays: 3,
         shortcuts: { openApp: 'Control+Shift+T', quickAdd: 'Control+Shift+S' },
     },
-    appVersion: '1.7.0',
+    appVersion: '1.7.1',
     updateStatus: null,
     updateLog: [],
     visibleGroupNotes: {},
+    expenseViewState: null,
 };
 
 const DEFAULT_DEMO_CATEGORIES = [
@@ -178,6 +182,9 @@ function enterDemoMode() {
         ...a,
         status: getStatusFromExpiry(a.expiryDate, a.expiryType),
     }));
+    window.appState.expenses = [];
+    window.appState.accountsLoaded = true;
+    window.appState.expensesLoaded = true;
     window.appState.trashAccounts = [];
     window.appState.customCategories = DEFAULT_DEMO_CATEGORIES.map(category => ({ ...category }));
     window.appState.groups = [];
@@ -195,11 +202,12 @@ function enterDemoMode() {
     updateHeader();
     checkExpiryAndNotify?.(window.appState.accounts);
     navigateTo('dashboard');
+    if (typeof backfillAccountExpenses === 'function') backfillAccountExpenses();
     showToast('Chế độ Demo — dữ liệu mẫu', 'success');
 }
 
 // ===== NAVIGATION =====
-const pageTitles = { dashboard:'Tổng quan', bought:'TK Mua', personal:'Cá nhân', groups:'Nhóm', 'group-detail':'Chi tiết nhóm', categories:'Danh mục', trash:'Thùng rác', settings:'Cài đặt', detail:'Chi tiết' };
+const pageTitles = { dashboard:'Tổng quan', expenses:'Chi tiêu', bought:'TK Mua', personal:'Cá nhân', groups:'Nhóm', 'group-detail':'Chi tiết nhóm', categories:'Danh mục', trash:'Thùng rác', settings:'Cài đặt', detail:'Chi tiết' };
 
 const NAV_STACK_LIMIT = 80;
 
@@ -229,6 +237,7 @@ function createNavEntry() {
         searchQuery: window.appState.searchQuery || '',
         expandedGroups: cloneNavExpandedGroups(),
         visibleGroupNotes: cloneNavVisibleGroupNotes(),
+        expenseViewState: { ...(window.appState.expenseViewState || {}) },
         scrollTop: content ? content.scrollTop : 0,
         windowScrollY: window.scrollY || window.pageYOffset || 0,
     };
@@ -259,6 +268,7 @@ function applyNavEntryState(entry) {
     window.appState.searchQuery = entry.searchQuery || '';
     window.appState.expandedGroups = cloneNavExpandedGroups(entry.expandedGroups);
     window.appState.visibleGroupNotes = cloneNavVisibleGroupNotes(entry.visibleGroupNotes);
+    if (entry.expenseViewState) window.appState.expenseViewState = { ...entry.expenseViewState };
     const searchInput = document.getElementById('search-input');
     if (searchInput) searchInput.value = window.appState.searchQuery;
 }
@@ -309,6 +319,7 @@ function navigateTo(page, isBack = false) {
     // Sidebar active
     document.querySelectorAll('.d-nav-item[data-page]').forEach(i => {
         i.classList.toggle('active', i.dataset.page === page
+            || (page === 'expenses' && i.dataset.page === 'dashboard')
             || (page === 'group-detail' && i.dataset.page === 'groups')
             || (page.startsWith('category:') && i.dataset.page === 'categories'));
     });
@@ -325,6 +336,7 @@ function navigateTo(page, isBack = false) {
     // Render
     switch (page) {
         case 'dashboard': renderDashboard(); break;
+        case 'expenses': renderExpensesPage?.(); break;
         case 'bought': renderAccountList('bought'); break;
         case 'personal': handlePersonalPage(); break;
         case 'groups': renderGroupList(); break;
@@ -430,8 +442,8 @@ function initSmartNavigationInputs() {
 
 // ===== HEADER / SIDEBAR =====
 function formatSidebarVersion(version) {
-    const raw = String(version || '1.7.0').trim().replace(/^v/i, '');
-    return raw ? `v${raw}` : 'v1.7.0';
+    const raw = String(version || '1.7.1').trim().replace(/^v/i, '');
+    return raw ? `v${raw}` : 'v1.7.1';
 }
 
 function updateSidebarVersion() {
@@ -4633,6 +4645,17 @@ function buildAccountSaveInput(input = {}) {
     const sellerLink = typeof resolveSellerLinkInput === 'function'
         ? resolveSellerLinkInput(sellerName, sellerPlatform, input.sellerLink)
         : (sellerName ? String(input.sellerLink || '').trim() : '');
+    const purchaseFields = typeof accountPurchaseFields === 'function'
+        ? accountPurchaseFields({
+            purchaseAmount: input.purchaseAmount ?? input.purchasePrice,
+            purchaseCurrency: input.purchaseCurrency || 'VND',
+            purchaseExchangeRateToVnd: input.purchaseExchangeRateToVnd || 1,
+            purchaseDate,
+        })
+        : { purchasePrice: (typeof parsePriceValue === 'function' ? parsePriceValue(input.purchasePrice) : (input.purchasePrice || null)) ?? null };
+    if (purchaseFields.purchaseAmount && purchaseFields.purchaseCurrency !== 'VND' && !purchaseFields.purchaseExchangeRateToVnd) {
+        return { ok: false, message: 'Nhập tỷ giá quy đổi tại ngày mua' };
+    }
 
     return {
         ok: true,
@@ -4645,7 +4668,7 @@ function buildAccountSaveInput(input = {}) {
             sellerName,
             sellerPlatform,
             sellerLink,
-            purchasePrice: (typeof parsePriceValue === 'function' ? parsePriceValue(input.purchasePrice) : (input.purchasePrice || null)) ?? null,
+            ...purchaseFields,
             displayUsername: maskUsername(sensitiveData.username),
             purchaseDate,
             purchaseTime,
@@ -4684,6 +4707,7 @@ async function persistNewAccount(input = {}, options = {}) {
     if (window.appState.isDemo) {
         const data = { ...baseData, ...sensitiveData, id: `demo_${Date.now()}` };
         window.appState.accounts.unshift(data);
+        if (typeof syncInitialPurchaseExpenseFromAccount === 'function') await syncInitialPurchaseExpenseFromAccount(data);
         updateHeader();
         if (options.closeModal) closeModal();
         if (options.navigateAfter) navigateTo(window.appState.currentPage);
@@ -4759,7 +4783,16 @@ async function saveNewAccount(type) {
     const sellerLink = typeof resolveSellerLinkInput === 'function'
         ? resolveSellerLinkInput(sellerName, sellerPlatform, rawSellerLink)
         : (sellerName ? rawSellerLink : '');
-    const purchasePrice = typeof parsePriceValue === 'function' ? parsePriceValue(document.getElementById('add-price')?.value) : null;
+    const purchaseMoney = typeof readAccountPurchaseMoneyFields === 'function'
+        ? readAccountPurchaseMoneyFields()
+        : { amount: typeof parsePriceValue === 'function' ? parsePriceValue(document.getElementById('add-price')?.value) : null, currency: 'VND', exchangeRateToVnd: 1 };
+    const purchaseFields = typeof accountPurchaseFields === 'function'
+        ? accountPurchaseFields({ purchaseAmount: purchaseMoney.amount, purchaseCurrency: purchaseMoney.currency, purchaseExchangeRateToVnd: purchaseMoney.exchangeRateToVnd, purchaseDate: pDate })
+        : { purchasePrice: purchaseMoney.amount };
+    if (purchaseMoney.amount && purchaseMoney.currency !== 'VND' && !purchaseMoney.exchangeRateToVnd) {
+        showToast('Nhập tỷ giá quy đổi tại ngày mua', 'error');
+        return;
+    }
     const tags = typeof normalizeTags === 'function' ? normalizeTags([...getAddTags(), ...smartName.tags]) : [...getAddTags(), ...smartName.tags];
     const categoryIds = getSelectedCategoryIdsFromForm();
     const notificationSettings = typeof getNotificationSettings === 'function' ? getNotificationSettings() : { daysBefore: [5, 3, 1] };
@@ -4778,7 +4811,7 @@ async function saveNewAccount(type) {
         sellerName,
         sellerPlatform: sellerPlatform || 'other',
         sellerLink,
-        purchasePrice: purchasePrice ?? null,
+        ...purchaseFields,
         displayUsername: maskUsername(sensitiveData.username),
         purchaseDate: pDate,
         purchaseTime: pTime,
@@ -4804,6 +4837,7 @@ async function saveNewAccount(type) {
         const data = { ...baseData, ...sensitiveData };
         data.id = 'demo_' + Date.now();
         window.appState.accounts.unshift(data);
+        if (typeof syncInitialPurchaseExpenseFromAccount === 'function') await syncInitialPurchaseExpenseFromAccount(data);
         markAccountAsJustAdded(data.id);
         updateHeader();
         if (typeof recordAddQuickFormHistory === 'function') recordAddQuickFormHistory();
@@ -4997,6 +5031,9 @@ function collectEditedAccountInput(acc) {
         sellerPlatform: document.getElementById('add-seller-platform')?.value || 'other',
         sellerLink: document.getElementById('add-seller-link')?.value || '',
         purchasePrice: document.getElementById('add-price')?.value || '',
+        purchaseAmount: document.getElementById('add-price')?.value || '',
+        purchaseCurrency: document.getElementById('add-currency')?.value || 'VND',
+        purchaseExchangeRateToVnd: document.getElementById('add-exchange-rate')?.value || 1,
         tags: getAddTags(),
         categoryIds: getSelectedCategoryIdsFromForm(),
         protectedByMasterPassword: acc.protectedByMasterPassword === true || acc.type === 'personal',
@@ -5034,6 +5071,7 @@ async function saveEditedAccount(accId) {
         }
         if (window.appState.isDemo) {
             Object.assign(acc, payload);
+            if (typeof syncInitialPurchaseExpenseFromAccount === 'function') await syncInitialPurchaseExpenseFromAccount(acc);
             window.appState.activeDecryptedAccount = { id: accId, data: { ...sensitiveData } };
             updateHeader();
             if (typeof recordAddQuickFormHistory === 'function') recordAddQuickFormHistory();

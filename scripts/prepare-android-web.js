@@ -43,6 +43,7 @@ const sharedScripts = [
   'platform-tags.js',
   'crypto.js',
   'db.js',
+  'expenses.js',
   'auth.js',
   'groups.js',
   'mobile-updater.js',

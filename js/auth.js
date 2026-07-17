@@ -814,6 +814,9 @@ async function signOut() {
             window.appState.activeDecryptedAccount = null;
             window.appState.accounts = [];
             window.appState.trashAccounts = [];
+            window.appState.expenses = [];
+            window.appState.expensesLoaded = false;
+            window.appState.accountsLoaded = false;
             window.appState.customCategories = [];
             window.appState.groups = [];
             window.appState.groupInvites = [];
@@ -841,6 +844,7 @@ async function signOut() {
         writeAuthLocalSetting(AUTH_SESSION_META_KEY, null);
         // Reset state
         stopAccountsRealtime?.();
+        stopExpensesRealtime?.();
         stopGroupsRealtime?.();
         window.appState.isLoggedIn = false;
         window.appState.masterUnlocked = false;
@@ -848,6 +852,9 @@ async function signOut() {
         window.appState.activeDecryptedAccount = null;
         window.appState.accounts = [];
         window.appState.trashAccounts = [];
+        window.appState.expenses = [];
+        window.appState.expensesLoaded = false;
+        window.appState.accountsLoaded = false;
         window.appState.customCategories = [];
         window.appState.groups = [];
         window.appState.groupInvites = [];
@@ -943,6 +950,7 @@ async function setupAuthListener() {
 
 function resetAppSessionState() {
     stopAccountsRealtime?.();
+    stopExpensesRealtime?.();
     stopGroupsRealtime?.();
     if (!window.appState) return;
     window.appState.isLoggedIn = false;
@@ -951,6 +959,9 @@ function resetAppSessionState() {
     window.appState.activeDecryptedAccount = null;
     window.appState.accounts = [];
     window.appState.trashAccounts = [];
+    window.appState.expenses = [];
+    window.appState.expensesLoaded = false;
+    window.appState.accountsLoaded = false;
     window.appState.customCategories = [];
     window.appState.groups = [];
     window.appState.groupInvites = [];
@@ -1022,6 +1033,7 @@ async function handleAuthenticatedUser(user) {
             await loadCloudUserSettings?.();
             await loadUserCategories?.();
             loadAccountsRealtime();
+            loadExpensesRealtime?.();
             loadGroupsRealtime?.();
             await startBackgroundNotificationCheck?.();
         }
